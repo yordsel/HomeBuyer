@@ -8,6 +8,7 @@ to canonical neighborhood names. Uses a 2-layer approach:
 
 import difflib
 import logging
+import re
 from typing import Optional
 
 from homebuyer.storage.database import Database
@@ -97,6 +98,8 @@ NEIGHBORHOOD_ALIASES: dict[str, list[str]] = {
     ],
     "Southside": [
         "SOUTH SIDE", "South Side", "SOUTH CAMPUS",
+        "State University Homestead Association", "Stanyan Park",
+        "UNIVERSITY CMPUS",
     ],
     "Fourth Street": [
         "4TH STREET", "4th Street", "4TH ST",
@@ -108,7 +111,7 @@ NEIGHBORHOOD_ALIASES: dict[str, list[str]] = {
         "CEDAR ROSE", "Cedar Rose",
     ],
     "Bateman": [
-        "BATEMAN NEIGHBORHOOD",
+        "BATEMAN NEIGHBORHOOD", "ELMWOOD/BATEMAN",
     ],
     "Ocean View": [
         "OCEANVIEW", "Ocean View", "OCEAN VW",
@@ -118,6 +121,67 @@ NEIGHBORHOOD_ALIASES: dict[str, list[str]] = {
     ],
     "Southwest Berkeley": [
         "SW BERKELEY", "SW Berkeley",
+    ],
+    # --- Additional micro-neighborhoods and MLS variants ---
+    "Tilden Park": [
+        "TILDEN PARK AREA", "TILDEN VIEWS",
+    ],
+    "Strawberry Creek": [
+        "STRAWBERRY CREEK",
+    ],
+    "Live Oak Park": [
+        "LIVE OAK PARK",
+    ],
+    "Willard": [
+        "ELMWOOD/WILLARD",
+    ],
+    "University Gardens": [
+        "UNIVERSITY GDNS", "UNIV. GARDENS",
+    ],
+    "Peralta Park": [
+        "PERALTA PARK",
+    ],
+    "Marin Circle": [
+        "MARIN CIRCLE",
+    ],
+    "Curtis Tract": [
+        "CURTIS TRACT",
+    ],
+    "Arch Street": [
+        "ARCH ST",
+    ],
+    "Dwight-Derby": [
+        "DWIGHT PLACE",
+    ],
+    "Regents Park": [
+        "REGENTS PARK",
+    ],
+    "Woodmont": [
+        "WOODMONT",
+    ],
+    "Twain-Harte": [
+        "Twichell",
+    ],
+    "Tamalpais": [
+        "TAMALPAIS ROAD",
+    ],
+    "McGee-Spaulding": [
+        "MCGEE'S FARM",
+    ],
+    "Hiller Highlands": [
+        "HILLER HIGHLANDS",
+    ],
+    "Arlington": [
+        "ARLINGTON HEIGHT",
+    ],
+    "Chestnut": [
+        "CHESTNUT",
+    ],
+    "West End": [
+        "WEST END",
+    ],
+    "Berkeley Marina": [
+        "Berkeley Marina",
     ],
 }
 
@@ -167,6 +231,11 @@ def normalize_neighborhood(raw_name: str) -> Optional[str]:
     if title_cleaned.lower() in lookup:
         return lookup[title_cleaned.lower()]
 
+    # Skip fuzzy matching for generic/numeric values that should go to geocoding
+    # "Berkeley Map Area N", pure numbers, "Not Listed", county names, etc.
+    if _should_skip_fuzzy(cleaned):
+        return None
+
     # Layer 2: Fuzzy matching
     canonical_names = list(NEIGHBORHOOD_ALIASES.keys())
     matches = difflib.get_close_matches(
@@ -193,6 +262,30 @@ def normalize_neighborhood(raw_name: str) -> Optional[str]:
         return canonical
 
     return None
+
+
+# Patterns that should skip fuzzy matching and go straight to geocoding
+_SKIP_FUZZY_PATTERNS = [
+    re.compile(r"^berkeley map area\s*\d+$", re.IGNORECASE),
+    re.compile(r"^\d+$"),  # Pure numeric codes like "21103", "11701"
+    re.compile(r"^not listed$", re.IGNORECASE),
+    re.compile(r"^alameda", re.IGNORECASE),  # "ALAMEDA COUNTY", "ALAMEDA", etc.
+    re.compile(r"^county/", re.IGNORECASE),  # "County/Alameda Area"
+    re.compile(r"^oakland", re.IGNORECASE),  # Oakland zip codes, etc.
+    re.compile(r"^berk\s*-\s*berkeley$", re.IGNORECASE),  # "BERK - Berkeley"
+    re.compile(r"alameda to \d+", re.IGNORECASE),  # "Alameda to 280"
+    re.compile(r"^upper kensington$", re.IGNORECASE),  # Not Berkeley proper
+    re.compile(r"^kensington$", re.IGNORECASE),  # Not Berkeley proper
+]
+
+
+def _should_skip_fuzzy(cleaned_name: str) -> bool:
+    """Return True if this raw name should skip fuzzy matching.
+
+    These are generic/numeric values that can't be reliably fuzzy-matched
+    and should only be resolved via spatial geocoding using lat/long.
+    """
+    return any(pat.search(cleaned_name) for pat in _SKIP_FUZZY_PATTERNS)
 
 
 def normalize_all(db: Database) -> tuple[int, int]:

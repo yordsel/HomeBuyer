@@ -308,6 +308,280 @@ def status(ctx: click.Context) -> None:
 
 
 # ---------------------------------------------------------------------------
+# analyze
+# ---------------------------------------------------------------------------
+
+@main.group()
+def analyze() -> None:
+    """Analyze collected data for pricing insights."""
+    pass
+
+
+@analyze.command("summary")
+@click.pass_context
+def analyze_summary(ctx: click.Context) -> None:
+    """Generate a comprehensive market summary report."""
+    import json
+    from homebuyer.analysis.market_analysis import MarketAnalyzer
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        analyzer = MarketAnalyzer(db)
+        report = analyzer.generate_summary_report()
+
+    click.echo("\n" + "=" * 60)
+    click.echo("BERKELEY HOME MARKET SUMMARY")
+    click.echo("=" * 60)
+
+    cov = report["data_coverage"]
+    click.echo(f"\nData: {cov['total_sales']:,} sales from {cov['date_range']['earliest']} "
+               f"to {cov['date_range']['latest']} across {cov['neighborhoods_covered']} neighborhoods")
+
+    mkt = report["current_market"]
+    click.echo(f"\nCurrent Market ({mkt['period']}):")
+    click.echo(f"  Median Sale Price:    ${mkt['median_sale_price']:,}" if mkt['median_sale_price'] else "  Median Sale Price:    N/A")
+    click.echo(f"  Median List Price:    ${mkt['median_list_price']:,}" if mkt['median_list_price'] else "  Median List Price:    N/A")
+    if mkt['sale_to_list_ratio']:
+        click.echo(f"  Sale-to-List Ratio:   {mkt['sale_to_list_ratio']:.1%} "
+                    f"(homes sell {(mkt['sale_to_list_ratio']-1)*100:+.1f}% vs list)")
+    if mkt['sold_above_list_pct'] is not None:
+        click.echo(f"  Sold Above List:      {mkt['sold_above_list_pct']:.0f}%")
+    click.echo(f"  Homes Sold/Month:     {mkt['homes_sold_monthly']}" if mkt['homes_sold_monthly'] else "")
+    click.echo(f"  Days on Market:       {mkt['median_days_on_market']}" if mkt['median_days_on_market'] else "")
+    click.echo(f"  30yr Mortgage Rate:   {mkt['mortgage_rate_30yr']:.2f}%" if mkt['mortgage_rate_30yr'] else "")
+
+    click.echo(f"\nPrice Distribution (last 2 years):")
+    for bucket in report["price_distribution_2yr"]:
+        bar = "█" * max(1, bucket["count"] // 5)
+        click.echo(f"  {bucket['bracket']:>15s}: {bucket['count']:>4d} {bar}")
+
+    click.echo(f"\nTop Neighborhoods by Median Price (last 2 years):")
+    click.echo(f"  {'Neighborhood':<25s} {'Median':>12s} {'$/sqft':>8s} {'Sales':>6s} {'YoY':>7s}")
+    click.echo(f"  {'-'*25} {'-'*12} {'-'*8} {'-'*6} {'-'*7}")
+    for n in report["top_neighborhoods_by_price"]:
+        median_str = f"${n['median_price']:,.0f}" if n['median_price'] else "N/A"
+        ppsf_str = f"${n['avg_ppsf']:,.0f}" if n['avg_ppsf'] else "N/A"
+        yoy_str = f"{n['yoy_change']:+.1f}%" if n['yoy_change'] is not None else "N/A"
+        click.echo(f"  {n['name']:<25s} {median_str:>12s} {ppsf_str:>8s} {n['sales']:>6d} {yoy_str:>7s}")
+
+    click.echo()
+
+
+@analyze.command("neighborhood")
+@click.argument("name")
+@click.option("--years", default=2, help="Years of data to analyze (default: 2).")
+@click.pass_context
+def analyze_neighborhood(ctx: click.Context, name: str, years: int) -> None:
+    """Get detailed stats for a specific neighborhood."""
+    from homebuyer.analysis.market_analysis import MarketAnalyzer
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        analyzer = MarketAnalyzer(db)
+        stats = analyzer.get_neighborhood_stats(name, lookback_years=years)
+
+    if stats.sale_count == 0:
+        click.echo(f"No sales found for '{name}' in the last {years} years.")
+        click.echo("Run 'homebuyer analyze neighborhoods' to see available names.")
+        return
+
+    click.echo(f"\n{'=' * 50}")
+    click.echo(f"NEIGHBORHOOD: {stats.name}")
+    click.echo(f"{'=' * 50}")
+    click.echo(f"  Sales (last {years} years):   {stats.sale_count}")
+    click.echo(f"  Median Price:          ${stats.median_price:,.0f}" if stats.median_price else "")
+    click.echo(f"  Average Price:         ${stats.avg_price:,.0f}" if stats.avg_price else "")
+    click.echo(f"  Price Range:           ${stats.min_price:,.0f} — ${stats.max_price:,.0f}" if stats.min_price else "")
+    click.echo(f"  Median $/sqft:         ${stats.median_ppsf:,.0f}" if stats.median_ppsf else "")
+    click.echo(f"  Avg $/sqft:            ${stats.avg_ppsf:,.0f}" if stats.avg_ppsf else "")
+    click.echo(f"  Avg Year Built:        {stats.avg_year_built}" if stats.avg_year_built else "")
+    if stats.yoy_price_change_pct is not None:
+        click.echo(f"  YoY Price Change:      {stats.yoy_price_change_pct:+.1f}%")
+    click.echo()
+
+
+@analyze.command("neighborhoods")
+@click.option("--min-sales", default=5, help="Minimum sales to include (default: 5).")
+@click.option("--years", default=2, help="Years of data to analyze (default: 2).")
+@click.pass_context
+def analyze_neighborhoods(ctx: click.Context, min_sales: int, years: int) -> None:
+    """Rank all neighborhoods by median price."""
+    from homebuyer.analysis.market_analysis import MarketAnalyzer
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        analyzer = MarketAnalyzer(db)
+        rankings = analyzer.get_all_neighborhood_rankings(
+            lookback_years=years, min_sales=min_sales
+        )
+
+    click.echo(f"\n{'=' * 70}")
+    click.echo(f"BERKELEY NEIGHBORHOOD RANKINGS (last {years} years, min {min_sales} sales)")
+    click.echo(f"{'=' * 70}")
+    click.echo(f"  {'#':>3s} {'Neighborhood':<25s} {'Median':>12s} {'$/sqft':>8s} {'Sales':>6s} {'YoY':>7s}")
+    click.echo(f"  {'─'*3} {'─'*25} {'─'*12} {'─'*8} {'─'*6} {'─'*7}")
+
+    for i, s in enumerate(rankings, 1):
+        median_str = f"${s.median_price:,.0f}" if s.median_price else "N/A"
+        ppsf_str = f"${s.median_ppsf:,.0f}" if s.median_ppsf else "N/A"
+        yoy_str = f"{s.yoy_price_change_pct:+.1f}%" if s.yoy_price_change_pct is not None else "N/A"
+        click.echo(f"  {i:>3d} {s.name:<25s} {median_str:>12s} {ppsf_str:>8s} {s.sale_count:>6d} {yoy_str:>7s}")
+
+    click.echo()
+
+
+@analyze.command("estimate")
+@click.argument("neighborhood")
+@click.option("--beds", type=float, help="Number of bedrooms.")
+@click.option("--baths", type=float, help="Number of bathrooms.")
+@click.option("--sqft", type=int, help="Square footage.")
+@click.option("--year-built", type=int, help="Year built.")
+@click.option("--lot-size", type=int, help="Lot size in sqft.")
+@click.pass_context
+def analyze_estimate(
+    ctx: click.Context,
+    neighborhood: str,
+    beds: float | None,
+    baths: float | None,
+    sqft: int | None,
+    year_built: int | None,
+    lot_size: int | None,
+) -> None:
+    """Estimate realistic sale price for a property."""
+    from homebuyer.analysis.market_analysis import MarketAnalyzer
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        analyzer = MarketAnalyzer(db)
+        estimate = analyzer.estimate_price(
+            neighborhood=neighborhood,
+            beds=beds,
+            baths=baths,
+            sqft=sqft,
+            year_built=year_built,
+            lot_size_sqft=lot_size,
+        )
+
+    if estimate.estimated_price == 0:
+        click.echo(f"Could not estimate price. {estimate.methodology_notes}")
+        return
+
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"PRICE ESTIMATE — {neighborhood}")
+    click.echo(f"{'=' * 60}")
+
+    criteria = []
+    if beds: criteria.append(f"{beds:.0f} bed")
+    if baths: criteria.append(f"{baths:.0f} bath")
+    if sqft: criteria.append(f"{sqft:,} sqft")
+    if year_built: criteria.append(f"built {year_built}")
+    if lot_size: criteria.append(f"{lot_size:,} sqft lot")
+    click.echo(f"  Criteria: {', '.join(criteria) if criteria else 'No specific criteria'}")
+
+    click.echo(f"\n  Estimated Sale Price:  ${estimate.estimated_price:,.0f}")
+    click.echo(f"  Price Range:           ${estimate.price_range_low:,.0f} — ${estimate.price_range_high:,.0f}")
+    click.echo(f"  Confidence:            {estimate.confidence.upper()}")
+    click.echo(f"  Based on:              {estimate.comparable_count} comparable sales")
+
+    if estimate.sale_to_list_ratio:
+        click.echo(f"  Market Sale/List:      {estimate.sale_to_list_ratio:.1%}")
+
+    click.echo(f"\n  Methodology:")
+    for note in estimate.methodology_notes:
+        click.echo(f"    • {note}")
+
+    if estimate.comparables:
+        click.echo(f"\n  Top Comparable Sales:")
+        click.echo(f"    {'Address':<30s} {'Date':>12s} {'Price':>12s} {'Bed':>4s} {'Sqft':>6s}")
+        click.echo(f"    {'─'*30} {'─'*12} {'─'*12} {'─'*4} {'─'*6}")
+        for c in estimate.comparables[:7]:
+            addr = c.address[:29] if len(c.address) > 29 else c.address
+            beds_s = f"{c.beds:.0f}" if c.beds else "—"
+            sqft_s = f"{c.sqft:,}" if c.sqft else "—"
+            click.echo(f"    {addr:<30s} {c.sale_date.isoformat():>12s} ${c.sale_price:>10,} {beds_s:>4s} {sqft_s:>6s}")
+
+    click.echo()
+
+
+@analyze.command("trend")
+@click.option("--months", default=24, help="Months to look back (default: 24).")
+@click.pass_context
+def analyze_trend(ctx: click.Context, months: int) -> None:
+    """Show monthly market trend data."""
+    from homebuyer.analysis.market_analysis import MarketAnalyzer
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        analyzer = MarketAnalyzer(db)
+        trend = analyzer.get_market_trend(months=months)
+
+    if not trend:
+        click.echo("No market trend data available.")
+        return
+
+    click.echo(f"\n{'=' * 90}")
+    click.echo(f"BERKELEY MARKET TREND (last {months} months)")
+    click.echo(f"{'=' * 90}")
+    click.echo(f"  {'Month':>7s} {'Med.Sale':>12s} {'Med.List':>12s} {'S/L Ratio':>10s} "
+               f"{'Above List':>10s} {'Sold':>5s} {'DOM':>4s} {'Rate':>6s}")
+    click.echo(f"  {'─'*7} {'─'*12} {'─'*12} {'─'*10} {'─'*10} {'─'*5} {'─'*4} {'─'*6}")
+
+    for s in trend:
+        sale_str = f"${s.median_sale_price:,}" if s.median_sale_price else "—"
+        list_str = f"${s.median_list_price:,}" if s.median_list_price else "—"
+        ratio_str = f"{s.sale_to_list_ratio:.1%}" if s.sale_to_list_ratio else "—"
+        above_str = f"{s.sold_above_list_pct:.0f}%" if s.sold_above_list_pct is not None else "—"
+        sold_str = f"{s.homes_sold}" if s.homes_sold else "—"
+        dom_str = f"{s.median_dom}" if s.median_dom else "—"
+        rate_str = f"{s.mortgage_rate_30yr:.2f}%" if s.mortgage_rate_30yr else "—"
+        click.echo(f"  {s.period:>7s} {sale_str:>12s} {list_str:>12s} {ratio_str:>10s} "
+                    f"{above_str:>10s} {sold_str:>5s} {dom_str:>4s} {rate_str:>6s}")
+
+    click.echo()
+
+
+@analyze.command("afford")
+@click.argument("monthly_budget", type=int)
+@click.option("--down-pct", default=20.0, help="Down payment percentage (default: 20%).")
+@click.option("--hoa", default=0, help="Monthly HOA dues (default: 0).")
+@click.pass_context
+def analyze_afford(ctx: click.Context, monthly_budget: int, down_pct: float, hoa: int) -> None:
+    """Determine affordable price range for a given monthly budget."""
+    from homebuyer.analysis.market_analysis import MarketAnalyzer
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        analyzer = MarketAnalyzer(db)
+        result = analyzer.assess_affordability(
+            monthly_budget=monthly_budget,
+            down_payment_pct=down_pct,
+            hoa_monthly=hoa,
+        )
+
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"AFFORDABILITY ANALYSIS")
+    click.echo(f"{'=' * 60}")
+    click.echo(f"  Monthly Budget:        ${result['monthly_budget']:,}")
+    click.echo(f"  30yr Mortgage Rate:    {result['mortgage_rate_30yr']:.2f}%")
+    click.echo(f"  Down Payment:          {down_pct:.0f}% (${result['down_payment_amount']:,})")
+    click.echo(f"  Max Affordable Price:  ${result['max_affordable_price']:,}")
+    click.echo(f"  Loan Amount:           ${result['loan_amount']:,}")
+    if result['is_jumbo_loan']:
+        click.echo(f"  ⚠ JUMBO LOAN (above ${result['jumbo_threshold']:,} conforming limit)")
+
+    if result['affordable_neighborhoods']:
+        click.echo(f"\n  Neighborhoods with recent sales in your range:")
+        click.echo(f"    {'Neighborhood':<25s} {'Sales':>6s} {'Avg Price':>12s} {'Lowest':>12s}")
+        click.echo(f"    {'─'*25} {'─'*6} {'─'*12} {'─'*12}")
+        for n in result['affordable_neighborhoods']:
+            click.echo(f"    {n['name']:<25s} {n['recent_sales_in_range']:>6d} "
+                        f"${n['avg_price']:>10,} ${n['lowest_recent_sale']:>10,}")
+    else:
+        click.echo(f"\n  No neighborhoods with recent sales under ${result['max_affordable_price']:,}")
+    click.echo()
+
+
+# ---------------------------------------------------------------------------
 # export
 # ---------------------------------------------------------------------------
 

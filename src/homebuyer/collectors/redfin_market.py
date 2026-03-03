@@ -22,9 +22,10 @@ logger = logging.getLogger(__name__)
 _TSV_FILENAME = "city_market_tracker.tsv000.gz"
 
 # Column names we need from the TSV (Redfin Data Center format)
-# The TSV has many columns; we extract only what we need.
-_REGION_COLUMN = "region"
-_CITY_COLUMN = "city"
+# The TSV uses UPPERCASE column names throughout.
+_REGION_COLUMN = "REGION"
+_CITY_COLUMN = "CITY"
+_STATE_CODE_COLUMN = "STATE_CODE"
 
 
 class RedfinMarketCollector:
@@ -94,12 +95,19 @@ class RedfinMarketCollector:
             reader = csv.DictReader(f, delimiter="\t")
 
             for row in reader:
-                # Filter to Berkeley rows
-                # The region column format varies; check both 'region' and 'city'
-                region = row.get("region", "").strip()
-                city = row.get("city", "").strip()
+                # Filter to Berkeley, CA rows only
+                # TSV uses UPPERCASE column names throughout
+                region = row.get("REGION", "").strip()
+                city = row.get("CITY", "").strip()
+                state_code = row.get("STATE_CODE", "").strip()
 
-                # Match on "Berkeley, CA" or just "Berkeley" in the region/city field
+                # Must be in California to exclude:
+                # - "Bath (Berkeley Springs), WV"
+                # - "Holiday City-Berkeley, NJ"
+                if state_code != "CA":
+                    continue
+
+                # Match on "Berkeley, CA" in region or "Berkeley" in city
                 is_berkeley = False
                 if "Berkeley" in region and "CA" in region:
                     is_berkeley = True
@@ -117,10 +125,13 @@ class RedfinMarketCollector:
                     logger.debug("Skipping malformed market row: %s", e)
 
     def _parse_row(self, row: dict) -> MarketMetric | None:
-        """Parse a TSV row dict into a MarketMetric object."""
-        period_begin_str = row.get("period_begin", "").strip()
-        period_end_str = row.get("period_end", "").strip()
-        period_duration = row.get("period_duration", "").strip()
+        """Parse a TSV row dict into a MarketMetric object.
+
+        All column names in the Redfin Data Center TSV are UPPERCASE.
+        """
+        period_begin_str = row.get("PERIOD_BEGIN", "").strip()
+        period_end_str = row.get("PERIOD_END", "").strip()
+        period_duration = row.get("PERIOD_DURATION", "").strip()
 
         if not period_begin_str or not period_end_str:
             return None
@@ -131,8 +142,8 @@ class RedfinMarketCollector:
         except ValueError:
             return None
 
-        region = row.get("region", "Berkeley, CA").strip()
-        property_type = row.get("property_type", "").strip() or None
+        region = row.get("REGION", "Berkeley, CA").strip()
+        property_type = row.get("PROPERTY_TYPE", "").strip() or None
 
         return MarketMetric(
             period_begin=period_begin,
@@ -140,29 +151,32 @@ class RedfinMarketCollector:
             period_duration=period_duration,
             region_name=region,
             property_type=property_type,
-            median_sale_price=_safe_int(row.get("median_sale_price")),
-            median_list_price=_safe_int(row.get("median_list_price")),
-            median_ppsf=_safe_float(row.get("median_ppsf")),
-            homes_sold=_safe_int(row.get("homes_sold")),
-            new_listings=_safe_int(row.get("new_listings")),
-            inventory=_safe_int(row.get("inventory")),
-            months_of_supply=_safe_float(row.get("months_of_supply")),
-            median_dom=_safe_int(row.get("median_dom")),
-            avg_sale_to_list=_safe_float(row.get("avg_sale_to_list")),
-            sold_above_list_pct=_safe_float(row.get("sold_above_list")),
-            price_drops_pct=_safe_float(row.get("price_drops")),
+            median_sale_price=_safe_int(row.get("MEDIAN_SALE_PRICE")),
+            median_list_price=_safe_int(row.get("MEDIAN_LIST_PRICE")),
+            median_ppsf=_safe_float(row.get("MEDIAN_PPSF")),
+            homes_sold=_safe_int(row.get("HOMES_SOLD")),
+            new_listings=_safe_int(row.get("NEW_LISTINGS")),
+            inventory=_safe_int(row.get("INVENTORY")),
+            months_of_supply=_safe_float(row.get("MONTHS_OF_SUPPLY")),
+            median_dom=_safe_int(row.get("MEDIAN_DOM")),
+            avg_sale_to_list=_safe_float(row.get("AVG_SALE_TO_LIST")),
+            sold_above_list_pct=_safe_float(row.get("SOLD_ABOVE_LIST")),
+            price_drops_pct=_safe_float(row.get("PRICE_DROPS")),
             off_market_in_two_weeks_pct=_safe_float(
-                row.get("off_market_in_two_weeks")
+                row.get("OFF_MARKET_IN_TWO_WEEKS")
             ),
         )
 
 
 def _safe_float(value: str | None) -> float | None:
-    """Parse a string to float, returning None on failure or empty."""
+    """Parse a string to float, returning None on failure, empty, or 'NA'."""
     if not value or not value.strip():
         return None
+    cleaned = value.strip()
+    if cleaned.upper() == "NA":
+        return None
     try:
-        result = float(value.strip())
+        result = float(cleaned)
         return result if result == result else None  # NaN check
     except (ValueError, TypeError):
         return None
