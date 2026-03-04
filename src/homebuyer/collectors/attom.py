@@ -35,6 +35,8 @@ class AttomPropertyDetail:
     year_built: Optional[int] = None
     lot_size_sqft: Optional[int] = None
     property_type: Optional[str] = None
+    last_sale_price: Optional[int] = None
+    last_sale_date: Optional[str] = None  # ISO YYYY-MM-DD
     source_fields: list[str] = field(default_factory=list)
 
     @property
@@ -173,6 +175,156 @@ class AttomClient:
             logger.warning("ATTOM: failed to parse response for %s: %s", address1, exc)
             return None
 
+    def lookup_last_sale(
+        self,
+        address1: str,
+        address2: str = "Berkeley, CA",
+    ) -> tuple[Optional[int], Optional[str]]:
+        """Look up the most recent sale price and date for a property.
+
+        Calls the ATTOM ``/sale/detail`` endpoint.
+
+        Args:
+            address1: Street address line (e.g. ``"898 Contra Costa Ave"``).
+            address2: City / state / zip (e.g. ``"Berkeley, CA 94706"``).
+
+        Returns:
+            ``(sale_price, sale_date)`` where *sale_date* is ISO ``YYYY-MM-DD``,
+            or ``(None, None)`` on any failure.
+        """
+        if not self.enabled or not address1:
+            return None, None
+
+        try:
+            resp = self.session.get(
+                f"{ATTOM_BASE_URL}/sale/detail",
+                params={"address1": address1, "address2": address2},
+                timeout=10,
+            )
+
+            if resp.status_code in (400, 404):
+                logger.debug("ATTOM sale/detail: no data for %s (HTTP %d)", address1, resp.status_code)
+                return None, None
+            if resp.status_code == 429:
+                logger.warning("ATTOM sale/detail: rate-limited (429).")
+                return None, None
+            if resp.status_code in (401, 403):
+                logger.error("ATTOM sale/detail: auth failed (%d).", resp.status_code)
+                return None, None
+
+            resp.raise_for_status()
+            data = resp.json()
+
+            properties = data.get("property", [])
+            if not properties:
+                return None, None
+
+            sale = properties[0].get("sale", {})
+            amount = sale.get("amount", {})
+
+            # /sale/detail uses lowercase 'saleamt'
+            sale_price = _safe_int(amount.get("saleamt") or amount.get("saleAmt"))
+
+            # Date field varies: try multiple known field names
+            sale_date_raw = (
+                sale.get("saleTransDate")
+                or sale.get("saletransdate")
+                or amount.get("salerecdate")
+                or amount.get("saleRecDate")
+                or sale.get("salesearchdate")
+                or sale.get("saleSearchDate")
+                or ""
+            )
+
+            if not sale_price or sale_price <= 0:
+                return None, None
+
+            # Normalise date to YYYY-MM-DD
+            sale_date = sale_date_raw[:10] if len(sale_date_raw) >= 10 else None
+
+            logger.debug(
+                "ATTOM last sale for %s: $%s on %s",
+                address1, f"{sale_price:,}", sale_date,
+            )
+            return sale_price, sale_date
+
+        except requests.Timeout:
+            logger.warning("ATTOM sale/detail: timed out for %s", address1)
+            return None, None
+        except requests.RequestException as exc:
+            logger.warning("ATTOM sale/detail: request failed for %s: %s", address1, exc)
+            return None, None
+        except (KeyError, ValueError, TypeError) as exc:
+            logger.warning("ATTOM sale/detail: parse error for %s: %s", address1, exc)
+            return None, None
+
+    def lookup_sale_history(
+        self,
+        address1: str,
+        address2: str = "Berkeley, CA",
+    ) -> list[dict]:
+        """Fetch the full sale history for a property.
+
+        Calls the ATTOM ``/saleshistory/expandedhistory`` endpoint and returns
+        only *real* sale transactions (``saleAmt > 0``), filtering out
+        refinances, quit-claims, and stand-alone financing.
+
+        Building details (beds, baths, sqft, year_built) come from the
+        **property level** and are copied to every sale record.
+
+        Args:
+            address1: Street address line.
+            address2: City / state / zip.
+
+        Returns:
+            A list of dicts with keys: ``sale_price``, ``sale_date``,
+            ``sale_type``, ``beds``, ``baths``, ``sqft``, ``year_built``,
+            ``lot_size_sqft``, ``property_type``, ``latitude``, ``longitude``,
+            ``price_per_sqft``.  Empty list on any failure.
+        """
+        if not self.enabled or not address1:
+            return []
+
+        try:
+            resp = self.session.get(
+                f"{ATTOM_BASE_URL}/saleshistory/expandedhistory",
+                params={"address1": address1, "address2": address2},
+                timeout=15,
+            )
+
+            if resp.status_code in (400, 404):
+                logger.debug(
+                    "ATTOM saleshistory: no data for %s (HTTP %d)",
+                    address1, resp.status_code,
+                )
+                return []
+            if resp.status_code == 429:
+                logger.warning("ATTOM saleshistory: rate-limited (429).")
+                return []
+            if resp.status_code in (401, 403):
+                logger.error("ATTOM saleshistory: auth failed (%d).", resp.status_code)
+                return []
+
+            resp.raise_for_status()
+            data = resp.json()
+
+            properties = data.get("property", [])
+            if not properties:
+                return []
+
+            prop = properties[0]
+            return self._parse_sale_history(prop)
+
+        except requests.Timeout:
+            logger.warning("ATTOM saleshistory: timed out for %s", address1)
+            return []
+        except requests.RequestException as exc:
+            logger.warning("ATTOM saleshistory: request failed for %s: %s", address1, exc)
+            return []
+        except (KeyError, ValueError, TypeError) as exc:
+            logger.warning("ATTOM saleshistory: parse error for %s: %s", address1, exc)
+            return []
+
     # ------------------------------------------------------------------
     # Response parsing
     # ------------------------------------------------------------------
@@ -264,6 +416,111 @@ class AttomClient:
 
         detail.source_fields = source_fields
         return detail if source_fields else None
+
+    def _parse_sale_history(self, prop: dict) -> list[dict]:
+        """Parse a single property object from ``/saleshistory/expandedhistory``.
+
+        Building details live at the **property** level and are shared across
+        all sale transactions.  We only return real sales (``saleAmt > 0``),
+        filtering out refinances, quit-claims, and stand-alone financing.
+        """
+        # --- Property-level details (shared by all sales) ---
+        building = prop.get("building", {})
+        lot = prop.get("lot", {})
+        summary = prop.get("summary", {})
+        location = prop.get("location", {})
+
+        rooms = building.get("rooms", {})
+        beds = _safe_float(rooms.get("beds") or rooms.get("bedrooms"))
+        baths = _safe_float(
+            rooms.get("bathstotal") or rooms.get("bathsTotal")
+        )
+        size = building.get("size", {})
+        sqft = _safe_int(
+            size.get("universalsize") or size.get("universalSize")
+            or size.get("livingsize") or size.get("livingSize")
+        )
+        year_built = _safe_int(
+            summary.get("yearbuilt") or summary.get("yearBuilt")
+        )
+        lot_sqft = _safe_int(lot.get("lotsize2") or lot.get("lotSize2"))
+        lot_acres = _safe_float(lot.get("lotsize1") or lot.get("lotSize1"))
+        if not lot_sqft and lot_acres and lot_acres > 0:
+            lot_sqft = int(lot_acres * 43_560)
+
+        # Property type mapping
+        prop_class = summary.get("propclass") or summary.get("propClass") or ""
+        prop_subtype = summary.get("propsubtype") or summary.get("propSubType") or ""
+        prop_type = summary.get("proptype") or summary.get("propType") or ""
+        property_type_raw = summary.get("propertyType") or ""
+        property_type = _map_property_type(
+            prop_class, prop_subtype, prop_type, property_type_raw
+        )
+
+        # Location
+        lat = _safe_float(location.get("latitude"))
+        lng = _safe_float(location.get("longitude"))
+
+        # --- Per-sale transactions ---
+        # ATTOM uses camelCase 'saleHistory' in expanded history responses
+        sale_history = prop.get("saleHistory") or prop.get("salehistory") or []
+        if not sale_history:
+            return []
+
+        results: list[dict] = []
+        for txn in sale_history:
+            amount = txn.get("amount", {})
+            # expanded history uses camelCase 'saleAmt'
+            sale_price = _safe_int(
+                amount.get("saleAmt") or amount.get("saleamt")
+            )
+            if not sale_price or sale_price <= 0:
+                continue  # skip refinances, quit-claims, etc.
+
+            sale_date_raw = (
+                txn.get("saleTransDate")
+                or txn.get("saletransdate")
+                or ""
+            )
+            if len(sale_date_raw) < 10:
+                continue  # need at least YYYY-MM-DD
+            sale_date = sale_date_raw[:10]
+
+            # Sale type description (e.g. "Resale", "New Construction")
+            # saleTransType can be at transaction level OR inside amount
+            sale_type = (
+                txn.get("saleTransType")
+                or txn.get("saletranstype")
+                or amount.get("saleTransType")
+                or amount.get("saletranstype")
+                or None
+            )
+
+            # Price per sqft
+            price_per_sqft: Optional[float] = None
+            if sqft and sqft > 0:
+                price_per_sqft = round(sale_price / sqft, 2)
+
+            results.append({
+                "sale_price": sale_price,
+                "sale_date": sale_date,
+                "sale_type": sale_type,
+                "beds": beds,
+                "baths": baths,
+                "sqft": sqft,
+                "year_built": year_built,
+                "lot_size_sqft": lot_sqft,
+                "property_type": property_type,
+                "latitude": lat,
+                "longitude": lng,
+                "price_per_sqft": price_per_sqft,
+            })
+
+        logger.debug(
+            "ATTOM sale history: %d real sales out of %d transactions",
+            len(results), len(sale_history),
+        )
+        return results
 
 
 # ---------------------------------------------------------------------------

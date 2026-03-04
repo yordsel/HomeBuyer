@@ -32,6 +32,17 @@ class NeighborhoodGeocoder:
                 "Boundary GeoJSON must have a 'name' property on each feature."
             )
 
+        # Drop polygons with null/empty names — they can't be geocoded
+        import pandas as pd
+
+        null_mask = self.boundaries["name"].isna() | (self.boundaries["name"] == "")
+        n_dropped = null_mask.sum()
+        if n_dropped > 0:
+            logger.warning(
+                "Dropping %d boundary polygon(s) with null/empty name.", n_dropped
+            )
+            self.boundaries = self.boundaries[~null_mask].reset_index(drop=True)
+
         # Build spatial index for fast lookups
         self._sindex = self.boundaries.sindex
         logger.info(

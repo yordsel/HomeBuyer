@@ -316,8 +316,14 @@ def predict_map_click(req: MapClickRequest):
 
     # Step 5b: Try ATTOM property detail lookup (if configured)
     attom_detail = None
+    last_sale_price, last_sale_date = None, None
     if address and _state.attom and _state.attom.enabled:
         attom_detail = _state.attom.lookup_property(
+            address1=address,
+            address2=f"Berkeley, CA {zip_code}",
+        )
+        # Also fetch last sale info
+        last_sale_price, last_sale_date = _state.attom.lookup_last_sale(
             address1=address,
             address2=f"Berkeley, CA {zip_code}",
         )
@@ -344,7 +350,11 @@ def predict_map_click(req: MapClickRequest):
 
         return {
             "status": "prediction",
-            "listing": _attom_to_listing(prop, neighborhood, zone_class),
+            "listing": _attom_to_listing(
+                prop, neighborhood, zone_class,
+                last_sale_price=last_sale_price,
+                last_sale_date=last_sale_date,
+            ),
             "prediction": _prediction_to_dict(result),
             "comparables": [_comp_to_dict(c) for c in comps[:7]],
         }
@@ -548,11 +558,18 @@ def _sale_to_listing(prop: dict, neighborhood: str | None = None) -> dict:
         "sale_date": sale_date,
         "hoa_per_month": prop.get("hoa_per_month"),
         "garage_spaces": None,
+        # For DB-sourced properties, the record IS the last sale
+        "last_sale_price": prop.get("sale_price"),
+        "last_sale_date": sale_date,
     }
 
 
 def _attom_to_listing(
-    prop: dict, neighborhood: str, zone_class: str | None = None,
+    prop: dict,
+    neighborhood: str,
+    zone_class: str | None = None,
+    last_sale_price: int | None = None,
+    last_sale_date: str | None = None,
 ) -> dict:
     """Convert ATTOM-sourced property details to ListingData format."""
     return {
@@ -575,6 +592,8 @@ def _attom_to_listing(
         "sale_date": None,
         "hoa_per_month": prop.get("hoa_per_month"),
         "garage_spaces": None,
+        "last_sale_price": last_sale_price,
+        "last_sale_date": last_sale_date,
     }
 
 

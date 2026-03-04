@@ -1,14 +1,24 @@
 """CLI entry point for the HomeBuyer application.
 
 Usage:
-    homebuyer init              Create directories and initialize database
-    homebuyer collect sales     Fetch property sales from Redfin
-    homebuyer collect market    Download Redfin Data Center market metrics
-    homebuyer collect rates     Fetch FRED mortgage rates
-    homebuyer collect all       Run all three collectors
-    homebuyer process all       Normalize, geocode, and deduplicate
-    homebuyer status            Show database statistics
-    homebuyer export            Export data to CSV
+    homebuyer init                Create directories and initialize database
+    homebuyer collect sales       Fetch property sales from Redfin
+    homebuyer collect market      Download Redfin Data Center market metrics
+    homebuyer collect rates       Fetch FRED mortgage rates
+    homebuyer collect indicators  Fetch FRED economic indicators (NASDAQ, CPI, etc.)
+    homebuyer collect census      Fetch Census ACS median income by zip code
+    homebuyer collect permits     Scrape building permits from Accela portal
+    homebuyer collect permits-address ADDRESS  Permits for a single address
+    homebuyer collect attom-sales Fetch ATTOM sale history for known addresses
+    homebuyer collect all         Run all five collectors
+    homebuyer process zoning      Assign zoning districts to properties
+    homebuyer process all         Normalize, geocode, zoning, and deduplicate
+    homebuyer status              Show database statistics
+    homebuyer export              Export data to CSV
+    homebuyer train               Train ML price prediction model
+    homebuyer predict manual      Predict price from property details
+    homebuyer predict listing     Predict price for a Redfin listing URL
+    homebuyer model info          Show model metadata and metrics
 """
 
 import csv
@@ -142,27 +152,146 @@ def collect_rates(ctx: click.Context, start: str) -> None:
         sys.exit(1)
 
 
+@collect.command("indicators")
+@click.option("--start", default="2018-01-01", help="Start date (YYYY-MM-DD).")
+@click.pass_context
+def collect_indicators(ctx: click.Context, start: str) -> None:
+    """Fetch FRED economic indicators (NASDAQ, Treasury, CPI, etc.)."""
+    from datetime import date as date_type
+    from homebuyer.collectors.fred import FredCollector
+
+    start_date = date_type.fromisoformat(start)
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        collector = FredCollector(db)
+        result = collector.collect_indicators(start_date=start_date)
+
+    click.echo(str(result))
+    if not result.success:
+        sys.exit(1)
+
+
+@collect.command("census")
+@click.pass_context
+def collect_census(ctx: click.Context) -> None:
+    """Fetch Census ACS median household income by zip code."""
+    from homebuyer.collectors.census import CensusCollector
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        collector = CensusCollector(db)
+        result = collector.collect()
+
+    click.echo(str(result))
+    if not result.success:
+        sys.exit(1)
+
+
+@collect.command("permits")
+@click.option(
+    "--start-date", default="01/01/2000", help="Permit start date MM/DD/YYYY."
+)
+@click.option("--limit", type=int, default=None, help="Limit number of addresses.")
+@click.option("--force", is_flag=True, help="Re-collect even if data exists.")
+@click.pass_context
+def collect_permits(
+    ctx: click.Context, start_date: str, limit: int | None, force: bool
+) -> None:
+    """Collect building permits from Berkeley Accela portal."""
+    from homebuyer.collectors.accela_permits import AccelaPermitCollector
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        collector = AccelaPermitCollector(db)
+        result = collector.collect(
+            start_date=start_date,
+            limit_addresses=limit,
+            force=force,
+        )
+
+    click.echo(str(result))
+    if not result.success:
+        sys.exit(1)
+
+
+@collect.command("permits-address")
+@click.argument("address")
+@click.pass_context
+def collect_permits_address(ctx: click.Context, address: str) -> None:
+    """Collect building permits for a single address.
+
+    Example: homebuyer collect permits-address "1529 Ada St"
+    """
+    from homebuyer.collectors.accela_permits import AccelaPermitCollector
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        collector = AccelaPermitCollector(db)
+        permits = collector.collect_for_address(address)
+
+    if permits:
+        click.echo(f"\nFound {len(permits)} permits for {address}:\n")
+        for p in permits:
+            value_str = f"${p.job_value:,.0f}" if p.job_value else "N/A"
+            click.echo(f"  {p.record_number:20s}  {p.permit_type or '':16s}  "
+                        f"{p.status or '':10s}  Value: {value_str}")
+            if p.description:
+                click.echo(f"    Description: {p.description[:100]}")
+    else:
+        click.echo(f"No permits found for {address}.")
+
+
+@collect.command("attom-sales")
+@click.option("--limit", type=int, default=None, help="Max addresses to process.")
+@click.option("--delay", type=float, default=2.0, help="Seconds between ATTOM API calls.")
+@click.pass_context
+def collect_attom_sales(ctx: click.Context, limit: int | None, delay: float) -> None:
+    """Collect historical sale data from ATTOM for known addresses."""
+    from homebuyer.collectors.attom_sales import AttomSalesCollector
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        collector = AttomSalesCollector(db)
+        result = collector.collect(limit=limit, delay=delay)
+
+    click.echo(str(result))
+    if not result.success:
+        sys.exit(1)
+
+
 @collect.command("all")
 @click.option("--days", default=1825, help="Number of days back for sales (default: 1825).")
 @click.pass_context
 def collect_all(ctx: click.Context, days: int) -> None:
-    """Run all three collectors in sequence."""
+    """Run all collectors in sequence."""
     click.echo("=" * 60)
-    click.echo("Step 1/3: Collecting property sales from Redfin...")
+    click.echo("Step 1/5: Collecting property sales from Redfin...")
     click.echo("=" * 60)
     ctx.invoke(collect_sales, days=days)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 2/3: Collecting market metrics from Redfin Data Center...")
+    click.echo("Step 2/5: Collecting market metrics from Redfin Data Center...")
     click.echo("=" * 60)
     ctx.invoke(collect_market)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 3/3: Collecting mortgage rates from FRED...")
+    click.echo("Step 3/5: Collecting mortgage rates from FRED...")
     click.echo("=" * 60)
     ctx.invoke(collect_rates)
+
+    click.echo()
+    click.echo("=" * 60)
+    click.echo("Step 4/5: Collecting economic indicators from FRED...")
+    click.echo("=" * 60)
+    ctx.invoke(collect_indicators)
+
+    click.echo()
+    click.echo("=" * 60)
+    click.echo("Step 5/5: Collecting Census ACS income data...")
+    click.echo("=" * 60)
+    ctx.invoke(collect_census)
 
     click.echo()
     click.echo("All collections complete.")
@@ -236,23 +365,44 @@ def process_validate(ctx: click.Context) -> None:
         click.echo("All data within expected ranges.")
 
 
+@process.command("zoning")
+@click.pass_context
+def process_zoning(ctx: click.Context) -> None:
+    """Assign zoning district classifications to properties using City of Berkeley data."""
+    from homebuyer.processing.zoning import ZoningClassifier
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        db.initialize_schema()  # ensure zoning_class column exists
+        classifier = ZoningClassifier()
+        classified = classifier.classify_batch(db)
+
+    click.echo(f"Classified: {classified} properties with zoning districts")
+
+
 @process.command("all")
 @click.pass_context
 def process_all(ctx: click.Context) -> None:
-    """Run normalize, geocode, and deduplicate in sequence."""
-    click.echo("Step 1/3: Normalizing neighborhood names...")
+    """Run normalize, geocode, zoning, and deduplicate in sequence."""
+    click.echo("Step 1/4: Normalizing neighborhood names...")
     ctx.invoke(process_normalize)
 
-    click.echo("\nStep 2/3: Geocoding missing neighborhoods...")
+    click.echo("\nStep 2/4: Geocoding missing neighborhoods...")
     try:
         ctx.invoke(process_geocode)
     except FileNotFoundError as e:
         click.echo(f"  Skipping geocode: {e}")
 
-    click.echo("\nStep 3/3: Deduplicating records...")
+    click.echo("\nStep 3/4: Classifying zoning districts...")
+    try:
+        ctx.invoke(process_zoning)
+    except FileNotFoundError as e:
+        click.echo(f"  Skipping zoning: {e}")
+
+    click.echo("\nStep 4/4: Deduplicating records...")
     ctx.invoke(process_deduplicate)
 
-    click.echo("\nStep 4/3: Validating data ranges...")
+    click.echo("\nStep 5/4: Validating data ranges...")
     ctx.invoke(process_validate)
 
     click.echo("\nAll processing complete.")
@@ -287,6 +437,10 @@ def status(ctx: click.Context) -> None:
     nc = stats["neighborhood_coverage"]
     click.echo(f"  Neighborhoods:   {nc['geocoded']:,}/{nc['total']:,} assigned ({nc['pct']}%)")
 
+    zc = stats.get("zoning_coverage", {})
+    if zc:
+        click.echo(f"  Zoning:          {zc['zoned']:,}/{zc['total']:,} assigned ({zc['pct']}%)")
+
     mm = stats["market_metrics"]
     click.echo(f"\nMarket Metrics:    {mm['count']:,} records")
     if mm["count"] > 0:
@@ -296,6 +450,21 @@ def status(ctx: click.Context) -> None:
     click.echo(f"\nMortgage Rates:    {mr['count']:,} observations")
     if mr["count"] > 0:
         click.echo(f"  Date range:      {mr['min_date']} to {mr['max_date']}")
+
+    ei = stats.get("economic_indicators", {})
+    click.echo(f"\nEcon Indicators:   {ei.get('count', 0):,} observations")
+    if ei.get("count", 0) > 0:
+        click.echo(f"  Date range:      {ei['min_date']} to {ei['max_date']}")
+        series = stats.get("economic_series", {})
+        if series:
+            for sid, cnt in series.items():
+                click.echo(f"  {sid:>20s}: {cnt:,} observations")
+
+    ci = stats.get("census_income", {})
+    click.echo(f"\nCensus Income:     {ci.get('count', 0):,} records")
+    if ci.get("count", 0) > 0:
+        click.echo(f"  Zip codes:       {ci['zip_codes']}")
+        click.echo(f"  ACS years:       {ci['min_year']}–{ci['max_year']}")
 
     nb = stats["neighborhoods"]
     click.echo(f"\nNeighborhoods:     {nb['count']:,} defined")
@@ -622,6 +791,273 @@ def export(ctx: click.Context, table: str, output: str | None) -> None:
                 writer.writerow(tuple(row))
 
     click.echo(f"Exported {len(rows):,} rows to {output_path}")
+
+
+# ---------------------------------------------------------------------------
+# train
+# ---------------------------------------------------------------------------
+
+@main.command()
+@click.option("--force", is_flag=True, help="Retrain even if a model already exists.")
+@click.option("--no-grid-search", is_flag=True, help="Skip hyperparameter tuning (use defaults).")
+@click.pass_context
+def train(ctx: click.Context, force: bool, no_grid_search: bool) -> None:
+    """Train the ML price prediction model."""
+    from homebuyer.prediction.model import DEFAULT_MODEL_PATH
+    from homebuyer.prediction.train import train_model
+
+    db_path = ctx.obj["db_path"]
+
+    if DEFAULT_MODEL_PATH.exists() and not force:
+        click.echo(
+            f"Model already exists at {DEFAULT_MODEL_PATH}\n"
+            f"Use --force to retrain."
+        )
+        return
+
+    click.echo("Training price prediction model...")
+    click.echo(f"  Grid search: {'OFF (using defaults)' if no_grid_search else 'ON'}")
+    click.echo()
+
+    with Database(db_path) as db:
+        artifact = train_model(
+            db,
+            grid_search=not no_grid_search,
+        )
+
+    click.echo(f"\nModel saved. Train: {artifact.train_size:,}, Test: {artifact.test_size:,}")
+    click.echo(f"MAE: ${artifact.training_metrics.get('mae', 0):,.0f}, "
+               f"MAPE: {artifact.training_metrics.get('mape', 0):.1f}%, "
+               f"R²: {artifact.training_metrics.get('r2', 0):.4f}")
+
+
+# ---------------------------------------------------------------------------
+# predict
+# ---------------------------------------------------------------------------
+
+@main.group()
+def predict() -> None:
+    """Predict sale prices using the trained ML model."""
+    pass
+
+
+@predict.command("manual")
+@click.option("--neighborhood", "-n", required=True, help="Neighborhood name.")
+@click.option("--beds", type=float, help="Number of bedrooms.")
+@click.option("--baths", type=float, help="Number of bathrooms.")
+@click.option("--sqft", type=int, help="Square footage.")
+@click.option("--year-built", type=int, help="Year built.")
+@click.option("--lot-size", type=int, help="Lot size in sqft.")
+@click.option("--hoa", type=int, default=None, help="Monthly HOA dues.")
+@click.option("--list-price", type=int, default=None, help="List price (to show expected premium).")
+@click.option("--zip-code", type=str, default=None, help="Zip code (default: 94702).")
+@click.pass_context
+def predict_manual(
+    ctx: click.Context,
+    neighborhood: str,
+    beds: float | None,
+    baths: float | None,
+    sqft: int | None,
+    year_built: int | None,
+    lot_size: int | None,
+    hoa: int | None,
+    list_price: int | None,
+    zip_code: str | None,
+) -> None:
+    """Predict sale price from manually entered property details."""
+    from homebuyer.prediction.model import ModelArtifact
+
+    db_path = ctx.obj["db_path"]
+
+    try:
+        artifact = ModelArtifact.load()
+    except FileNotFoundError as e:
+        click.echo(str(e))
+        sys.exit(1)
+
+    # Build property dict
+    prop = {
+        "neighborhood": neighborhood,
+        "zip_code": zip_code or "94702",
+        "property_type": "Single Family Residential",
+    }
+    if beds is not None:
+        prop["beds"] = beds
+    if baths is not None:
+        prop["baths"] = baths
+    if sqft is not None:
+        prop["sqft"] = sqft
+    if year_built is not None:
+        prop["year_built"] = year_built
+    if lot_size is not None:
+        prop["lot_size_sqft"] = lot_size
+    if hoa is not None:
+        prop["hoa_per_month"] = hoa
+    if list_price is not None:
+        prop["list_price"] = list_price
+
+    with Database(db_path) as db:
+        result = artifact.predict_single(db, prop)
+
+    _print_prediction_result(result, prop)
+
+
+@predict.command("listing")
+@click.argument("url")
+@click.option("--show-comps", is_flag=True, help="Also show comparable sales.")
+@click.pass_context
+def predict_listing(ctx: click.Context, url: str, show_comps: bool) -> None:
+    """Predict sale price for a Redfin listing URL."""
+    from homebuyer.collectors.redfin_listing import ListingFetcher, resolve_neighborhood
+    from homebuyer.prediction.model import ModelArtifact
+
+    db_path = ctx.obj["db_path"]
+
+    try:
+        artifact = ModelArtifact.load()
+    except FileNotFoundError as e:
+        click.echo(str(e))
+        sys.exit(1)
+
+    # Fetch listing details
+    click.echo(f"Fetching listing from Redfin...")
+    fetcher = ListingFetcher()
+    try:
+        listing = fetcher.fetch_listing(url)
+    except (ValueError, ConnectionError) as e:
+        click.echo(f"Error: {e}")
+        sys.exit(1)
+
+    # Resolve neighborhood if missing
+    if not listing.get("neighborhood"):
+        with Database(db_path) as db:
+            listing["neighborhood"] = resolve_neighborhood(listing, db)
+
+    click.echo(f"Listing: {listing.get('address', 'Unknown')}, "
+               f"{listing.get('city', '')}, {listing.get('state', '')} "
+               f"{listing.get('zip_code', '')}")
+    click.echo(f"List Price: ${listing.get('list_price', 0):,}")
+
+    details = []
+    if listing.get("beds"):
+        details.append(f"Beds: {listing['beds']:.0f}")
+    if listing.get("baths"):
+        details.append(f"Baths: {listing['baths']:.0f}")
+    if listing.get("sqft"):
+        details.append(f"Sqft: {listing['sqft']:,}")
+    if listing.get("year_built"):
+        details.append(f"Built: {listing['year_built']}")
+    click.echo(f"{' | '.join(details)}")
+    click.echo(f"Neighborhood: {listing.get('neighborhood', 'Unknown')}")
+    click.echo()
+
+    # Run prediction
+    with Database(db_path) as db:
+        result = artifact.predict_single(db, listing)
+
+    _print_prediction_result(result, listing)
+
+    # Show comps if requested
+    if show_comps:
+        from homebuyer.analysis.market_analysis import MarketAnalyzer
+
+        with Database(db_path) as db:
+            analyzer = MarketAnalyzer(db)
+            comps = analyzer.find_comparables(
+                neighborhood=listing.get("neighborhood", ""),
+                beds=listing.get("beds"),
+                baths=listing.get("baths"),
+                sqft=listing.get("sqft"),
+                year_built=listing.get("year_built"),
+            )
+
+        if comps:
+            click.echo(f"\n  TOP COMPARABLE SALES")
+            click.echo(f"  {'─' * 75}")
+            click.echo(f"  {'Address':<30s} {'Date':>12s} {'Price':>12s} {'Bed':>4s} {'Sqft':>6s} {'$/sqft':>8s}")
+            click.echo(f"  {'─'*30} {'─'*12} {'─'*12} {'─'*4} {'─'*6} {'─'*8}")
+            for c in comps[:7]:
+                addr = c.address[:29] if len(c.address) > 29 else c.address
+                beds_s = f"{c.beds:.0f}" if c.beds else "—"
+                sqft_s = f"{c.sqft:,}" if c.sqft else "—"
+                ppsf_s = f"${c.price_per_sqft:,.0f}" if c.price_per_sqft else "—"
+                click.echo(
+                    f"  {addr:<30s} {c.sale_date.isoformat():>12s} "
+                    f"${c.sale_price:>10,} {beds_s:>4s} {sqft_s:>6s} {ppsf_s:>8s}"
+                )
+        click.echo()
+
+
+def _print_prediction_result(result, prop: dict) -> None:
+    """Print a formatted prediction result with SHAP feature contributions."""
+    click.echo(f"{'=' * 55}")
+    click.echo(f"  ML PRICE PREDICTION")
+    click.echo(f"{'=' * 55}")
+    click.echo(f"  Predicted Sale Price:   ${result.predicted_price:,}")
+    click.echo(f"  90% Prediction Range:   ${result.price_lower:,} — ${result.price_upper:,}")
+
+    if result.list_price and result.list_price > 0:
+        premium = result.predicted_premium_pct
+        click.echo(f"  Expected Over List:     {premium:+.1f}%")
+        click.echo(f"  List Price:             ${result.list_price:,}")
+
+    click.echo(f"  Neighborhood:           {result.neighborhood or 'N/A'}")
+
+    # Feature contribution breakdown
+    if result.feature_contributions and result.base_value is not None:
+        click.echo()
+        click.echo(f"  PRICE FACTORS")
+        click.echo(f"  {'─' * 49}")
+        click.echo(f"  {'Baseline (avg home):':<36s} ${result.base_value:>12,}")
+
+        max_abs = max(abs(c["value"]) for c in result.feature_contributions) if result.feature_contributions else 1
+
+        for c in result.feature_contributions:
+            name = c["name"]
+            val = c["value"]
+            # Truncate long names
+            if len(name) > 34:
+                name = name[:31] + "..."
+            # Format as +$123,000 or -$123,000
+            abs_val = abs(val)
+            if val >= 0:
+                val_str = f"+${abs_val:>9,}"
+            else:
+                val_str = f"-${abs_val:>9,}"
+            # Bar proportional to contribution
+            bar_len = max(1, int(abs(val) / max_abs * 12))
+            bar = "█" * bar_len
+            click.echo(f"  {name:<36s} {val_str}  {bar}")
+
+        click.echo(f"  {'─' * 49}")
+        click.echo(f"  {'Predicted Total':<36s} ${result.predicted_price:>12,}")
+
+    click.echo(f"{'=' * 55}")
+
+
+# ---------------------------------------------------------------------------
+# model
+# ---------------------------------------------------------------------------
+
+@main.group("model")
+def model_group() -> None:
+    """Model management commands."""
+    pass
+
+
+@model_group.command("info")
+@click.pass_context
+def model_info(ctx: click.Context) -> None:
+    """Show model metadata, feature importances, and metrics."""
+    from homebuyer.prediction.model import ModelArtifact
+
+    try:
+        artifact = ModelArtifact.load()
+    except FileNotFoundError as e:
+        click.echo(str(e))
+        sys.exit(1)
+
+    click.echo(artifact.format_info())
 
 
 if __name__ == "__main__":

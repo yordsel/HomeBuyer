@@ -67,6 +67,8 @@ class ComparableProperty:
     neighborhood: Optional[str] = None
     price_per_sqft: Optional[float] = None
     distance_score: float = 0.0  # similarity to target
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 @dataclass
@@ -331,7 +333,8 @@ class MarketAnalyzer:
         query = """
             SELECT
                 address, sale_date, sale_price, beds, baths, sqft,
-                lot_size_sqft, year_built, neighborhood, price_per_sqft
+                lot_size_sqft, year_built, neighborhood, price_per_sqft,
+                latitude, longitude
             FROM property_sales
             WHERE neighborhood = ?
               AND sale_date >= ?
@@ -375,6 +378,8 @@ class MarketAnalyzer:
                     neighborhood=row["neighborhood"],
                     price_per_sqft=row["price_per_sqft"],
                     distance_score=score,
+                    latitude=row["latitude"],
+                    longitude=row["longitude"],
                 )
             )
 
@@ -941,7 +946,8 @@ class MarketAnalyzer:
         query = """
             SELECT
                 address, sale_date, sale_price, beds, baths, sqft,
-                lot_size_sqft, year_built, neighborhood, price_per_sqft
+                lot_size_sqft, year_built, neighborhood, price_per_sqft,
+                latitude, longitude
             FROM property_sales
             WHERE neighborhood != ?
               AND neighborhood IS NOT NULL
@@ -980,6 +986,8 @@ class MarketAnalyzer:
                     neighborhood=row["neighborhood"],
                     price_per_sqft=row["price_per_sqft"],
                     distance_score=score,
+                    latitude=row["latitude"],
+                    longitude=row["longitude"],
                 )
             )
 

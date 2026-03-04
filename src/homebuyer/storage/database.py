@@ -7,7 +7,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from homebuyer.storage.models import CollectionResult, MarketMetric, MortgageRate, PropertySale
+from homebuyer.storage.models import (
+    BuildingPermit,
+    CensusIncome,
+    CollectionResult,
+    EconomicIndicator,
+    MarketMetric,
+    MortgageRate,
+    PropertySale,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +54,12 @@ CREATE TABLE IF NOT EXISTS property_sales (
     longitude           REAL NOT NULL,
     neighborhood_raw    TEXT,
     neighborhood        TEXT,
+    zoning_class        TEXT,
     redfin_url          TEXT,
     days_on_market      INTEGER,
     collected_at        TEXT NOT NULL DEFAULT (datetime('now')),
     price_range_bucket  TEXT,
+    data_source         TEXT,
     CHECK (sale_price > 0)
 );
 
@@ -61,6 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_sales_date ON property_sales(sale_date);
 CREATE INDEX IF NOT EXISTS idx_sales_neighborhood ON property_sales(neighborhood);
 CREATE INDEX IF NOT EXISTS idx_sales_zip ON property_sales(zip_code);
 CREATE INDEX IF NOT EXISTS idx_sales_price ON property_sales(sale_price);
+CREATE INDEX IF NOT EXISTS idx_sales_zoning ON property_sales(zoning_class);
 
 CREATE TABLE IF NOT EXISTS market_metrics (
     id                          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,6 +106,29 @@ CREATE TABLE IF NOT EXISTS mortgage_rates (
 
 CREATE INDEX IF NOT EXISTS idx_rates_date ON mortgage_rates(observation_date);
 
+CREATE TABLE IF NOT EXISTS economic_indicators (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    series_id           TEXT NOT NULL,
+    observation_date    TEXT NOT NULL,
+    value               REAL NOT NULL,
+    UNIQUE(series_id, observation_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_econ_series_date
+    ON economic_indicators(series_id, observation_date);
+
+CREATE TABLE IF NOT EXISTS census_income (
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    zip_code                    TEXT NOT NULL,
+    acs_year                    INTEGER NOT NULL,
+    median_household_income     INTEGER NOT NULL,
+    margin_of_error             INTEGER,
+    UNIQUE(zip_code, acs_year)
+);
+
+CREATE INDEX IF NOT EXISTS idx_census_zip_year
+    ON census_income(zip_code, acs_year);
+
 CREATE TABLE IF NOT EXISTS neighborhoods (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT NOT NULL UNIQUE,
@@ -104,6 +138,29 @@ CREATE TABLE IF NOT EXISTS neighborhoods (
     centroid_lon    REAL,
     area_sqmi       REAL
 );
+
+CREATE TABLE IF NOT EXISTS building_permits (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_number       TEXT NOT NULL,
+    permit_type         TEXT,
+    status              TEXT,
+    address             TEXT NOT NULL,
+    zip_code            TEXT,
+    parcel_id           TEXT,
+    description         TEXT,
+    job_value           REAL,
+    construction_type   TEXT,
+    contractor_cslb     TEXT,
+    owner_name          TEXT,
+    filed_date          TEXT,
+    detail_url          TEXT,
+    collected_at        TEXT DEFAULT (datetime('now')),
+    UNIQUE(record_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_permits_address ON building_permits(address);
+CREATE INDEX IF NOT EXISTS idx_permits_filed ON building_permits(filed_date);
+CREATE INDEX IF NOT EXISTS idx_permits_type ON building_permits(permit_type);
 
 CREATE TABLE IF NOT EXISTS collection_runs (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,10 +190,10 @@ class Database:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._conn
 
-    def connect(self) -> "Database":
+    def connect(self, check_same_thread: bool = True) -> "Database":
         """Open connection with WAL mode and row factory."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.db_path))
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=check_same_thread)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -158,7 +215,37 @@ class Database:
 
     def initialize_schema(self) -> None:
         """Create all tables if they don't exist."""
+        # --- Migrations for existing databases ---
+        # Run migrations BEFORE executescript so new indexes on new columns succeed.
+        # Check if property_sales table exists first (it won't on a fresh DB).
+        table_exists = self.conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='property_sales'"
+        ).fetchone()[0]
+
+        if table_exists:
+            existing_cols = {
+                row[1]
+                for row in self.conn.execute("PRAGMA table_info(property_sales)").fetchall()
+            }
+            if "zoning_class" not in existing_cols:
+                self.conn.execute(
+                    "ALTER TABLE property_sales ADD COLUMN zoning_class TEXT"
+                )
+                self.conn.commit()
+                logger.info("Migration: added zoning_class column to property_sales.")
+
+            if "data_source" not in existing_cols:
+                self.conn.execute(
+                    "ALTER TABLE property_sales ADD COLUMN data_source TEXT"
+                )
+                self.conn.execute(
+                    "UPDATE property_sales SET data_source = 'redfin' WHERE data_source IS NULL"
+                )
+                self.conn.commit()
+                logger.info("Migration: added data_source column, backfilled as 'redfin'.")
+
         self.conn.executescript(_SCHEMA_SQL)
+
         # Record schema version if not already set
         existing = self.conn.execute(
             "SELECT MAX(version) FROM schema_version"
@@ -169,6 +256,7 @@ class Database:
                 (SCHEMA_VERSION, "Initial schema"),
             )
             self.conn.commit()
+
         logger.info("Database schema initialized (version %d).", SCHEMA_VERSION)
 
     # ------------------------------------------------------------------
@@ -183,9 +271,9 @@ class Database:
                 sale_type, property_type, beds, baths, sqft, lot_size_sqft,
                 year_built, price_per_sqft, hoa_per_month, latitude, longitude,
                 neighborhood_raw, neighborhood, redfin_url, days_on_market,
-                price_range_bucket
+                price_range_bucket, data_source
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             ON CONFLICT DO NOTHING
         """
@@ -213,6 +301,7 @@ class Database:
             sale.redfin_url,
             sale.days_on_market,
             sale.price_range_bucket,
+            sale.data_source,
         )
         cursor = self.conn.execute(sql, params)
         self.conn.commit()
@@ -228,9 +317,9 @@ class Database:
                 sale_type, property_type, beds, baths, sqft, lot_size_sqft,
                 year_built, price_per_sqft, hoa_per_month, latitude, longitude,
                 neighborhood_raw, neighborhood, redfin_url, days_on_market,
-                price_range_bucket
+                price_range_bucket, data_source
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             ON CONFLICT DO NOTHING
         """
@@ -260,6 +349,7 @@ class Database:
                     sale.redfin_url,
                     sale.days_on_market,
                     sale.price_range_bucket,
+                    sale.data_source,
                 )
                 cursor = self.conn.execute(sql, params)
                 if cursor.rowcount > 0:
@@ -413,6 +503,122 @@ class Database:
         return affected
 
     # ------------------------------------------------------------------
+    # Economic Indicators
+    # ------------------------------------------------------------------
+
+    def upsert_economic_indicators_batch(
+        self, indicators: list[EconomicIndicator]
+    ) -> int:
+        """Insert/update a batch of economic indicators. Returns affected rows."""
+        affected = 0
+        sql = """
+            INSERT INTO economic_indicators (series_id, observation_date, value)
+            VALUES (?, ?, ?)
+            ON CONFLICT(series_id, observation_date) DO UPDATE SET
+                value = excluded.value
+        """
+        with self.conn:
+            for ind in indicators:
+                cursor = self.conn.execute(
+                    sql,
+                    (ind.series_id, ind.observation_date.isoformat(), ind.value),
+                )
+                if cursor.rowcount > 0:
+                    affected += 1
+        return affected
+
+    # ------------------------------------------------------------------
+    # Census Income
+    # ------------------------------------------------------------------
+
+    def upsert_census_income_batch(self, records: list[CensusIncome]) -> int:
+        """Insert/update a batch of Census income records. Returns affected rows."""
+        affected = 0
+        sql = """
+            INSERT INTO census_income (
+                zip_code, acs_year, median_household_income, margin_of_error
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(zip_code, acs_year) DO UPDATE SET
+                median_household_income = excluded.median_household_income,
+                margin_of_error = excluded.margin_of_error
+        """
+        with self.conn:
+            for rec in records:
+                cursor = self.conn.execute(
+                    sql,
+                    (
+                        rec.zip_code,
+                        rec.acs_year,
+                        rec.median_household_income,
+                        rec.margin_of_error,
+                    ),
+                )
+                if cursor.rowcount > 0:
+                    affected += 1
+        return affected
+
+    # ------------------------------------------------------------------
+    # Building Permits
+    # ------------------------------------------------------------------
+
+    def upsert_permits_batch(self, permits: list[BuildingPermit]) -> tuple[int, int]:
+        """Insert a batch of building permits. Returns (inserted_count, duplicate_count)."""
+        inserted = 0
+        duplicates = 0
+        sql = """
+            INSERT INTO building_permits (
+                record_number, permit_type, status, address, zip_code,
+                parcel_id, description, job_value, construction_type,
+                contractor_cslb, owner_name, filed_date, detail_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(record_number) DO UPDATE SET
+                permit_type = excluded.permit_type,
+                status = excluded.status,
+                address = excluded.address,
+                zip_code = excluded.zip_code,
+                parcel_id = excluded.parcel_id,
+                description = excluded.description,
+                job_value = excluded.job_value,
+                construction_type = excluded.construction_type,
+                contractor_cslb = excluded.contractor_cslb,
+                owner_name = excluded.owner_name,
+                filed_date = excluded.filed_date,
+                detail_url = excluded.detail_url
+        """
+        with self.conn:
+            for p in permits:
+                cursor = self.conn.execute(
+                    sql,
+                    (
+                        p.record_number,
+                        p.permit_type,
+                        p.status,
+                        p.address,
+                        p.zip_code,
+                        p.parcel_id,
+                        p.description,
+                        p.job_value,
+                        p.construction_type,
+                        p.contractor_cslb,
+                        p.owner_name,
+                        p.filed_date,
+                        p.detail_url,
+                    ),
+                )
+                if cursor.rowcount > 0:
+                    inserted += 1
+                else:
+                    duplicates += 1
+        return inserted, duplicates
+
+    def get_collected_permit_addresses(self) -> set[str]:
+        """Return the set of addresses that already have permit data collected."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT UPPER(TRIM(address)) FROM building_permits"
+        ).fetchall()
+        return {row[0] for row in rows}
+
+    # ------------------------------------------------------------------
     # Neighborhoods
     # ------------------------------------------------------------------
 
@@ -505,6 +711,17 @@ class Database:
             "pct": round(geocoded / total * 100, 1) if total > 0 else 0,
         }
 
+        # Zoning coverage
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM property_sales WHERE zoning_class IS NOT NULL"
+        ).fetchone()
+        zoned = row[0]
+        stats["zoning_coverage"] = {
+            "zoned": zoned,
+            "total": total,
+            "pct": round(zoned / total * 100, 1) if total > 0 else 0,
+        }
+
         # Market metrics
         row = self.conn.execute(
             "SELECT COUNT(*), MIN(period_begin), MAX(period_begin) FROM market_metrics"
@@ -525,6 +742,54 @@ class Database:
             "max_date": row[2],
         }
 
+        # Economic indicators
+        row = self.conn.execute(
+            "SELECT COUNT(*), MIN(observation_date), MAX(observation_date) "
+            "FROM economic_indicators"
+        ).fetchone()
+        stats["economic_indicators"] = {
+            "count": row[0],
+            "min_date": row[1],
+            "max_date": row[2],
+        }
+
+        # Series breakdown
+        series_rows = self.conn.execute(
+            "SELECT series_id, COUNT(*) as cnt FROM economic_indicators "
+            "GROUP BY series_id ORDER BY series_id"
+        ).fetchall()
+        stats["economic_series"] = {r[0]: r[1] for r in series_rows}
+
+        # Census income
+        row = self.conn.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT zip_code), "
+            "MIN(acs_year), MAX(acs_year) FROM census_income"
+        ).fetchone()
+        stats["census_income"] = {
+            "count": row[0],
+            "zip_codes": row[1],
+            "min_year": row[2],
+            "max_year": row[3],
+        }
+
+        # Building permits
+        permits_exists = self.conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='building_permits'"
+        ).fetchone()[0]
+        if permits_exists:
+            row = self.conn.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT UPPER(TRIM(address))), "
+                "MIN(filed_date), MAX(filed_date) FROM building_permits"
+            ).fetchone()
+            stats["building_permits"] = {
+                "count": row[0],
+                "addresses": row[1],
+                "min_date": row[2],
+                "max_date": row[3],
+            }
+        else:
+            stats["building_permits"] = {"count": 0, "addresses": 0}
+
         # Neighborhoods
         row = self.conn.execute("SELECT COUNT(*) FROM neighborhoods").fetchone()
         stats["neighborhoods"] = {"count": row[0]}
@@ -541,6 +806,64 @@ class Database:
             }
 
         return stats
+
+    # ------------------------------------------------------------------
+    # Processing helpers
+    # ------------------------------------------------------------------
+
+    def find_nearest_sale(
+        self,
+        lat: float,
+        lon: float,
+        max_distance_m: float = 50.0,
+    ) -> Optional[dict]:
+        """Find the nearest property sale within *max_distance_m* of (lat, lon).
+
+        Uses a bounding-box SQL pre-filter (fast) then Haversine distance in
+        Python on the small candidate set.
+
+        Returns:
+            Dict of property_sales columns for the nearest match, or ``None``.
+        """
+        import math
+
+        # Approximate bounding box in degrees (1° lat ≈ 111 139 m)
+        delta = max_distance_m / 111_139.0
+        rows = self.conn.execute(
+            """
+            SELECT * FROM property_sales
+            WHERE latitude BETWEEN ? AND ?
+              AND longitude BETWEEN ? AND ?
+            ORDER BY sale_date DESC
+            """,
+            (lat - delta, lat + delta, lon - delta, lon + delta),
+        ).fetchall()
+
+        if not rows:
+            return None
+
+        def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+            R = 6_371_000  # Earth radius in metres
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = (
+                math.sin(dlat / 2) ** 2
+                + math.cos(math.radians(lat1))
+                * math.cos(math.radians(lat2))
+                * math.sin(dlon / 2) ** 2
+            )
+            return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        best: Optional[dict] = None
+        best_dist = float("inf")
+        for row in rows:
+            d = dict(row)
+            dist = _haversine(lat, lon, d["latitude"], d["longitude"])
+            if dist < best_dist and dist <= max_distance_m:
+                best = d
+                best_dist = dist
+
+        return best
 
     # ------------------------------------------------------------------
     # Processing helpers
@@ -567,3 +890,32 @@ class Database:
                 "UPDATE property_sales SET neighborhood = ? WHERE id = ?",
                 updates,
             )
+
+    def get_sales_missing_zoning(self) -> list[dict]:
+        """Get all sales where zoning_class is NULL, with lat/long."""
+        rows = self.conn.execute(
+            "SELECT id, latitude, longitude FROM property_sales "
+            "WHERE zoning_class IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_zoning_batch(self, updates: list[tuple[str, int]]) -> None:
+        """Batch update zoning_class. Each tuple is (zoning_class, sale_id)."""
+        with self.conn:
+            self.conn.executemany(
+                "UPDATE property_sales SET zoning_class = ? WHERE id = ?",
+                updates,
+            )
+
+    def get_unique_redfin_addresses(self) -> list[dict]:
+        """Return unique addresses from Redfin-sourced sales with lat/lng for ATTOM lookups."""
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT address, city, state, zip_code, latitude, longitude
+            FROM property_sales
+            WHERE (data_source = 'redfin' OR data_source IS NULL)
+              AND latitude IS NOT NULL AND longitude IS NOT NULL
+            ORDER BY address
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]

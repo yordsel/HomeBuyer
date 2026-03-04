@@ -27,6 +27,7 @@ env/
 data/raw/
 data/processed/
 data/berkeley_homebuyer.db
+data/models/
 
 # Keep the geo directory (committed boundary files)
 !data/geo/

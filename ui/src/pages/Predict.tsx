@@ -141,6 +141,8 @@ export function PredictPage() {
             sale_date: null,
             hoa_per_month: payload.hoa_per_month ?? null,
             garage_spaces: null,
+            last_sale_price: null,
+            last_sale_date: null,
           },
           prediction: data.prediction,
           comparables: comps,

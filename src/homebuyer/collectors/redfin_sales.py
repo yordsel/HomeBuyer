@@ -240,6 +240,7 @@ class RedfinSalesCollector:
             redfin_url=url_value,
             days_on_market=_parse_int(row.get("DAYS ON MARKET")),
             price_range_bucket=price_range_bucket,
+            data_source="redfin",
         )
 
 

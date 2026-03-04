@@ -29,9 +29,11 @@ class PropertySale:
     hoa_per_month: Optional[int] = None
     neighborhood_raw: Optional[str] = None
     neighborhood: Optional[str] = None
+    zoning_class: Optional[str] = None
     redfin_url: Optional[str] = None
     days_on_market: Optional[int] = None
     price_range_bucket: Optional[str] = None
+    data_source: Optional[str] = None
 
 
 @dataclass
@@ -64,6 +66,52 @@ class MortgageRate:
     observation_date: date
     rate_30yr: Optional[float] = None
     rate_15yr: Optional[float] = None
+
+
+@dataclass
+class EconomicIndicator:
+    """A single economic indicator observation from FRED.
+
+    Stores data for any FRED series (NASDAQ, Treasury, CPI, etc.)
+    in a generic (series_id, date, value) format.
+    """
+
+    series_id: str
+    observation_date: date
+    value: float
+
+
+@dataclass
+class CensusIncome:
+    """Median household income from the Census ACS for a zip code.
+
+    Each record represents one ACS vintage year's 5-year estimate
+    for a specific zip code (ZCTA).
+    """
+
+    zip_code: str
+    acs_year: int  # e.g. 2023 means the 2019-2023 5-year estimate
+    median_household_income: int
+    margin_of_error: Optional[int] = None
+
+
+@dataclass
+class BuildingPermit:
+    """A building permit record from the Accela Citizen Access portal."""
+
+    record_number: str
+    address: str
+    permit_type: Optional[str] = None
+    status: Optional[str] = None
+    zip_code: Optional[str] = None
+    parcel_id: Optional[str] = None
+    description: Optional[str] = None
+    job_value: Optional[float] = None
+    construction_type: Optional[str] = None
+    contractor_cslb: Optional[str] = None
+    owner_name: Optional[str] = None
+    filed_date: Optional[str] = None
+    detail_url: Optional[str] = None
 
 
 @dataclass

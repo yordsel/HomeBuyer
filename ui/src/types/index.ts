@@ -39,6 +39,8 @@ export interface ListingData {
   sale_date: string | null;
   hoa_per_month: number | null;
   garage_spaces: number | null;
+  last_sale_price: number | null;
+  last_sale_date: string | null;
 }
 
 export interface ListingPredictionResponse {
