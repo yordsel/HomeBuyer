@@ -979,8 +979,9 @@ else:
 def main():
     import uvicorn
 
-    host = os.environ.get("HOST", "127.0.0.1")
-    port = int(os.environ.get("PORT", "8787"))
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "10000"))
+    print(f"Starting uvicorn on {host}:{port}")
     uvicorn.run(
         "homebuyer.api:app",
         host=host,
