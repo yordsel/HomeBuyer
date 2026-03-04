@@ -1,6 +1,7 @@
 """Configuration constants and settings for the HomeBuyer application."""
 
 import dataclasses
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -37,6 +38,34 @@ REDFIN_CAP_SAFETY_THRESHOLD = 345  # If we get this many rows, assume capped
 FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 FRED_SERIES_30YR = "MORTGAGE30US"
 FRED_SERIES_15YR = "MORTGAGE15US"
+
+# Additional economic indicator series
+FRED_ECONOMIC_SERIES: dict[str, str] = {
+    "NASDAQCOM": "NASDAQ Composite Index (daily)",
+    "GS10": "10-Year Treasury Constant Maturity Rate (monthly)",
+    "UMCSENT": "University of Michigan Consumer Sentiment (monthly)",
+    "CUURA422SA0": "CPI All Items: San Francisco-Oakland-Hayward (bimonthly)",
+    "SANF806UR": "Unemployment Rate: SF-Oakland-Hayward MSA (monthly)",
+}
+
+# Census ACS API
+CENSUS_ACS_BASE_URL = "https://api.census.gov/data"
+
+# ---------------------------------------------------------------------------
+# ATTOM Property Data API (optional — enables auto-fill for map-click)
+# ---------------------------------------------------------------------------
+ATTOM_API_KEY = os.environ.get("ATTOM_API_KEY", "")
+
+# ---------------------------------------------------------------------------
+# Accela Citizen Access (Berkeley building permits)
+# ---------------------------------------------------------------------------
+ACCELA_SEARCH_URL = (
+    "https://aca-prod.accela.com/BERKELEY/Cap/CapHome.aspx"
+    "?module=Building&TabName=Home"
+)
+ACCELA_DETAIL_BASE = "https://aca-prod.accela.com"
+ACCELA_REQUEST_DELAY = 2.0  # seconds between page loads (politeness)
+ACCELA_BATCH_SIZE = 50  # upsert every N addresses
 
 # ---------------------------------------------------------------------------
 # HTTP settings
