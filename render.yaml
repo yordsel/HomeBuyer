@@ -14,5 +14,3 @@ services:
         value: "10000"
       - key: ATTOM_API_KEY
         sync: false
-      - key: FRED_API_KEY
-        sync: false
