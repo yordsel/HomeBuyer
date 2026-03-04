@@ -266,33 +266,38 @@ export function PredictPage() {
 
       {/* ===== MAP MODE — side-by-side layout ===== */}
       {mode === 'map' && (
-        <div className="flex gap-4 items-start" style={{ minHeight: 540 }}>
+        <div className="flex gap-4 items-start" style={{ height: 'calc(100vh - 140px)' }}>
           {/* Left: Map */}
-          <div className="flex-1 min-w-0 space-y-4">
-            <ClickableMap
-              geojson={geojson}
-              onLocationSelect={handleMapClick}
-              clickResult={mapClickResult}
-              isLoading={loading}
-            />
+          <div className="flex-1 min-w-0 h-full flex flex-col gap-4">
+            <div className="flex-1 min-h-0">
+              <ClickableMap
+                geojson={geojson}
+                onLocationSelect={handleMapClick}
+                clickResult={mapClickResult}
+                isLoading={loading}
+                fillHeight
+              />
+            </div>
 
             {/* Property details form (when needs_details and no result yet) */}
             {!result &&
               mapClickResult?.status === 'needs_details' &&
               mapClickResult.location_info && (
-                <PropertyDetailsForm
-                  locationInfo={mapClickResult.location_info}
-                  onSubmit={handleManualPredict}
-                  isLoading={loading}
-                />
+                <div className="shrink-0">
+                  <PropertyDetailsForm
+                    locationInfo={mapClickResult.location_info}
+                    onSubmit={handleManualPredict}
+                    isLoading={loading}
+                  />
+                </div>
               )}
           </div>
 
           {/* Right: Prediction results panel */}
           {(result || error) && (
             <div
-              className="w-[380px] shrink-0 overflow-y-auto rounded-xl"
-              style={{ maxHeight: 'calc(100vh - 140px)' }}
+              className="w-2/5 shrink-0 overflow-y-auto rounded-xl"
+              style={{ maxHeight: '100%' }}
             >
               {resultsPanel}
             </div>

@@ -23,6 +23,8 @@ interface ClickableMapProps {
   onLocationSelect: (lat: number, lng: number) => void;
   clickResult: MapClickResponse | null;
   isLoading: boolean;
+  /** When true, stretch to fill parent height instead of fixed 500px. */
+  fillHeight?: boolean;
 }
 
 /** Berkeley approximate center. */
@@ -106,6 +108,7 @@ export function ClickableMap({
   onLocationSelect,
   clickResult,
   isLoading,
+  fillHeight = false,
 }: ClickableMapProps) {
   const [clickedPos, setClickedPos] = useState<[number, number] | null>(null);
   const [flyTarget, setFlyTarget] = useState<[number, number] | null>(null);
@@ -223,14 +226,14 @@ export function ClickableMap({
 
   if (!geojson) {
     return (
-      <div className="flex items-center justify-center h-[500px] bg-gray-50 rounded-xl border border-gray-200">
+      <div className={`flex items-center justify-center ${fillHeight ? 'h-full' : 'h-[500px]'} bg-gray-50 rounded-xl border border-gray-200`}>
         <Loader2 size={32} className="animate-spin text-blue-500" />
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+    <div className={`bg-white rounded-xl border border-gray-200 overflow-hidden ${fillHeight ? 'h-full flex flex-col' : ''}`}>
       {/* Instructions bar */}
       <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
         <MapPin size={16} className="text-blue-500 shrink-0" />
@@ -240,7 +243,7 @@ export function ClickableMap({
         </p>
       </div>
 
-      <div style={{ height: 500 }} className="relative">
+      <div style={fillHeight ? undefined : { height: 500 }} className={`relative ${fillHeight ? 'flex-1 min-h-0' : ''}`}>
         {/* Address search overlay */}
         <div className="absolute top-3 left-3 z-[1000]">
           <AddressSearch

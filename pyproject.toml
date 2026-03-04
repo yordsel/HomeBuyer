@@ -21,10 +21,12 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "shap>=0.44",
-    "playwright>=1.40",
 ]
 
 [project.optional-dependencies]
+collectors = [
+    "playwright>=1.40",
+]
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",

@@ -3,8 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
-dist/
-build/
+/dist/
+/build/
 *.egg
 .eggs/
 
@@ -26,15 +26,26 @@ env/
 # Data files (large, regenerable)
 data/raw/
 data/processed/
-data/berkeley_homebuyer.db
-data/models/
+data/homebuyer.db
+data/homebuyer.log
+data/berkeley_homebuyer.db-shm
+data/berkeley_homebuyer.db-wal
 
-# Keep the geo directory (committed boundary files)
-!data/geo/
+# Keep deployed data (small, required for production)
+# data/berkeley_homebuyer.db  — ~4MB, committed for deploy
+# data/models/                — ~2MB, committed for deploy
+# data/geo/                   — ~3MB, committed for deploy
 
 # Jupyter
 .ipynb_checkpoints/
 notebooks/.ipynb_checkpoints/
+
+# Node / Frontend
+ui/node_modules/
+# ui/dist/ is committed for Render deployment
+
+# Tauri build output
+ui/src-tauri/target/
 
 # OS
 .DS_Store

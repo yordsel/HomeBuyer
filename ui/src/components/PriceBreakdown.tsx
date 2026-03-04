@@ -73,8 +73,8 @@ export function PriceBreakdown({
             <YAxis
               type="category"
               dataKey="name"
-              width={200}
-              tick={{ fontSize: 12, fill: '#374151' }}
+              width={160}
+              tick={<TruncatedYTick />}
               axisLine={false}
               tickLine={false}
             />
@@ -110,6 +110,30 @@ export function PriceBreakdown({
 }
 
 // ---------------------------------------------------------------------------
+// Custom Y-axis tick — truncates long feature names with ellipsis
+// ---------------------------------------------------------------------------
+
+function TruncatedYTick(props: any) {
+  const { x, y, payload } = props;
+  const maxChars = 22;
+  const text: string = payload?.value ?? '';
+  const display = text.length > maxChars ? text.slice(0, maxChars - 1) + '…' : text;
+
+  return (
+    <text
+      x={x}
+      y={y}
+      textAnchor="end"
+      fill="#374151"
+      fontSize={12}
+      dominantBaseline="central"
+    >
+      {display}
+    </text>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Custom bar label (dollar amount at end of each bar)
 // ---------------------------------------------------------------------------
 
@@ -118,14 +142,17 @@ function BarLabel(props: any) {
   if (value == null) return null;
 
   const isPositive = value >= 0;
-  const labelX = isPositive ? x + width + 4 : x + width - 4;
+  // Positive bars: label to the right of the bar tip
+  // Negative bars: label to the right of the zero line (x is the zero point)
+  //   to avoid overlapping with Y-axis labels on the left
+  const labelX = isPositive ? x + width + 4 : x + 4;
 
   return (
     <text
       x={labelX}
       y={y + height / 2}
       fill={isPositive ? '#16a34a' : '#dc2626'}
-      textAnchor={isPositive ? 'start' : 'end'}
+      textAnchor="start"
       dominantBaseline="central"
       fontSize={11}
       fontWeight={600}

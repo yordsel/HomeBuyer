@@ -45,7 +45,6 @@ _PROPERTY_FEATURES = [
 # Derived features computed from property data
 _DERIVED_FEATURES = [
     "property_age",
-    "is_sfr",
     "sale_month",
     "sale_quarter",
     "bed_bath_ratio",
@@ -360,17 +359,6 @@ class FeatureBuilder:
             current_year - features["year_built"],
             np.nan,
         )
-
-        # Is single-family residential
-        if "property_type" in df.columns:
-            features["is_sfr"] = (
-                df["property_type"]
-                .fillna("")
-                .str.contains("Single Family", case=False, na=False)
-                .astype(float)
-            )
-        else:
-            features["is_sfr"] = np.nan
 
         # Temporal features
         sale_dates = pd.to_datetime(df["sale_date"], errors="coerce")

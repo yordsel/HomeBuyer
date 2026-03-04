@@ -190,7 +190,7 @@ class ModelArtifact:
 
         # Compute SHAP feature contributions
         base_value, contributions = self._compute_shap_contributions(
-            X, property_dict, builder,
+            X, property_dict, builder, predicted_price,
         )
 
         return PredictionResult(
@@ -209,16 +209,21 @@ class ModelArtifact:
         X: pd.DataFrame,
         property_dict: dict,
         builder: FeatureBuilder,
+        predicted_price: int,
     ) -> tuple[Optional[int], Optional[list[dict]]]:
         """Compute per-feature SHAP contributions for a single prediction.
 
         Uses shap.TreeExplainer for exact Shapley values on the
         HistGradientBoostingRegressor model.
 
+        The contributions are rounded for display but adjusted so that
+        base_value + sum(contributions) == predicted_price exactly.
+
         Args:
             X: Single-row feature DataFrame.
             property_dict: Original property dict (for human-readable labels).
             builder: The FeatureBuilder (for reverse-encoding categoricals).
+            predicted_price: The final rounded predicted price (for reconciliation).
 
         Returns:
             (base_value, contributions) where contributions is a list of dicts
@@ -241,6 +246,8 @@ class ModelArtifact:
         # shap_values shape: (1, n_features) for single prediction
         sv = np.asarray(shap_values)
         sv = sv[0] if sv.ndim == 2 else sv
+
+        base_value = int(round(base, -3))
 
         # Build human-readable contribution dicts
         raw_contributions: list[dict] = []
@@ -265,17 +272,25 @@ class ModelArtifact:
         max_show = 12
         if len(raw_contributions) > max_show:
             top = raw_contributions[:max_show]
-            rest_sum = sum(c["value"] for c in raw_contributions[max_show:])
             rest_count = len(raw_contributions) - max_show
-            if abs(rest_sum) > 0:
+            # Compute the "other" bucket as the exact residual so everything adds up
+            top_sum = sum(c["value"] for c in top)
+            rest_value = predicted_price - base_value - top_sum
+            if abs(rest_value) > 0:
                 top.append({
                     "name": f"{rest_count} other factors",
-                    "value": int(round(rest_sum, -2)),
+                    "value": rest_value,
                     "raw_feature": "_other",
                 })
             raw_contributions = top
+        else:
+            # All contributions shown — adjust the smallest one to absorb rounding
+            contrib_sum = sum(c["value"] for c in raw_contributions)
+            residual = predicted_price - base_value - contrib_sum
+            if abs(residual) > 0 and raw_contributions:
+                raw_contributions[-1]["value"] += residual
 
-        return int(round(base, -3)), raw_contributions
+        return base_value, raw_contributions
 
     @staticmethod
     def _feature_label(
@@ -306,11 +321,7 @@ class ModelArtifact:
         if feat_name == "property_type_encoded":
             ptype = property_dict.get("property_type", "")
             if ptype:
-                # Shorten common types
-                short = ptype.replace("Single Family Residential", "Single-family")
-                short = short.replace("Multi-Family (2-4 Unit)", "Multi-family (2-4)")
-                short = short.replace("Condominium/Co-Op", "Condo/Co-Op")
-                return f"{short} (property type)"
+                return ptype
             return "Property type"
 
         # --- Numeric features with readable labels ---
@@ -322,7 +333,6 @@ class ModelArtifact:
             "year_built": ("Year built", "{:.0f}"),
             "hoa_per_month": ("HOA", "${:,.0f}/mo"),
             "property_age": ("Property age", "{:.0f} years"),
-            "is_sfr": ("Single-family home", None),
             "sale_month": ("Sale month", None),
             "sale_quarter": ("Sale quarter", "Q{:.0f}"),
             "bed_bath_ratio": ("Bed/bath ratio", "{:.1f}"),

@@ -18,7 +18,14 @@ import type {
 // ---------------------------------------------------------------------------
 
 const isTauri = '__TAURI_INTERNALS__' in window;
-const API_BASE = 'http://127.0.0.1:8787';
+
+// In Tauri or local dev, hit the local FastAPI server directly.
+// In production (same-origin), use relative URLs so the request goes
+// to the same host that served the frontend.
+const isLocal =
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1';
+const API_BASE = isTauri || isLocal ? 'http://127.0.0.1:8787' : '';
 
 /**
  * Wrapper that uses Tauri invoke() when running inside the Tauri shell,

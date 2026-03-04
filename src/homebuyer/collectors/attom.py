@@ -37,6 +37,8 @@ class AttomPropertyDetail:
     property_type: Optional[str] = None
     last_sale_price: Optional[int] = None
     last_sale_date: Optional[str] = None  # ISO YYYY-MM-DD
+    resolved_address: Optional[str] = None  # populated by coords lookup
+    resolved_city: Optional[str] = None  # populated by coords lookup
     source_fields: list[str] = field(default_factory=list)
 
     @property
@@ -325,6 +327,79 @@ class AttomClient:
             logger.warning("ATTOM saleshistory: parse error for %s: %s", address1, exc)
             return []
 
+    def lookup_property_by_coords(
+        self,
+        latitude: float,
+        longitude: float,
+        radius_m: int = 5,
+    ) -> Optional[AttomPropertyDetail]:
+        """Look up property details by lat/lng coordinates.
+
+        Uses ATTOM ``/property/snapshot`` endpoint with a small radius.
+        Returns the nearest property with full detail parsing.
+        Also stores the resolved address as ``detail.resolved_address``.
+        """
+        if not self.enabled:
+            return None
+
+        try:
+            resp = self.session.get(
+                f"{ATTOM_BASE_URL}/property/snapshot",
+                params={
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "radius": radius_m,
+                    "orderby": "distance",
+                    "pagesize": 1,
+                },
+                timeout=10,
+            )
+
+            if resp.status_code in (400, 404):
+                logger.debug(
+                    "ATTOM property/snapshot: no property at (%.6f, %.6f) within %dm",
+                    latitude, longitude, radius_m,
+                )
+                return None
+            if resp.status_code == 429:
+                logger.warning("ATTOM property/snapshot: rate-limited (429).")
+                return None
+            if resp.status_code in (401, 403):
+                logger.error(
+                    "ATTOM property/snapshot: auth failed (%d).", resp.status_code,
+                )
+                return None
+
+            resp.raise_for_status()
+            data = resp.json()
+            detail = self._parse_response(data)
+
+            if detail:
+                # Extract the resolved street address and city from the response
+                properties = data.get("property", [])
+                if properties:
+                    addr = properties[0].get("address", {})
+                    line1 = addr.get("line1") or addr.get("oneLine", "")
+                    detail.resolved_address = line1.strip() if line1 else None
+                    city = addr.get("locality") or addr.get("city") or ""
+                    detail.resolved_city = city.strip() if city else None
+                    logger.debug(
+                        "ATTOM coords lookup resolved: %s, %s",
+                        detail.resolved_address, detail.resolved_city,
+                    )
+
+            return detail
+
+        except requests.Timeout:
+            logger.warning("ATTOM property/snapshot: timed out")
+            return None
+        except requests.RequestException as exc:
+            logger.warning("ATTOM property/snapshot: failed: %s", exc)
+            return None
+        except (KeyError, ValueError, TypeError) as exc:
+            logger.warning("ATTOM property/snapshot: parse error: %s", exc)
+            return None
+
     # ------------------------------------------------------------------
     # Response parsing
     # ------------------------------------------------------------------
@@ -556,6 +631,8 @@ def _map_property_type(
         return "Townhouse"
     if "DUPLEX" in combined or "TRIPLEX" in combined or "QUADPLEX" in combined or "2-4" in combined:
         return "Multi-Family (2-4 Unit)"
+    if "APARTMENT" in combined or "5+" in combined or "MULTI" in combined:
+        return "Multi-Family (5+ Unit)"
     # Fall back: if subtype says "Residential" but nothing more specific, assume SFR
     if "RESIDENTIAL" in combined and "COMMERCIAL" not in combined:
         return "Single Family Residential"

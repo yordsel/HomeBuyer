@@ -74,7 +74,7 @@ export function AddressSearch({ onSelect, disabled }: AddressSearchProps) {
       const lng = parseFloat(result.lon);
       const address = formatResultAddress(result);
 
-      setQuery(address);
+      setQuery('');
       setIsOpen(false);
       setResults([]);
       onSelect(lat, lng, address);

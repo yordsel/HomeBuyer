@@ -73,6 +73,48 @@ class NeighborhoodGeocoder:
 
         return None
 
+    def geocode_nearest(self, lat: float, lon: float, max_distance_m: float = 200) -> Optional[str]:
+        """Find the nearest neighborhood polygon to a given point.
+
+        Used as a fallback when ``geocode_point`` returns None (the point
+        falls in a gap between neighborhood polygons but is still in Berkeley).
+
+        Args:
+            lat: Latitude.
+            lon: Longitude.
+            max_distance_m: Maximum distance in metres.  Points farther than
+                this from any boundary are treated as outside Berkeley.
+
+        Returns:
+            The nearest neighborhood name, or None if too far away.
+        """
+        from shapely.geometry import Point
+
+        point = Point(lon, lat)
+
+        # Approximate degrees-to-metres at Berkeley's latitude (~37.87)
+        # 1 degree lat ≈ 111,320 m, 1 degree lon ≈ 88,000 m
+        min_dist = float("inf")
+        nearest_name: Optional[str] = None
+
+        for idx in range(len(self.boundaries)):
+            geom = self.boundaries.geometry.iloc[idx]
+            dist_deg = geom.distance(point)
+            # Convert to rough metres (average of lat/lon scale)
+            dist_m = dist_deg * 100_000
+            if dist_m < min_dist:
+                min_dist = dist_m
+                nearest_name = self.boundaries.iloc[idx]["name"]
+
+        if min_dist <= max_distance_m and nearest_name:
+            logger.debug(
+                "Nearest neighborhood for (%.6f, %.6f): %s (~%.0fm away)",
+                lat, lon, nearest_name, min_dist,
+            )
+            return nearest_name
+
+        return None
+
     def geocode_batch(self, db: Database) -> tuple[int, int]:
         """Geocode all property_sales rows with NULL neighborhood.
 

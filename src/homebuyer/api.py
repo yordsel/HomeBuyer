@@ -221,6 +221,33 @@ def predict_listing(req: ListingPredictRequest):
         year_built=listing.get("year_built"),
     )
 
+    # Persist ATTOM sale history for this listing address
+    # Build a lightweight AttomPropertyDetail from listing for property-only fallback
+    from homebuyer.collectors.attom import AttomPropertyDetail as _APD
+    _listing_detail = _APD(
+        beds=listing.get("beds"),
+        baths=listing.get("baths"),
+        sqft=listing.get("sqft"),
+        year_built=listing.get("year_built"),
+        lot_size_sqft=listing.get("lot_size_sqft"),
+        property_type=listing.get("property_type"),
+    )
+    _persist_attom_sales(
+        address=listing.get("address", ""),
+        city=listing.get("city", "Berkeley"),
+        state=listing.get("state", "CA"),
+        zip_code=listing.get("zip_code", ""),
+        latitude=listing.get("latitude", 0),
+        longitude=listing.get("longitude", 0),
+        neighborhood=listing.get("neighborhood"),
+        attom_detail=_listing_detail,
+    )
+
+    # Collect building permits in background (Playwright, ~8-10s)
+    listing_addr = listing.get("address", "")
+    if listing_addr:
+        _collect_permits_background(listing_addr)
+
     return {
         "listing": listing,
         "prediction": _prediction_to_dict(result),
@@ -252,13 +279,30 @@ def predict_map_click(req: MapClickRequest):
     """
     model = _require_model()
 
-    # Step 1: Neighborhood lookup (also serves as "in Berkeley?" check)
+    # Step 1: Neighborhood lookup
     if not _state.geocoder:
         raise HTTPException(
             status_code=503,
             detail="Neighborhood geocoder not available.",
         )
     neighborhood = _state.geocoder.geocode_point(req.latitude, req.longitude)
+    if not neighborhood:
+        # Point may be in a gap between neighborhood polygons — try nearest
+        neighborhood = _state.geocoder.geocode_nearest(req.latitude, req.longitude)
+
+    # Step 1b: "In Berkeley?" check — use ATTOM city as fallback when
+    # neighborhood polygons have gaps
+    if not neighborhood and _state.attom and _state.attom.enabled:
+        attom_check = _state.attom.lookup_property_by_coords(
+            latitude=req.latitude, longitude=req.longitude, radius_m=50,
+        )
+        if attom_check and attom_check.resolved_city:
+            if attom_check.resolved_city.upper() == "BERKELEY":
+                # We're in Berkeley but outside known neighborhood polygons
+                neighborhood = "Berkeley"
+                logger.info(
+                    "ATTOM confirmed Berkeley via city field (no polygon match)"
+                )
     if not neighborhood:
         return {
             "status": "error",
@@ -286,12 +330,40 @@ def predict_map_click(req: MapClickRequest):
     zip_code = _estimate_zip_from_coords(req.latitude, req.longitude)
 
     # Step 4: Try to find an existing property sale near the clicked point
-    nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=50)
+    nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=5)
 
     if nearest:
-        # Full prediction from existing property record
         prop = dict(nearest)
         prop["neighborhood"] = neighborhood  # ensure current geocoded neighborhood
+
+        # If the DB record is missing key property details, try ATTOM to fill gaps
+        _key_fields = ("beds", "baths", "sqft", "property_type")
+        if any(prop.get(f) is None for f in _key_fields):
+            if _state.attom and _state.attom.enabled:
+                _enrich_detail = None
+                address = prop.get("address")
+                zip_code_val = prop.get("zip_code") or zip_code
+                if address:
+                    _enrich_detail = _state.attom.lookup_property(
+                        address1=address,
+                        address2=f"Berkeley, CA {zip_code_val}",
+                    )
+                if not _enrich_detail:
+                    _enrich_detail = _state.attom.lookup_property_by_coords(
+                        latitude=req.latitude,
+                        longitude=req.longitude,
+                        radius_m=5,
+                    )
+                if _enrich_detail:
+                    enriched = _enrich_detail.to_dict()
+                    for field in ("beds", "baths", "sqft", "lot_size_sqft",
+                                  "year_built", "property_type"):
+                        if prop.get(field) is None and enriched.get(field) is not None:
+                            prop[field] = enriched[field]
+                    logger.info(
+                        "Enriched DB record for %s with ATTOM data: %s",
+                        address, list(enriched.keys()),
+                    )
 
         result = model.predict_single(_state.db, prop)
 
@@ -311,18 +383,37 @@ def predict_map_click(req: MapClickRequest):
             "comparables": [_comp_to_dict(c) for c in comps[:7]],
         }
 
-    # Step 5: No nearby property — reverse geocode for address
-    address = _reverse_geocode(req.latitude, req.longitude)
-
-    # Step 5b: Try ATTOM property detail lookup (if configured)
+    # Step 5: Try ATTOM coords-based property lookup first (most reliable)
+    address = None
     attom_detail = None
     last_sale_price, last_sale_date = None, None
-    if address and _state.attom and _state.attom.enabled:
+
+    if _state.attom and _state.attom.enabled:
+        attom_detail = _state.attom.lookup_property_by_coords(
+            latitude=req.latitude,
+            longitude=req.longitude,
+            radius_m=5,
+        )
+        if attom_detail and attom_detail.resolved_address:
+            address = attom_detail.resolved_address
+            logger.info("ATTOM coords lookup resolved address: %s", address)
+
+            # Fetch last sale using the resolved address
+            last_sale_price, last_sale_date = _state.attom.lookup_last_sale(
+                address1=address,
+                address2=f"Berkeley, CA {zip_code}",
+            )
+
+    # Step 5a: Fall back to Nominatim reverse geocode if ATTOM didn't resolve
+    if not address:
+        address = _reverse_geocode(req.latitude, req.longitude)
+
+    # Step 5b: If we have an address but no ATTOM detail yet, try address-based lookup
+    if address and not attom_detail and _state.attom and _state.attom.enabled:
         attom_detail = _state.attom.lookup_property(
             address1=address,
             address2=f"Berkeley, CA {zip_code}",
         )
-        # Also fetch last sale info
         last_sale_price, last_sale_date = _state.attom.lookup_last_sale(
             address1=address,
             address2=f"Berkeley, CA {zip_code}",
@@ -347,6 +438,22 @@ def predict_map_click(req: MapClickRequest):
             sqft=prop.get("sqft"),
             year_built=prop.get("year_built"),
         )
+
+        # Persist ATTOM sale history for future predictions & model training
+        _persist_attom_sales(
+            address=address,
+            city="Berkeley",
+            state="CA",
+            zip_code=zip_code,
+            latitude=req.latitude,
+            longitude=req.longitude,
+            neighborhood=neighborhood,
+            attom_detail=attom_detail,
+        )
+
+        # Collect building permits in background (Playwright, ~8-10s)
+        if address:
+            _collect_permits_background(address)
 
         return {
             "status": "prediction",
@@ -640,6 +747,156 @@ def _estimate_zip_from_coords(lat: float, lon: float) -> str:
     return dict(row)["zip_code"] if row else "94702"
 
 
+def _persist_attom_sales(
+    address: str,
+    city: str,
+    state: str,
+    zip_code: str,
+    latitude: float,
+    longitude: float,
+    neighborhood: str | None,
+    attom_detail: "AttomPropertyDetail | None" = None,
+) -> None:
+    """Fetch full sale history from ATTOM and persist to the database.
+
+    Called after a successful prediction for a property not already in the DB.
+    If no sale history is found, persists a property-only record (null
+    sale_price/sale_date) so the property is cached for future lookups.
+
+    Errors are logged but never raised so the prediction response is unaffected.
+    """
+    if not _state.attom or not _state.attom.enabled:
+        return
+    if not address:
+        return
+
+    try:
+        from datetime import date as date_type
+
+        from homebuyer.storage.models import PropertySale
+
+        address2 = f"{city}, {state} {zip_code}".strip()
+        history = _state.attom.lookup_sale_history(
+            address1=address, address2=address2,
+        )
+
+        inserted = 0
+
+        if history:
+            for txn in history:
+                txn_lat = txn.get("latitude") or latitude
+                txn_lng = txn.get("longitude") or longitude
+                if not txn_lat or not txn_lng:
+                    continue
+
+                try:
+                    sale_date_obj = date_type.fromisoformat(txn["sale_date"])
+                except (KeyError, ValueError):
+                    continue
+
+                sale_price = txn.get("sale_price")
+                if not sale_price or sale_price <= 0:
+                    continue
+
+                sqft = txn.get("sqft")
+                price_per_sqft = (
+                    round(sale_price / sqft, 2) if sqft and sqft > 0 else None
+                )
+
+                sale = PropertySale(
+                    address=address,
+                    city=city,
+                    state=state,
+                    zip_code=zip_code,
+                    latitude=float(txn_lat),
+                    longitude=float(txn_lng),
+                    sale_date=sale_date_obj,
+                    sale_price=sale_price,
+                    sale_type=txn.get("sale_type"),
+                    property_type=txn.get("property_type"),
+                    beds=txn.get("beds"),
+                    baths=txn.get("baths"),
+                    sqft=sqft,
+                    lot_size_sqft=txn.get("lot_size_sqft"),
+                    year_built=txn.get("year_built"),
+                    price_per_sqft=price_per_sqft,
+                    neighborhood=neighborhood,
+                    data_source="attom",
+                )
+                if _state.db.upsert_sale(sale):
+                    inserted += 1
+
+        # If no sale history was persisted, save a property-only record
+        # from ATTOM property details so we don't re-query ATTOM next time
+        if inserted == 0 and attom_detail:
+            prop_record = PropertySale(
+                address=address,
+                city=city,
+                state=state,
+                zip_code=zip_code,
+                latitude=latitude,
+                longitude=longitude,
+                sale_date=None,
+                sale_price=None,
+                property_type=attom_detail.property_type,
+                beds=attom_detail.beds,
+                baths=attom_detail.baths,
+                sqft=attom_detail.sqft,
+                lot_size_sqft=attom_detail.lot_size_sqft,
+                year_built=attom_detail.year_built,
+                neighborhood=neighborhood,
+                data_source="attom",
+            )
+            if _state.db.upsert_sale(prop_record):
+                inserted = 1
+                logger.info(
+                    "Persisted property-only record for %s (no sale history)",
+                    address,
+                )
+
+        if inserted and history:
+            logger.info(
+                "Persisted %d ATTOM sale records for %s", inserted, address,
+            )
+    except Exception:
+        logger.warning(
+            "Failed to persist ATTOM sales for %s", address, exc_info=True,
+        )
+
+
+def _collect_permits_background(address: str) -> None:
+    """Collect building permits for an address in a background thread.
+
+    Uses Playwright (headless Chromium) to scrape the Accela portal,
+    which takes ~8-10 seconds per address.  Runs in a daemon thread so
+    the prediction response is not delayed.
+
+    Errors are logged but never propagated.
+    """
+    import threading
+
+    def _run() -> None:
+        try:
+            from homebuyer.collectors.accela_permits import AccelaPermitCollector
+
+            collector = AccelaPermitCollector(_state.db)
+            permits = collector.collect_for_address(address)
+            if permits:
+                logger.info(
+                    "Background permit collection: %d permits for %s",
+                    len(permits), address,
+                )
+            else:
+                logger.debug("Background permit collection: no permits for %s", address)
+        except Exception:
+            logger.warning(
+                "Background permit collection failed for %s", address, exc_info=True,
+            )
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+
 # Common non-residential zone descriptions for user-friendly error messages
 _ZONE_DESCRIPTIONS: dict[str, str] = {
     "C-AC": "Adeline Corridor Commercial",
@@ -685,16 +942,49 @@ def _neighborhood_stats_to_dict(stats) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Static file serving for production (React SPA)
+# ---------------------------------------------------------------------------
+
+import os
+from pathlib import Path as _Path
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+# Resolve the UI build directory relative to the project root.
+# In production, the build script places the built frontend at ui/dist/.
+_UI_DIST = _Path(__file__).resolve().parents[2] / "ui" / "dist"
+
+if _UI_DIST.is_dir():
+    # Serve static assets (JS, CSS, images) from the Vite build output.
+    app.mount("/assets", StaticFiles(directory=_UI_DIST / "assets"), name="static-assets")
+
+    @app.get("/{path:path}")
+    async def _serve_spa(path: str):
+        """Catch-all: serve index.html for SPA client-side routing."""
+        # If a real file exists at the path, serve it (e.g. favicon.ico)
+        file = _UI_DIST / path
+        if path and file.is_file():
+            return FileResponse(file)
+        return FileResponse(_UI_DIST / "index.html")
+else:
+    logger.info("No UI build found at %s — API-only mode.", _UI_DIST)
+
+
+# ---------------------------------------------------------------------------
 # Entrypoint for `python -m homebuyer.api`
 # ---------------------------------------------------------------------------
 
 
 def main():
     import uvicorn
+
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "8787"))
     uvicorn.run(
         "homebuyer.api:app",
-        host="127.0.0.1",
-        port=8787,
+        host=host,
+        port=port,
         log_level="info",
     )
 

@@ -39,8 +39,8 @@ CREATE TABLE IF NOT EXISTS property_sales (
     city                TEXT NOT NULL,
     state               TEXT NOT NULL DEFAULT 'CA',
     zip_code            TEXT NOT NULL,
-    sale_date           TEXT NOT NULL,
-    sale_price          INTEGER NOT NULL,
+    sale_date           TEXT,
+    sale_price          INTEGER,
     sale_type           TEXT,
     property_type       TEXT,
     beds                REAL,
@@ -60,13 +60,17 @@ CREATE TABLE IF NOT EXISTS property_sales (
     collected_at        TEXT NOT NULL DEFAULT (datetime('now')),
     price_range_bucket  TEXT,
     data_source         TEXT,
-    CHECK (sale_price > 0)
+    CHECK (sale_price IS NULL OR sale_price > 0)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_mls
     ON property_sales(mls_number) WHERE mls_number IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_dedup
-    ON property_sales(address, sale_date, sale_price);
+    ON property_sales(address, sale_date, sale_price)
+    WHERE sale_date IS NOT NULL AND sale_price IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_dedup_property_only
+    ON property_sales(address)
+    WHERE sale_date IS NULL AND sale_price IS NULL;
 CREATE INDEX IF NOT EXISTS idx_sales_date ON property_sales(sale_date);
 CREATE INDEX IF NOT EXISTS idx_sales_neighborhood ON property_sales(neighborhood);
 CREATE INDEX IF NOT EXISTS idx_sales_zip ON property_sales(zip_code);
@@ -283,7 +287,7 @@ class Database:
             sale.city,
             sale.state,
             sale.zip_code,
-            sale.sale_date.isoformat(),
+            sale.sale_date.isoformat() if sale.sale_date else None,
             sale.sale_price,
             sale.sale_type,
             sale.property_type,
@@ -331,7 +335,7 @@ class Database:
                     sale.city,
                     sale.state,
                     sale.zip_code,
-                    sale.sale_date.isoformat(),
+                    sale.sale_date.isoformat() if sale.sale_date else None,
                     sale.sale_price,
                     sale.sale_type,
                     sale.property_type,

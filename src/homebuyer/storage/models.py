@@ -13,10 +13,10 @@ class PropertySale:
     city: str
     state: str
     zip_code: str
-    sale_date: date
-    sale_price: int
     latitude: float
     longitude: float
+    sale_date: Optional[date] = None
+    sale_price: Optional[int] = None
     mls_number: Optional[str] = None
     sale_type: Optional[str] = None
     property_type: Optional[str] = None

@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: homebuyer
+    runtime: python
+    plan: free
+    buildCommand: ./render-build.sh
+    startCommand: python -m homebuyer.api
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT
+        value: "10000"
+      - key: ATTOM_API_KEY
+        sync: false
+      - key: FRED_API_KEY
+        sync: false
