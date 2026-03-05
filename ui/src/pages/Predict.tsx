@@ -61,6 +61,7 @@ export function PredictPage({ onNavigate }: PredictPageProps) {
     setLoading(true);
     setError(null);
     setResult(null);
+    setLastProperty(null);
 
     try {
       const data = await api.predictListing(trimmed);
@@ -86,6 +87,7 @@ export function PredictPage({ onNavigate }: PredictPageProps) {
     setLoading(true);
     setError(null);
     setResult(null);
+    setLastProperty(null);
     setMapClickResult(null);
 
     try {
@@ -189,6 +191,7 @@ export function PredictPage({ onNavigate }: PredictPageProps) {
     if (newMode === mode) return;
     setMode(newMode);
     setResult(null);
+    setLastProperty(null);
     setError(null);
     setMapClickResult(null);
   }
