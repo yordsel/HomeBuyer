@@ -7,10 +7,11 @@ Usage:
     homebuyer collect rates       Fetch FRED mortgage rates
     homebuyer collect indicators  Fetch FRED economic indicators (NASDAQ, CPI, etc.)
     homebuyer collect census      Fetch Census ACS median income by zip code
+    homebuyer collect beso         Fetch BESO energy benchmarking data
     homebuyer collect permits     Scrape building permits from Accela portal
     homebuyer collect permits-address ADDRESS  Permits for a single address
     homebuyer collect attom-sales Fetch ATTOM sale history for known addresses
-    homebuyer collect all         Run all five collectors
+    homebuyer collect all         Run all six collectors
     homebuyer process zoning      Assign zoning districts to properties
     homebuyer process all         Normalize, geocode, zoning, and deduplicate
     homebuyer status              Show database statistics
@@ -187,6 +188,25 @@ def collect_census(ctx: click.Context) -> None:
         sys.exit(1)
 
 
+@collect.command("beso")
+@click.option("--file", "local_file", type=click.Path(exists=True), default=None,
+              help="Load from a local JSON/CSV file instead of the API.")
+@click.pass_context
+def collect_beso(ctx: click.Context, local_file: str | None) -> None:
+    """Fetch BESO energy benchmarking data from Berkeley Open Data."""
+    from homebuyer.collectors.berkeley_opendata import BESOCollector
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        collector = BESOCollector(db)
+        file_path = Path(local_file) if local_file else None
+        result = collector.collect(local_file=file_path)
+
+    click.echo(str(result))
+    if not result.success:
+        sys.exit(1)
+
+
 @collect.command("permits")
 @click.option(
     "--start-date", default="01/01/2000", help="Permit start date MM/DD/YYYY."
@@ -265,33 +285,39 @@ def collect_attom_sales(ctx: click.Context, limit: int | None, delay: float) -> 
 def collect_all(ctx: click.Context, days: int) -> None:
     """Run all collectors in sequence."""
     click.echo("=" * 60)
-    click.echo("Step 1/5: Collecting property sales from Redfin...")
+    click.echo("Step 1/6: Collecting property sales from Redfin...")
     click.echo("=" * 60)
     ctx.invoke(collect_sales, days=days)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 2/5: Collecting market metrics from Redfin Data Center...")
+    click.echo("Step 2/6: Collecting market metrics from Redfin Data Center...")
     click.echo("=" * 60)
     ctx.invoke(collect_market)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 3/5: Collecting mortgage rates from FRED...")
+    click.echo("Step 3/6: Collecting mortgage rates from FRED...")
     click.echo("=" * 60)
     ctx.invoke(collect_rates)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 4/5: Collecting economic indicators from FRED...")
+    click.echo("Step 4/6: Collecting economic indicators from FRED...")
     click.echo("=" * 60)
     ctx.invoke(collect_indicators)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 5/5: Collecting Census ACS income data...")
+    click.echo("Step 5/6: Collecting Census ACS income data...")
     click.echo("=" * 60)
     ctx.invoke(collect_census)
+
+    click.echo()
+    click.echo("=" * 60)
+    click.echo("Step 6/6: Collecting BESO energy benchmarking data...")
+    click.echo("=" * 60)
+    ctx.invoke(collect_beso)
 
     click.echo()
     click.echo("All collections complete.")
@@ -465,6 +491,12 @@ def status(ctx: click.Context) -> None:
     if ci.get("count", 0) > 0:
         click.echo(f"  Zip codes:       {ci['zip_codes']}")
         click.echo(f"  ACS years:       {ci['min_year']}–{ci['max_year']}")
+
+    beso = stats.get("beso_records", {})
+    click.echo(f"\nBESO Records:      {beso.get('count', 0):,} records")
+    if beso.get("count", 0) > 0:
+        click.echo(f"  Buildings:       {beso['addresses']:,}")
+        click.echo(f"  Years:           {beso['min_year']}–{beso['max_year']}")
 
     nb = stats["neighborhoods"]
     click.echo(f"\nNeighborhoods:     {nb['count']:,} defined")

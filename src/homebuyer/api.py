@@ -66,6 +66,41 @@ class CompsRequest(BaseModel):
     max_results: int = 10
 
 
+class PropertyPotentialRequest(BaseModel):
+    latitude: float
+    longitude: float
+    address: Optional[str] = None
+    lot_size_sqft: Optional[int] = None
+    sqft: Optional[int] = None
+
+
+class PotentialSummaryRequest(BaseModel):
+    latitude: float
+    longitude: float
+    address: Optional[str] = None
+    lot_size_sqft: Optional[int] = None
+    sqft: Optional[int] = None
+    neighborhood: Optional[str] = None
+    beds: Optional[float] = None
+    baths: Optional[float] = None
+    year_built: Optional[int] = None
+
+
+class ImprovementSimRequest(BaseModel):
+    latitude: float
+    longitude: float
+    address: Optional[str] = None
+    neighborhood: Optional[str] = None
+    zip_code: Optional[str] = None
+    beds: Optional[float] = None
+    baths: Optional[float] = None
+    sqft: Optional[int] = None
+    lot_size_sqft: Optional[int] = None
+    year_built: Optional[int] = None
+    property_type: str = "Single Family Residential"
+    hoa_per_month: Optional[int] = None
+
+
 # ---------------------------------------------------------------------------
 # Application state — loaded once at startup, kept warm
 # ---------------------------------------------------------------------------
@@ -110,10 +145,41 @@ class AppState:
             self.geocoder = None
             logger.warning("Neighborhood boundaries not found. Map-click geocoding disabled.")
 
+        # Development potential calculator
+        try:
+            from homebuyer.processing.development import DevelopmentPotentialCalculator
+
+            if self.zoning:
+                self.dev_calc = DevelopmentPotentialCalculator(self.zoning, self.db)
+            else:
+                self.dev_calc = None
+                logger.warning("Development calculator disabled (no zoning data).")
+        except Exception:
+            self.dev_calc = None
+            logger.warning("Development calculator initialization failed.")
+
         # ATTOM property data client (optional — auto-fills property details)
         from homebuyer.collectors.attom import AttomClient
 
         self.attom = AttomClient()
+
+        # AI-powered development potential summarizer (optional)
+        from homebuyer.services.ai_summary import PotentialSummarizer
+
+        self.potential_summarizer = PotentialSummarizer()
+        if self.potential_summarizer.enabled:
+            logger.info("AI potential summarizer enabled (Claude API)")
+        else:
+            logger.info("AI potential summarizer disabled (no ANTHROPIC_API_KEY)")
+
+        # Faketor AI chat advisor
+        from homebuyer.services.faketor import FaketorService
+
+        self.faketor = FaketorService()
+        if self.faketor.enabled:
+            logger.info("Faketor AI advisor enabled (Claude API)")
+        else:
+            logger.info("Faketor AI advisor disabled (no ANTHROPIC_API_KEY)")
 
     def get_analyzer(self):
         from homebuyer.analysis.market_analysis import MarketAnalyzer
@@ -585,6 +651,530 @@ def affordability(
     )
 
 
+# --- Development Potential ---
+
+
+@app.post("/api/property/potential")
+def property_potential(req: PropertyPotentialRequest):
+    """Compute development potential for a Berkeley property.
+
+    Returns zoning details, unit potential (base + Middle Housing),
+    ADU feasibility, SB 9 eligibility, BESO status, and improvement ROI.
+    """
+    if not _state or not _state.dev_calc:
+        raise HTTPException(
+            status_code=503,
+            detail="Development potential calculator not available.",
+        )
+
+    # Try to enrich from DB if address is provided but lot_size/sqft missing
+    lot_size = req.lot_size_sqft
+    sqft = req.sqft
+    address = req.address
+
+    if (lot_size is None or sqft is None) and _state.db:
+        nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=50)
+        if nearest:
+            if lot_size is None:
+                lot_size = nearest.get("lot_size_sqft")
+            if sqft is None:
+                sqft = nearest.get("sqft")
+            if address is None:
+                address = nearest.get("address")
+
+    result = _state.dev_calc.compute(
+        lat=req.latitude,
+        lon=req.longitude,
+        lot_size_sqft=lot_size,
+        sqft=sqft,
+        address=address,
+    )
+
+    return _development_potential_to_dict(result)
+
+
+@app.post("/api/property/potential/summary")
+def property_potential_summary(req: PotentialSummaryRequest):
+    """Compute development potential AND generate an AI summary.
+
+    Returns the full potential data plus a Claude-generated summary
+    with recommendation, caveats, and highlights. Results are cached
+    for 24 hours per location.
+    """
+    if not _state or not _state.dev_calc:
+        raise HTTPException(
+            status_code=503,
+            detail="Development potential calculator not available.",
+        )
+
+    # Reuse existing logic to enrich missing fields from DB
+    lot_size = req.lot_size_sqft
+    sqft = req.sqft
+    address = req.address
+
+    if (lot_size is None or sqft is None) and _state.db:
+        nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=50)
+        if nearest:
+            if lot_size is None:
+                lot_size = nearest.get("lot_size_sqft")
+            if sqft is None:
+                sqft = nearest.get("sqft")
+            if address is None:
+                address = nearest.get("address")
+
+    result = _state.dev_calc.compute(
+        lat=req.latitude,
+        lon=req.longitude,
+        lot_size_sqft=lot_size,
+        sqft=sqft,
+        address=address,
+    )
+
+    potential_dict = _development_potential_to_dict(result)
+
+    # Build property context for the AI prompt
+    property_context = {
+        "address": address or req.address,
+        "neighborhood": req.neighborhood,
+        "lot_size_sqft": lot_size,
+        "sqft": sqft,
+        "beds": req.beds,
+        "baths": req.baths,
+        "year_built": req.year_built,
+    }
+
+    # Generate AI summary (cached internally)
+    summary_resp = _state.potential_summarizer.generate_summary(
+        potential_dict=potential_dict,
+        property_context=property_context,
+        lat=req.latitude,
+        lon=req.longitude,
+    )
+
+    resp: dict = {"potential": summary_resp.potential}
+
+    if summary_resp.ai_summary:
+        resp["ai_summary"] = {
+            "summary": summary_resp.ai_summary.summary,
+            "recommendation": summary_resp.ai_summary.recommendation,
+            "caveats": summary_resp.ai_summary.caveats,
+            "highlights": summary_resp.ai_summary.highlights,
+        }
+    else:
+        resp["ai_summary"] = None
+
+    if summary_resp.ai_error:
+        resp["ai_error"] = summary_resp.ai_error
+
+    return resp
+
+
+@app.post("/api/property/improvement-sim")
+def improvement_simulation(req: ImprovementSimRequest):
+    """Simulate the effect of home improvements on predicted price.
+
+    Uses the ML model to predict current price, then simulates how modifying
+    permit-related features affects the prediction. Also returns market-wide
+    cost data per improvement category from Berkeley building permits.
+    """
+    model = _require_model()
+
+    if not _state or not _state.dev_calc:
+        raise HTTPException(
+            status_code=503,
+            detail="Development potential calculator not available.",
+        )
+
+    # Resolve property details from DB if needed
+    neighborhood = req.neighborhood
+    zip_code = req.zip_code or "94702"
+    sqft = req.sqft
+    lot_size_sqft = req.lot_size_sqft
+    address = req.address
+
+    if _state.db:
+        nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=50)
+        if nearest:
+            if not neighborhood:
+                neighborhood = nearest.get("neighborhood")
+            if sqft is None:
+                sqft = nearest.get("sqft")
+            if lot_size_sqft is None:
+                lot_size_sqft = nearest.get("lot_size_sqft")
+            if not address:
+                address = nearest.get("address")
+            if not req.zip_code:
+                zip_code = nearest.get("zip_code") or zip_code
+
+    if not neighborhood:
+        if _state.geocoder:
+            neighborhood = _state.geocoder.geocode_point(req.latitude, req.longitude)
+            if not neighborhood:
+                neighborhood = _state.geocoder.geocode_nearest(req.latitude, req.longitude)
+        if not neighborhood:
+            neighborhood = "Berkeley"
+
+    # Build property dict for the ML model
+    prop = {
+        "latitude": req.latitude,
+        "longitude": req.longitude,
+        "neighborhood": neighborhood,
+        "zip_code": zip_code,
+        "beds": req.beds,
+        "baths": req.baths,
+        "sqft": sqft,
+        "lot_size_sqft": lot_size_sqft,
+        "year_built": req.year_built,
+        "property_type": req.property_type,
+        "hoa_per_month": req.hoa_per_month,
+        "address": address,
+    }
+
+    # Get improvement cost data from permits DB
+    roi_data = _state.dev_calc._compute_improvement_roi()
+
+    # Build improvement list with average costs from permit data
+    improvements = []
+    for roi in roi_data:
+        improvements.append({
+            "category": roi.category,
+            "estimated_cost": roi.avg_job_value,
+        })
+
+    if not improvements:
+        return {
+            "error": "No improvement data available (building permits not collected).",
+            "categories": [],
+            "simulation": None,
+        }
+
+    # Run ML simulation
+    try:
+        sim_result = model.simulate_improvements(_state.db, prop, improvements)
+    except Exception as e:
+        logger.warning("Improvement simulation failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Simulation failed: {e}")
+
+    # Merge ROI correlation data with ML simulation data
+    categories = []
+    roi_by_cat = {r.category: r for r in roi_data}
+
+    for ind in sim_result["individual"]:
+        cat_name = ind["category"]
+        roi = roi_by_cat.get(cat_name)
+        categories.append({
+            "category": cat_name,
+            "avg_permit_cost": ind["estimated_cost"],
+            "ml_predicted_delta": ind["predicted_delta"],
+            "ml_roi_ratio": ind["roi_ratio"],
+            "correlation_premium_pct": roi.avg_ppsf_premium_pct if roi else None,
+            "sample_count": roi.sample_count if roi else 0,
+        })
+
+    # Sort by ml_predicted_delta descending (best improvements first)
+    categories.sort(key=lambda c: c["ml_predicted_delta"], reverse=True)
+
+    return {
+        "current_price": sim_result["current_price"],
+        "improved_price": sim_result["improved_price"],
+        "total_delta": sim_result["total_delta"],
+        "total_cost": sim_result["total_cost"],
+        "roi_ratio": sim_result["roi_ratio"],
+        "categories": categories,
+    }
+
+
+# --- Faketor Chat ---
+
+
+class FaketorChatRequest(BaseModel):
+    latitude: float
+    longitude: float
+    message: str
+    history: list[dict] = []
+    address: Optional[str] = None
+    neighborhood: Optional[str] = None
+    zip_code: Optional[str] = None
+    beds: Optional[float] = None
+    baths: Optional[float] = None
+    sqft: Optional[int] = None
+    lot_size_sqft: Optional[int] = None
+    year_built: Optional[int] = None
+    property_type: str = "Single Family Residential"
+
+
+def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
+    """Execute a Faketor tool and return JSON string result."""
+
+    if tool_name == "get_development_potential":
+        if not _state or not _state.dev_calc:
+            return json.dumps({"error": "Development calculator not available"})
+        lat = tool_input["latitude"]
+        lon = tool_input["longitude"]
+        lot_size, sqft, address = None, None, tool_input.get("address")
+        if _state.db:
+            nearest = _state.db.find_nearest_sale(lat, lon, max_distance_m=50)
+            if nearest:
+                lot_size = nearest.get("lot_size_sqft")
+                sqft = nearest.get("sqft")
+                if not address:
+                    address = nearest.get("address")
+        result = _state.dev_calc.compute(lat=lat, lon=lon,
+                                          lot_size_sqft=lot_size, sqft=sqft,
+                                          address=address)
+        return json.dumps(_development_potential_to_dict(result), default=str)
+
+    elif tool_name == "get_improvement_simulation":
+        model = _require_model()
+        if not _state or not _state.dev_calc:
+            return json.dumps({"error": "Development calculator not available"})
+        lat = tool_input["latitude"]
+        lon = tool_input["longitude"]
+        neighborhood = tool_input.get("neighborhood")
+        sqft = tool_input.get("sqft")
+        lot_size = tool_input.get("lot_size_sqft")
+        address = tool_input.get("address")
+        if _state.db:
+            nearest = _state.db.find_nearest_sale(lat, lon, max_distance_m=50)
+            if nearest:
+                if not neighborhood:
+                    neighborhood = nearest.get("neighborhood")
+                if sqft is None:
+                    sqft = nearest.get("sqft")
+                if lot_size is None:
+                    lot_size = nearest.get("lot_size_sqft")
+        if not neighborhood and _state.geocoder:
+            neighborhood = _state.geocoder.geocode_point(lat, lon) or "Berkeley"
+        prop = {
+            "latitude": lat, "longitude": lon,
+            "neighborhood": neighborhood or "Berkeley",
+            "zip_code": tool_input.get("zip_code", "94702"),
+            "beds": tool_input.get("beds"), "baths": tool_input.get("baths"),
+            "sqft": sqft, "lot_size_sqft": lot_size,
+            "year_built": tool_input.get("year_built"),
+            "property_type": tool_input.get("property_type", "Single Family Residential"),
+            "address": address,
+        }
+        roi_data = _state.dev_calc._compute_improvement_roi()
+        improvements = [{"category": r.category, "estimated_cost": r.avg_job_value}
+                        for r in roi_data]
+        if not improvements:
+            return json.dumps({"error": "No improvement data available"})
+        sim = model.simulate_improvements(_state.db, prop, improvements)
+        roi_by_cat = {r.category: r for r in roi_data}
+        categories = []
+        for ind in sim["individual"]:
+            roi = roi_by_cat.get(ind["category"])
+            categories.append({
+                "category": ind["category"],
+                "avg_cost": ind["estimated_cost"],
+                "ml_delta": ind["predicted_delta"],
+                "roi": ind["roi_ratio"],
+                "market_premium_pct": roi.avg_ppsf_premium_pct if roi else None,
+            })
+        return json.dumps({
+            "current_price": sim["current_price"],
+            "improved_price": sim["improved_price"],
+            "total_delta": sim["total_delta"],
+            "total_cost": sim["total_cost"],
+            "roi": sim["roi_ratio"],
+            "categories": categories,
+        })
+
+    elif tool_name == "get_comparable_sales":
+        analyzer = _state.get_analyzer()
+        comps = analyzer.find_comparables(
+            neighborhood=tool_input["neighborhood"],
+            beds=tool_input.get("beds"),
+            baths=tool_input.get("baths"),
+            sqft=tool_input.get("sqft"),
+            year_built=tool_input.get("year_built"),
+        )
+        return json.dumps([_comp_to_dict(c) for c in comps[:7]], default=str)
+
+    elif tool_name == "get_neighborhood_stats":
+        analyzer = _state.get_analyzer()
+        from dataclasses import asdict
+        stats = analyzer.get_neighborhood_stats(
+            tool_input["neighborhood"],
+            lookback_years=tool_input.get("years", 2),
+        )
+        return json.dumps(_neighborhood_stats_to_dict(stats), default=str)
+
+    elif tool_name == "get_market_summary":
+        analyzer = _state.get_analyzer()
+        return json.dumps(analyzer.generate_summary_report(), default=str)
+
+    elif tool_name == "get_price_prediction":
+        model = _require_model()
+        prop = {
+            "latitude": tool_input["latitude"],
+            "longitude": tool_input["longitude"],
+            "neighborhood": tool_input.get("neighborhood", "Berkeley"),
+            "zip_code": tool_input.get("zip_code", "94702"),
+            "beds": tool_input.get("beds"),
+            "baths": tool_input.get("baths"),
+            "sqft": tool_input.get("sqft"),
+            "year_built": tool_input.get("year_built"),
+            "lot_size_sqft": tool_input.get("lot_size_sqft"),
+            "property_type": tool_input.get("property_type", "Single Family Residential"),
+        }
+        result = model.predict_single(_state.db, prop)
+        return json.dumps(_prediction_to_dict(result), default=str)
+
+    elif tool_name == "estimate_sell_vs_hold":
+        model = _require_model()
+        analyzer = _state.get_analyzer()
+        prop = {
+            "latitude": tool_input["latitude"],
+            "longitude": tool_input["longitude"],
+            "neighborhood": tool_input.get("neighborhood", "Berkeley"),
+            "zip_code": tool_input.get("zip_code", "94702"),
+            "beds": tool_input.get("beds"),
+            "baths": tool_input.get("baths"),
+            "sqft": tool_input.get("sqft"),
+            "year_built": tool_input.get("year_built"),
+            "lot_size_sqft": tool_input.get("lot_size_sqft"),
+            "property_type": tool_input.get("property_type", "Single Family Residential"),
+        }
+        # Current predicted value
+        pred = model.predict_single(_state.db, prop)
+        current_value = pred.predicted_price
+
+        # Get neighborhood YoY appreciation
+        neighborhood = tool_input.get("neighborhood", "Berkeley")
+        stats = analyzer.get_neighborhood_stats(neighborhood, lookback_years=2)
+        yoy_pct = stats.yoy_price_change_pct or 3.0  # default 3% if unknown
+
+        # Get current market conditions
+        market = analyzer.generate_summary_report()
+        mortgage_rate = None
+        if market and market.get("current_market"):
+            mortgage_rate = market["current_market"].get("mortgage_rate_30yr")
+
+        # Project future values
+        scenarios = {}
+        for years in [1, 3, 5]:
+            appreciation = (1 + yoy_pct / 100) ** years
+            projected = int(round(current_value * appreciation, -3))
+            gain = projected - current_value
+            # Rough selling costs: 5% agent fees + 1% closing
+            sell_costs = int(round(projected * 0.06, -3))
+            net_gain = gain - sell_costs
+            scenarios[f"{years}yr"] = {
+                "projected_value": projected,
+                "appreciation_pct": round((appreciation - 1) * 100, 1),
+                "gross_gain": gain,
+                "estimated_sell_costs": sell_costs,
+                "net_gain": net_gain,
+            }
+
+        # Rough rental yield estimate
+        # Berkeley typical price-to-rent ratio: ~25-30 for SFH
+        beds = tool_input.get("beds") or 3
+        # Rough monthly rent estimates by bedroom count (Berkeley 2025-26)
+        rent_estimates = {1: 2200, 2: 3000, 3: 3800, 4: 4500, 5: 5200}
+        monthly_rent = rent_estimates.get(int(beds), 3500)
+        annual_rent = monthly_rent * 12
+        # Expenses: ~35% of rent (property tax, insurance, maintenance, vacancy)
+        annual_net_rent = int(annual_rent * 0.65)
+        cap_rate = round(annual_net_rent / current_value * 100, 2) if current_value > 0 else 0
+        price_to_rent = round(current_value / annual_rent, 1) if annual_rent > 0 else 0
+
+        return json.dumps({
+            "current_predicted_value": current_value,
+            "confidence_range": [pred.price_lower, pred.price_upper],
+            "neighborhood": neighborhood,
+            "yoy_appreciation_pct": yoy_pct,
+            "mortgage_rate_30yr": mortgage_rate,
+            "hold_scenarios": scenarios,
+            "rental_estimate": {
+                "monthly_rent": monthly_rent,
+                "annual_gross_rent": annual_rent,
+                "annual_net_rent": annual_net_rent,
+                "cap_rate_pct": cap_rate,
+                "price_to_rent_ratio": price_to_rent,
+                "expense_ratio_pct": 35,
+                "note": "Rough estimate based on typical Berkeley price-to-rent ratios. "
+                        "Actual rents vary by condition, exact location, and amenities.",
+            },
+        }, default=str)
+
+    else:
+        return json.dumps({"error": f"Unknown tool: {tool_name}"})
+
+
+@app.post("/api/faketor/chat")
+def faketor_chat(req: FaketorChatRequest):
+    """Chat with Faketor, the AI real estate advisor.
+
+    Faketor uses Claude with tool-use to call development potential,
+    improvement simulation, comps, market, and sell-vs-hold analysis tools.
+    """
+    if not _state:
+        raise HTTPException(status_code=503, detail="Server not initialized")
+
+    # Resolve property context from DB if needed
+    neighborhood = req.neighborhood
+    sqft = req.sqft
+    lot_size = req.lot_size_sqft
+    beds = req.beds
+    baths = req.baths
+    year_built = req.year_built
+    address = req.address
+    zip_code = req.zip_code
+
+    if _state.db:
+        nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=50)
+        if nearest:
+            if not neighborhood:
+                neighborhood = nearest.get("neighborhood")
+            if sqft is None:
+                sqft = nearest.get("sqft")
+            if lot_size is None:
+                lot_size = nearest.get("lot_size_sqft")
+            if beds is None:
+                beds = nearest.get("beds")
+            if baths is None:
+                baths = nearest.get("baths")
+            if year_built is None:
+                year_built = nearest.get("year_built")
+            if not address:
+                address = nearest.get("address")
+            if not zip_code:
+                zip_code = nearest.get("zip_code")
+
+    if not neighborhood and _state.geocoder:
+        neighborhood = _state.geocoder.geocode_point(req.latitude, req.longitude)
+        if not neighborhood:
+            neighborhood = _state.geocoder.geocode_nearest(req.latitude, req.longitude)
+    if not neighborhood:
+        neighborhood = "Berkeley"
+
+    property_context = {
+        "latitude": req.latitude,
+        "longitude": req.longitude,
+        "address": address or req.address,
+        "neighborhood": neighborhood,
+        "zip_code": zip_code or "94702",
+        "beds": beds,
+        "baths": baths,
+        "sqft": sqft,
+        "lot_size_sqft": lot_size,
+        "year_built": year_built,
+        "property_type": req.property_type,
+    }
+
+    result = _state.faketor.chat(
+        message=req.message,
+        history=req.history,
+        property_context=property_context,
+        tool_executor=_faketor_tool_executor,
+    )
+
+    return result
+
+
 # --- Comparables ---
 
 
@@ -640,6 +1230,75 @@ def _prediction_to_dict(result) -> dict:
         "base_value": result.base_value,
         "feature_contributions": result.feature_contributions,
     }
+
+
+def _development_potential_to_dict(result) -> dict:
+    """Convert DevelopmentPotential to JSON-serializable dict."""
+    resp: dict = {}
+
+    if result.zoning:
+        resp["zoning"] = {
+            "zone_class": result.zoning.zone_class,
+            "zone_desc": result.zoning.zone_desc,
+            "general_plan": result.zoning.general_plan,
+        }
+    else:
+        resp["zoning"] = None
+
+    if result.zone_rule:
+        resp["zone_rule"] = {
+            "max_lot_coverage_pct": result.zone_rule.max_lot_coverage_pct,
+            "max_height_ft": result.zone_rule.max_height_ft,
+            "is_hillside": result.zone_rule.is_hillside,
+            "residential": result.zone_rule.residential,
+        }
+    else:
+        resp["zone_rule"] = None
+
+    if result.units:
+        resp["units"] = {
+            "base_max_units": result.units.base_max_units,
+            "middle_housing_eligible": result.units.middle_housing_eligible,
+            "middle_housing_max_units": result.units.middle_housing_max_units,
+            "effective_max_units": result.units.effective_max_units,
+        }
+    else:
+        resp["units"] = None
+
+    if result.adu:
+        resp["adu"] = {
+            "eligible": result.adu.eligible,
+            "max_adu_sqft": result.adu.max_adu_sqft,
+            "remaining_lot_coverage_sqft": result.adu.remaining_lot_coverage_sqft,
+            "notes": result.adu.notes,
+        }
+    else:
+        resp["adu"] = None
+
+    if result.sb9:
+        resp["sb9"] = {
+            "eligible": result.sb9.eligible,
+            "can_split": result.sb9.can_split,
+            "resulting_lot_sizes": result.sb9.resulting_lot_sizes,
+            "max_total_units": result.sb9.max_total_units,
+            "notes": result.sb9.notes,
+        }
+    else:
+        resp["sb9"] = None
+
+    resp["beso"] = result.beso or []
+
+    resp["improvements"] = [
+        {
+            "category": imp.category,
+            "avg_job_value": imp.avg_job_value,
+            "avg_ppsf_premium_pct": imp.avg_ppsf_premium_pct,
+            "sample_count": imp.sample_count,
+        }
+        for imp in result.improvements
+    ]
+
+    return resp
 
 
 def _sale_to_listing(prop: dict, neighborhood: str | None = None) -> dict:

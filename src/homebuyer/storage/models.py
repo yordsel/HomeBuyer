@@ -115,6 +115,25 @@ class BuildingPermit:
 
 
 @dataclass
+class BESORecord:
+    """A BESO (Building Energy Saving Ordinance) record from Berkeley Open Data.
+
+    Tracks energy benchmarking data for commercial and large residential
+    buildings. Required at time of sale since Jan 1, 2026.
+    """
+
+    beso_id: str
+    building_address: str
+    beso_property_type: Optional[str] = None
+    floor_area: Optional[int] = None
+    energy_star_score: Optional[int] = None
+    site_eui: Optional[float] = None
+    benchmark_status: Optional[str] = None
+    assessment_status: Optional[str] = None
+    reporting_year: Optional[int] = None
+
+
+@dataclass
 class CollectionResult:
     """Result summary from a data collection run."""
 

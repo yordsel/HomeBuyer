@@ -8,15 +8,23 @@ import { CompsTable } from '../components/CompsTable';
 import { PredictMap } from '../components/PredictMap';
 import { ClickableMap } from '../components/ClickableMap';
 import { PropertyDetailsForm } from '../components/PropertyDetailsForm';
+import { PotentialSummaryCard } from '../components/PotentialSummaryCard';
+import { usePropertyContext } from '../context/PropertyContext';
 import type {
   ListingPredictionResponse,
   PredictMode,
   MapClickResponse,
   ManualPredictPayload,
   NeighborhoodGeoJson,
+  PageId,
 } from '../types';
 
-export function PredictPage() {
+interface PredictPageProps {
+  onNavigate: (page: PageId) => void;
+}
+
+export function PredictPage({ onNavigate }: PredictPageProps) {
+  const { setLastProperty } = usePropertyContext();
   // Shared state
   const [mode, setMode] = useState<PredictMode>('map');
   const [loading, setLoading] = useState(false);
@@ -57,6 +65,11 @@ export function PredictPage() {
     try {
       const data = await api.predictListing(trimmed);
       setResult(data);
+      setLastProperty({
+        latitude: data.listing.latitude,
+        longitude: data.listing.longitude,
+        address: data.listing.address,
+      });
       toast.success('Prediction complete');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -84,6 +97,11 @@ export function PredictPage() {
           listing: data.listing!,
           prediction: data.prediction!,
           comparables: data.comparables!,
+        });
+        setLastProperty({
+          latitude: data.listing!.latitude,
+          longitude: data.listing!.longitude,
+          address: data.listing!.address,
         });
         toast.success('Prediction complete');
       } else if (data.status === 'needs_details') {
@@ -119,33 +137,39 @@ export function PredictPage() {
         });
 
         const locationInfo = mapClickResult?.location_info;
+        const manualListing = {
+          address: locationInfo?.address || 'Selected Location',
+          city: 'Berkeley',
+          state: 'CA',
+          zip_code: payload.zip_code || '',
+          latitude: payload.latitude || locationInfo?.latitude || 0,
+          longitude: payload.longitude || locationInfo?.longitude || 0,
+          beds: payload.beds ?? null,
+          baths: payload.baths ?? null,
+          sqft: payload.sqft ?? null,
+          year_built: payload.year_built ?? null,
+          lot_size_sqft: payload.lot_size_sqft ?? null,
+          property_type:
+            payload.property_type || 'Single Family Residential',
+          list_price: payload.list_price ?? null,
+          neighborhood: payload.neighborhood,
+          redfin_url: '',
+          property_id: null,
+          sale_date: null,
+          hoa_per_month: payload.hoa_per_month ?? null,
+          garage_spaces: null,
+          last_sale_price: null,
+          last_sale_date: null,
+        };
         setResult({
-          listing: {
-            address: locationInfo?.address || 'Selected Location',
-            city: 'Berkeley',
-            state: 'CA',
-            zip_code: payload.zip_code || '',
-            latitude: payload.latitude || locationInfo?.latitude || 0,
-            longitude: payload.longitude || locationInfo?.longitude || 0,
-            beds: payload.beds ?? null,
-            baths: payload.baths ?? null,
-            sqft: payload.sqft ?? null,
-            year_built: payload.year_built ?? null,
-            lot_size_sqft: payload.lot_size_sqft ?? null,
-            property_type:
-              payload.property_type || 'Single Family Residential',
-            list_price: payload.list_price ?? null,
-            neighborhood: payload.neighborhood,
-            redfin_url: '',
-            property_id: null,
-            sale_date: null,
-            hoa_per_month: payload.hoa_per_month ?? null,
-            garage_spaces: null,
-            last_sale_price: null,
-            last_sale_date: null,
-          },
+          listing: manualListing,
           prediction: data.prediction,
           comparables: comps,
+        });
+        setLastProperty({
+          latitude: manualListing.latitude,
+          longitude: manualListing.longitude,
+          address: manualListing.address,
         });
         toast.success('Prediction complete');
       } catch (err) {
@@ -205,7 +229,13 @@ export function PredictPage() {
             listing={result.listing}
           />
 
-          {/* Price Breakdown (SHAP contributions) */}
+          {/* Development Potential Summary */}
+          <PotentialSummaryCard
+            listing={result.listing}
+            onViewDetails={() => onNavigate('potential')}
+          />
+
+          {/* Price Breakdown */}
           {result.prediction.feature_contributions &&
             result.prediction.base_value != null && (
               <PriceBreakdown
@@ -215,7 +245,7 @@ export function PredictPage() {
               />
             )}
 
-          {/* Comps */}
+          {/* Comparable Sales */}
           <CompsTable comps={result.comparables} />
         </div>
       )}
@@ -293,7 +323,7 @@ export function PredictPage() {
               )}
           </div>
 
-          {/* Right: Prediction results panel */}
+          {/* Right: Prediction results panel (40% width) */}
           {(result || error) && (
             <div
               className="w-2/5 shrink-0 overflow-y-auto rounded-xl"

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 # ---------------------------------------------------------------------------
 # Project paths (relative to project root)
@@ -51,10 +51,18 @@ FRED_ECONOMIC_SERIES: dict[str, str] = {
 # Census ACS API
 CENSUS_ACS_BASE_URL = "https://api.census.gov/data"
 
+# Berkeley Open Data (Socrata) — BESO energy benchmarking
+BERKELEY_OPENDATA_BESO_URL = "https://data.cityofberkeley.info/resource/8k7b-6awf.json"
+
 # ---------------------------------------------------------------------------
 # ATTOM Property Data API (optional — enables auto-fill for map-click)
 # ---------------------------------------------------------------------------
 ATTOM_API_KEY = os.environ.get("ATTOM_API_KEY", "")
+
+# ---------------------------------------------------------------------------
+# Anthropic Claude API (optional — enables AI-powered property summaries)
+# ---------------------------------------------------------------------------
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # Accela Citizen Access (Berkeley building permits)

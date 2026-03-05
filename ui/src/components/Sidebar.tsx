@@ -5,6 +5,7 @@ import {
   TrendingUp,
   Brain,
   DollarSign,
+  Layers,
   ChevronsLeft,
   ChevronsRight,
 } from 'lucide-react';
@@ -21,6 +22,7 @@ const NAV_ITEMS: { id: PageId; label: string; icon: typeof Search }[] = [
   { id: 'market', label: 'Market', icon: TrendingUp },
   { id: 'model', label: 'Model', icon: Brain },
   { id: 'afford', label: 'Affordability', icon: DollarSign },
+  { id: 'potential', label: 'Potential', icon: Layers },
 ];
 
 export function Sidebar({ currentPage, onNavigate }: SidebarProps) {

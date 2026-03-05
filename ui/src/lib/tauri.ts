@@ -11,6 +11,10 @@ import type {
   DatabaseStatus,
   ManualPredictPayload,
   MapClickResponse,
+  DevelopmentPotentialResponse,
+  PotentialSummaryResponse,
+  ImprovementSimResponse,
+  FaketorChatResponse,
 } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -200,4 +204,75 @@ export async function getComparables(payload: {
 }): Promise<ComparableProperty[]> {
   if (isTauri) return tauriInvoke('get_comparables', { payload });
   return apiPost('/api/comps', payload);
+}
+
+// ============================================================================
+// Development Potential
+// ============================================================================
+
+export async function getPropertyPotential(payload: {
+  latitude: number;
+  longitude: number;
+  address?: string;
+  lot_size_sqft?: number;
+  sqft?: number;
+}): Promise<DevelopmentPotentialResponse> {
+  if (isTauri) return tauriInvoke('get_property_potential', { payload });
+  return apiPost('/api/property/potential', payload);
+}
+
+export async function getPropertyPotentialSummary(payload: {
+  latitude: number;
+  longitude: number;
+  address?: string;
+  lot_size_sqft?: number;
+  sqft?: number;
+  neighborhood?: string;
+  beds?: number;
+  baths?: number;
+  year_built?: number;
+}): Promise<PotentialSummaryResponse> {
+  if (isTauri) return tauriInvoke('get_property_potential_summary', { payload });
+  return apiPost('/api/property/potential/summary', payload);
+}
+
+export async function getImprovementSimulation(payload: {
+  latitude: number;
+  longitude: number;
+  address?: string;
+  neighborhood?: string;
+  zip_code?: string;
+  beds?: number;
+  baths?: number;
+  sqft?: number;
+  lot_size_sqft?: number;
+  year_built?: number;
+  property_type?: string;
+  hoa_per_month?: number;
+}): Promise<ImprovementSimResponse> {
+  if (isTauri) return tauriInvoke('get_improvement_simulation', { payload });
+  return apiPost('/api/property/improvement-sim', payload);
+}
+
+// ============================================================================
+// Faketor Chat
+// ============================================================================
+
+export async function sendFaketorMessage(payload: {
+  latitude: number;
+  longitude: number;
+  message: string;
+  history?: { role: string; content: string }[];
+  address?: string;
+  neighborhood?: string;
+  zip_code?: string;
+  beds?: number;
+  baths?: number;
+  sqft?: number;
+  lot_size_sqft?: number;
+  year_built?: number;
+  property_type?: string;
+}): Promise<FaketorChatResponse> {
+  if (isTauri) return tauriInvoke('faketor_chat', { payload });
+  return apiPost('/api/faketor/chat', payload);
 }

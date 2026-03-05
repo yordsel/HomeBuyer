@@ -6,6 +6,7 @@ zoning polygon boundaries.
 """
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +20,15 @@ logger = logging.getLogger(__name__)
 
 # Default path to the zoning GeoJSON
 DEFAULT_ZONING_PATH = GEO_DIR / "berkeley_zoning.geojson"
+
+
+@dataclass
+class ZoningInfo:
+    """Full zoning metadata for a point location."""
+
+    zone_class: str  # e.g. "R-1", "R-2A", "C-W"
+    zone_desc: Optional[str] = None  # e.g. "Single Family Residential"
+    general_plan: Optional[str] = None  # e.g. "LDR" (Low Density Residential)
 
 
 class ZoningClassifier:
@@ -75,6 +85,46 @@ class ZoningClassifier:
         for idx in candidates:
             if self.boundaries.geometry.iloc[idx].contains(point):
                 return self.boundaries.iloc[idx]["ZONECLASS"]
+
+        return None
+
+    def classify_point_full(self, lat: float, lon: float) -> Optional[ZoningInfo]:
+        """Get full zoning metadata for a given point.
+
+        Extracts ZONECLASS, ZONEDESC, and GENPLAN from the matched polygon.
+
+        Args:
+            lat: Latitude (y coordinate).
+            lon: Longitude (x coordinate).
+
+        Returns:
+            A ZoningInfo with zone class, description, and general plan,
+            or None if the point is outside all zoning boundaries.
+        """
+        point = Point(lon, lat)
+
+        candidates = list(
+            self._sindex.query(point.buffer(0.001), predicate="intersects")
+        )
+
+        for idx in candidates:
+            if self.boundaries.geometry.iloc[idx].contains(point):
+                row = self.boundaries.iloc[idx]
+                zone_class = row.get("ZONECLASS")
+                if not zone_class or (isinstance(zone_class, float)):
+                    continue
+                zone_desc = row.get("ZONEDESC")
+                general_plan = row.get("GENPLAN")
+                # Clean NaN values
+                if isinstance(zone_desc, float):
+                    zone_desc = None
+                if isinstance(general_plan, float):
+                    general_plan = None
+                return ZoningInfo(
+                    zone_class=zone_class,
+                    zone_desc=zone_desc,
+                    general_plan=general_plan,
+                )
 
         return None
 

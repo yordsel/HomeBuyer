@@ -6,6 +6,9 @@ import { NeighborhoodsPage } from './pages/Neighborhoods';
 import { MarketPage } from './pages/Market';
 import { ModelInfoPage } from './pages/ModelInfo';
 import { AffordPage } from './pages/Afford';
+import { PotentialPage } from './pages/Potential';
+import { PropertyProvider } from './context/PropertyContext';
+import { FaketorFAB } from './components/FaketorFAB';
 import type { PageId } from './types';
 
 function App() {
@@ -14,7 +17,7 @@ function App() {
   function renderPage() {
     switch (currentPage) {
       case 'predict':
-        return <PredictPage />;
+        return <PredictPage onNavigate={setCurrentPage} />;
       case 'neighborhoods':
         return <NeighborhoodsPage />;
       case 'market':
@@ -23,23 +26,28 @@ function App() {
         return <ModelInfoPage />;
       case 'afford':
         return <AffordPage />;
+      case 'potential':
+        return <PotentialPage />;
       default:
-        return <PredictPage />;
+        return <PredictPage onNavigate={setCurrentPage} />;
     }
   }
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
-      <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
+    <PropertyProvider>
+      <div className="flex h-screen bg-gray-50 overflow-hidden">
+        <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
 
-      <main className="flex-1 overflow-y-auto">
-        <div className="p-6 lg:p-8">
-          {renderPage()}
-        </div>
-      </main>
+        <main className="flex-1 overflow-y-auto">
+          <div className="p-6 lg:p-8">
+            {renderPage()}
+          </div>
+        </main>
 
-      <Toaster position="bottom-right" richColors closeButton />
-    </div>
+        <Toaster position="bottom-right" richColors closeButton />
+      </div>
+      <FaketorFAB />
+    </PropertyProvider>
   );
 }
 

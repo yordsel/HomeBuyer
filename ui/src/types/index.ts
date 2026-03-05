@@ -288,7 +288,130 @@ export interface DatabaseStatus {
 }
 
 // ---------------------------------------------------------------------------
+// Development Potential
+// ---------------------------------------------------------------------------
+
+export interface ZoningDetail {
+  zone_class: string;
+  zone_desc: string | null;
+  general_plan: string | null;
+}
+
+export interface ZoneRuleDetail {
+  max_lot_coverage_pct: number;
+  max_height_ft: number;
+  is_hillside: boolean;
+  residential: boolean;
+}
+
+export interface UnitPotential {
+  base_max_units: number;
+  middle_housing_eligible: boolean;
+  middle_housing_max_units: number | null;
+  effective_max_units: number;
+}
+
+export interface ADUFeasibility {
+  eligible: boolean;
+  max_adu_sqft: number;
+  remaining_lot_coverage_sqft: number | null;
+  notes: string;
+}
+
+export interface SB9Eligibility {
+  eligible: boolean;
+  can_split: boolean;
+  resulting_lot_sizes: number[] | null;
+  max_total_units: number;
+  notes: string;
+}
+
+export interface BESORecordData {
+  beso_id: string;
+  building_address: string;
+  beso_property_type: string | null;
+  floor_area: number | null;
+  energy_star_score: number | null;
+  site_eui: number | null;
+  benchmark_status: string | null;
+  assessment_status: string | null;
+  reporting_year: number | null;
+}
+
+export interface ImprovementROI {
+  category: string;
+  avg_job_value: number;
+  avg_ppsf_premium_pct: number;
+  sample_count: number;
+}
+
+export interface DevelopmentPotentialResponse {
+  zoning: ZoningDetail | null;
+  zone_rule: ZoneRuleDetail | null;
+  units: UnitPotential | null;
+  adu: ADUFeasibility | null;
+  sb9: SB9Eligibility | null;
+  beso: BESORecordData[];
+  improvements: ImprovementROI[];
+}
+
+// ---------------------------------------------------------------------------
+// Improvement Simulation
+// ---------------------------------------------------------------------------
+
+export interface ImprovementSimCategory {
+  category: string;
+  avg_permit_cost: number;
+  ml_predicted_delta: number;
+  ml_roi_ratio: number;
+  correlation_premium_pct: number | null;
+  sample_count: number;
+}
+
+export interface ImprovementSimResponse {
+  current_price: number;
+  improved_price: number;
+  total_delta: number;
+  total_cost: number;
+  roi_ratio: number;
+  categories: ImprovementSimCategory[];
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// AI Potential Summary
+// ---------------------------------------------------------------------------
+
+export interface AIPotentialSummary {
+  summary: string;
+  recommendation: string;
+  caveats: string[];
+  highlights: string[];
+}
+
+export interface PotentialSummaryResponse {
+  potential: DevelopmentPotentialResponse;
+  ai_summary: AIPotentialSummary | null;
+  ai_error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Faketor Chat
+// ---------------------------------------------------------------------------
+
+export interface FaketorMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface FaketorChatResponse {
+  reply: string;
+  tool_calls?: { name: string; input: Record<string, unknown> }[];
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
-export type PageId = 'predict' | 'neighborhoods' | 'market' | 'model' | 'afford';
+export type PageId = 'predict' | 'neighborhoods' | 'market' | 'model' | 'afford' | 'potential';

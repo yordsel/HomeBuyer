@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from homebuyer.storage.models import (
+    BESORecord,
     BuildingPermit,
     CensusIncome,
     CollectionResult,
@@ -165,6 +166,24 @@ CREATE TABLE IF NOT EXISTS building_permits (
 CREATE INDEX IF NOT EXISTS idx_permits_address ON building_permits(address);
 CREATE INDEX IF NOT EXISTS idx_permits_filed ON building_permits(filed_date);
 CREATE INDEX IF NOT EXISTS idx_permits_type ON building_permits(permit_type);
+
+CREATE TABLE IF NOT EXISTS beso_records (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    beso_id             TEXT NOT NULL,
+    building_address    TEXT NOT NULL,
+    beso_property_type  TEXT,
+    floor_area          INTEGER,
+    energy_star_score   INTEGER,
+    site_eui            REAL,
+    benchmark_status    TEXT,
+    assessment_status   TEXT,
+    reporting_year      INTEGER,
+    collected_at        TEXT DEFAULT (datetime('now')),
+    UNIQUE(beso_id, reporting_year)
+);
+
+CREATE INDEX IF NOT EXISTS idx_beso_address ON beso_records(building_address);
+CREATE INDEX IF NOT EXISTS idx_beso_year ON beso_records(reporting_year);
 
 CREATE TABLE IF NOT EXISTS collection_runs (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -562,6 +581,67 @@ class Database:
         return affected
 
     # ------------------------------------------------------------------
+    # BESO Records
+    # ------------------------------------------------------------------
+
+    def upsert_beso_records_batch(self, records: list[BESORecord]) -> int:
+        """Insert/update a batch of BESO records. Returns affected rows."""
+        affected = 0
+        sql = """
+            INSERT INTO beso_records (
+                beso_id, building_address, beso_property_type, floor_area,
+                energy_star_score, site_eui, benchmark_status,
+                assessment_status, reporting_year
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(beso_id, reporting_year) DO UPDATE SET
+                building_address = excluded.building_address,
+                beso_property_type = excluded.beso_property_type,
+                floor_area = excluded.floor_area,
+                energy_star_score = excluded.energy_star_score,
+                site_eui = excluded.site_eui,
+                benchmark_status = excluded.benchmark_status,
+                assessment_status = excluded.assessment_status
+        """
+        with self.conn:
+            for rec in records:
+                cursor = self.conn.execute(
+                    sql,
+                    (
+                        rec.beso_id,
+                        rec.building_address,
+                        rec.beso_property_type,
+                        rec.floor_area,
+                        rec.energy_star_score,
+                        rec.site_eui,
+                        rec.benchmark_status,
+                        rec.assessment_status,
+                        rec.reporting_year,
+                    ),
+                )
+                if cursor.rowcount > 0:
+                    affected += 1
+        return affected
+
+    def lookup_beso_by_address(self, address: str) -> list[dict]:
+        """Look up BESO records by address (case-insensitive).
+
+        Returns all matching records sorted by reporting_year descending.
+        """
+        normalized = address.strip().upper()
+        rows = self.conn.execute(
+            """
+            SELECT beso_id, building_address, beso_property_type, floor_area,
+                   energy_star_score, site_eui, benchmark_status,
+                   assessment_status, reporting_year
+            FROM beso_records
+            WHERE UPPER(TRIM(building_address)) = ?
+            ORDER BY reporting_year DESC
+            """,
+            (normalized,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
     # Building Permits
     # ------------------------------------------------------------------
 
@@ -775,6 +855,24 @@ class Database:
             "min_year": row[2],
             "max_year": row[3],
         }
+
+        # BESO records
+        beso_exists = self.conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='beso_records'"
+        ).fetchone()[0]
+        if beso_exists:
+            row = self.conn.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT UPPER(TRIM(building_address))), "
+                "MIN(reporting_year), MAX(reporting_year) FROM beso_records"
+            ).fetchone()
+            stats["beso_records"] = {
+                "count": row[0],
+                "addresses": row[1],
+                "min_year": row[2],
+                "max_year": row[3],
+            }
+        else:
+            stats["beso_records"] = {"count": 0, "addresses": 0}
 
         # Building permits
         permits_exists = self.conn.execute(

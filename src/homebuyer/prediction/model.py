@@ -384,6 +384,172 @@ class ModelArtifact:
         # Fallback: use the raw feature name
         return feat_name.replace("_", " ").title()
 
+    def simulate_improvements(
+        self,
+        db: Database,
+        property_dict: dict,
+        improvements: list[dict],
+    ) -> dict:
+        """Simulate the effect of improvements on predicted price.
+
+        Takes the property's current features, modifies permit-related features
+        to simulate each improvement, and re-predicts. Returns the predicted
+        price delta for each improvement individually and combined.
+
+        Args:
+            db: Database connection.
+            property_dict: Property dict (same format as predict_single).
+            improvements: List of dicts with keys:
+                - category: str (e.g. "kitchen", "bathroom", "adu")
+                - estimated_cost: float (permit job value)
+
+        Returns:
+            Dict with:
+                - current_price: int
+                - improved_price: int (all improvements combined)
+                - total_delta: int
+                - total_cost: int
+                - roi_ratio: float (delta / cost)
+                - individual: list of per-improvement dicts
+        """
+        from homebuyer.prediction.features import (
+            _MODERNIZATION_CATEGORIES,
+            _MAINTENANCE_CATEGORIES,
+        )
+
+        # Get current prediction
+        current = self.predict_single(db, property_dict)
+        current_price = current.predicted_price
+
+        # Build feature vector for the current property
+        zoning_classifier = None
+        try:
+            from homebuyer.processing.zoning import ZoningClassifier
+            zoning_classifier = ZoningClassifier()
+        except (FileNotFoundError, ImportError):
+            pass
+
+        builder = FeatureBuilder(db, zoning_classifier=zoning_classifier)
+        builder.set_encoders(self.label_encoders)
+
+        # Ensure caches are loaded
+        if builder._market_cache is None:
+            builder._load_market_cache()
+        if builder._rate_cache is None:
+            builder._load_rate_cache()
+        if builder._econ_cache is None:
+            builder._load_econ_cache()
+        if builder._income_cache is None:
+            builder._load_income_cache()
+        if builder._permit_cache is None:
+            builder._load_permit_cache()
+
+        base_X = builder.build_single_prediction(property_dict.copy())
+
+        individual_results = []
+        total_cost = 0
+
+        for imp in improvements:
+            cat = imp["category"].lower()
+            cost = imp.get("estimated_cost", 0)
+            total_cost += cost
+
+            # Simulate: modify permit features on a copy
+            sim_X = base_X.copy()
+
+            # Increment permit counts
+            if "permit_count_5yr" in sim_X.columns:
+                cur = sim_X["permit_count_5yr"].iloc[0]
+                sim_X.iloc[0, sim_X.columns.get_loc("permit_count_5yr")] = (
+                    (cur if pd.notna(cur) else 0) + 1
+                )
+            if "permit_count_total" in sim_X.columns:
+                cur = sim_X["permit_count_total"].iloc[0]
+                sim_X.iloc[0, sim_X.columns.get_loc("permit_count_total")] = (
+                    (cur if pd.notna(cur) else 0) + 1
+                )
+
+            # Set years_since_last_permit to 0 (just done)
+            if "years_since_last_permit" in sim_X.columns:
+                sim_X.iloc[0, sim_X.columns.get_loc("years_since_last_permit")] = 0.0
+
+            # Update composite scores based on category
+            if cat in _MODERNIZATION_CATEGORIES:
+                if "modernization_recency" in sim_X.columns:
+                    cur = sim_X["modernization_recency"].iloc[0]
+                    # decay=1.0 for brand new (0 years ago)
+                    sim_X.iloc[0, sim_X.columns.get_loc("modernization_recency")] = (
+                        (cur if pd.notna(cur) else 0) + cost * 1.0
+                    )
+            elif cat in _MAINTENANCE_CATEGORIES:
+                if "maintenance_value" in sim_X.columns:
+                    cur = sim_X["maintenance_value"].iloc[0]
+                    sim_X.iloc[0, sim_X.columns.get_loc("maintenance_value")] = (
+                        (cur if pd.notna(cur) else 0) + cost
+                    )
+
+            # Predict with simulated features
+            y_pred, _, _ = self.predict(sim_X)
+            sim_price = int(round(y_pred[0], -3))
+            delta = sim_price - current_price
+
+            individual_results.append({
+                "category": imp["category"],
+                "estimated_cost": int(cost),
+                "predicted_delta": delta,
+                "roi_ratio": round(delta / cost, 2) if cost > 0 else 0,
+            })
+
+        # Combined simulation: apply ALL improvements together
+        combined_X = base_X.copy()
+        total_mod_cost = 0
+        total_maint_cost = 0
+        n_improvements = len(improvements)
+
+        for imp in improvements:
+            cat = imp["category"].lower()
+            cost = imp.get("estimated_cost", 0)
+            if cat in _MODERNIZATION_CATEGORIES:
+                total_mod_cost += cost
+            elif cat in _MAINTENANCE_CATEGORIES:
+                total_maint_cost += cost
+
+        if "permit_count_5yr" in combined_X.columns:
+            cur = combined_X["permit_count_5yr"].iloc[0]
+            combined_X.iloc[0, combined_X.columns.get_loc("permit_count_5yr")] = (
+                (cur if pd.notna(cur) else 0) + n_improvements
+            )
+        if "permit_count_total" in combined_X.columns:
+            cur = combined_X["permit_count_total"].iloc[0]
+            combined_X.iloc[0, combined_X.columns.get_loc("permit_count_total")] = (
+                (cur if pd.notna(cur) else 0) + n_improvements
+            )
+        if "years_since_last_permit" in combined_X.columns:
+            combined_X.iloc[0, combined_X.columns.get_loc("years_since_last_permit")] = 0.0
+        if "modernization_recency" in combined_X.columns:
+            cur = combined_X["modernization_recency"].iloc[0]
+            combined_X.iloc[0, combined_X.columns.get_loc("modernization_recency")] = (
+                (cur if pd.notna(cur) else 0) + total_mod_cost
+            )
+        if "maintenance_value" in combined_X.columns:
+            cur = combined_X["maintenance_value"].iloc[0]
+            combined_X.iloc[0, combined_X.columns.get_loc("maintenance_value")] = (
+                (cur if pd.notna(cur) else 0) + total_maint_cost
+            )
+
+        y_combined, _, _ = self.predict(combined_X)
+        improved_price = int(round(y_combined[0], -3))
+        total_delta = improved_price - current_price
+
+        return {
+            "current_price": current_price,
+            "improved_price": improved_price,
+            "total_delta": total_delta,
+            "total_cost": int(total_cost),
+            "roi_ratio": round(total_delta / total_cost, 2) if total_cost > 0 else 0,
+            "individual": individual_results,
+        }
+
     def format_info(self) -> str:
         """Format model metadata as a human-readable string."""
         lines = []
