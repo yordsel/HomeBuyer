@@ -43,10 +43,10 @@ _PROPERTY_FEATURES = [
 ]
 
 # Derived features computed from property data
+# Removed: property_age (r=-1.0 with year_built — perfectly redundant),
+#          sale_quarter (r=0.97 with sale_month, zero importance).
 _DERIVED_FEATURES = [
-    "property_age",
     "sale_month",
-    "sale_quarter",
     "bed_bath_ratio",
     "sqft_per_bed",
     "lot_to_living_ratio",
@@ -61,55 +61,83 @@ _CATEGORICAL_FEATURES = [
 ]
 
 # Market context features (joined from market_metrics)
-# Note: market_inventory and market_months_supply were removed — they exhibit
-# regime shift between train and test periods, hurting generalization.
+# Removed: market_inventory, market_months_supply (regime shift),
+#          market_median_dom (negative importance).
 _MARKET_FEATURES = [
     "market_median_price",
     "market_sale_to_list",
     "market_sold_above_pct",
-    "market_median_dom",
 ]
 
 # Mortgage rate features (joined from mortgage_rates)
-# Note: rate_15yr removed — collinear with rate_30yr, adds noise.
+# Removed: rate_15yr (collinear with rate_30yr).
 _RATE_FEATURES = [
     "rate_30yr",
 ]
 
 # Economic indicator features (joined from economic_indicators)
-# Note: Removed nasdaq_3mo_return, nasdaq_6mo_return (temporal regime shift),
+# Removed: nasdaq_3mo_return, nasdaq_6mo_return (temporal regime shift),
 # treasury_mortgage_spread (derived + collinear), cpi_sf (raw level, keep YoY),
-# unemployment_rate (temporal regime shift).
+# unemployment_rate (temporal regime shift),
+# treasury_10yr (r=0.98 with rate_30yr — redundant),
+# cpi_sf_yoy (negative importance, 48% temporal shift),
+# nasdaq_level (45% temporal shift between train/test — unreliable).
 _ECONOMIC_FEATURES = [
-    "nasdaq_level",
-    "treasury_10yr",
     "consumer_sentiment",
-    "cpi_sf_yoy",
 ]
 
 # Census income features (joined from census_income)
+# Removed: price_to_income (100% NaN — never populated, dead weight).
 _INCOME_FEATURES = [
     "zip_median_income",
-    "price_to_income",
 ]
 
 # Building permit features (joined from building_permits)
+# Removed after analysis:
+#   - Individual binary flags (has_kitchen_remodel, has_bath_remodel, etc.) —
+#     too sparse (1-8% positive), zero or negative importance. The composite
+#     scores capture the same signal better.
+#   - total_permit_value — r=0.97 with modernization_value, negative importance.
+#   - modernization_value — negative importance, collinear with total_permit_value.
+#     Replaced by modernization_recency which weights by recency.
+#   - years_since_roof — negative importance.
+#   - years_since_kitchen, years_since_bath — >98% NaN, zero importance.
+# Kept:
+#   - permit_count_5yr, permit_count_total (aggregate activity signals)
+#   - years_since_last_permit (recency signal)
+#   - maintenance_value (separates upkeep from value-add)
+#   - modernization_recency (best composite: weights value × recency)
 _PERMIT_FEATURES = [
     "permit_count_5yr",        # Permits filed in 5 years before sale
     "permit_count_total",      # Total permits on record for this address
-    "total_permit_value",      # Sum of job_value for all permits
-    "has_major_renovation",    # 1 if any permit description has major work keywords
     "years_since_last_permit", # Years between sale_date and most recent permit
-    "recent_permit_value",     # Job value of most recent permit (0 if none)
+    "maintenance_value",       # $ invested in upkeep (roof, HVAC, plumbing, termite)
+    "modernization_recency",   # Recency-weighted modernization (higher = more recent + more $)
 ]
 
-# Keywords indicating major renovation work in permit descriptions
-_MAJOR_WORK_KEYWORDS = [
-    "addition", "adu", "accessory dwelling", "remodel", "renovation",
-    "kitchen", "bathroom", "seismic", "retrofit", "foundation",
-    "new construction", "rebuild", "convert", "expand", "extension",
-    "second story", "2nd story", "solar", "electrical panel",
+# Permit category classification by description keywords
+# Order matters: first match wins, so put more specific patterns first
+_PERMIT_CATEGORIES: list[tuple[str, list[str]]] = [
+    ("adu", ["adu", "accessory dwelling", "convert", "duplex"]),
+    ("addition", ["addition", "expand", "extension", "2nd story", "second story", "new construction", "rebuild"]),
+    ("kitchen", ["kitchen"]),
+    ("bathroom", ["bathroom", "bath remodel", "bath renovation"]),
+    ("remodel", ["remodel", "renovation", "renovate", "partial renovation"]),
+    ("seismic", ["seismic", "retrofit", "foundation replacement", "foundation repair"]),
+    ("roof", ["roof", "roofing", "shingle"]),
+    ("solar", ["solar", "pv ", "photovoltaic", "ev charger", "energy storage"]),
+    ("electrical", ["electrical panel", "panel upgrade", "amp service", "200 amp", "amp upgrade", "rewire"]),
+    ("hvac", ["furnace", "hvac", "heater", "heating", "air conditioning", "a/c", "ducting"]),
+    ("plumbing", ["plumbing", "sewer", "water line", "water heater", "tankless"]),
+    ("windows_doors", ["window", "door", "sliding door", "skylight"]),
+    ("exterior", ["fence", "deck", "patio", "siding", "stucco", "paint"]),
+    ("termite", ["termite", "pest", "dry rot"]),
 ]
+
+# Categories considered "modernization" (value-adding improvements)
+_MODERNIZATION_CATEGORIES = {"kitchen", "bathroom", "remodel", "addition", "adu", "solar"}
+# Categories considered "maintenance" (upkeep, not value-adding)
+_MAINTENANCE_CATEGORIES = {"roof", "hvac", "plumbing", "termite", "exterior"}
 
 ALL_FEATURE_NAMES = (
     _PROPERTY_FEATURES
@@ -352,18 +380,9 @@ class FeatureBuilder:
                 features[col] = np.nan
 
         # --- Derived features ---
-        # Property age
-        current_year = datetime.now().year
-        features["property_age"] = np.where(
-            features["year_built"].notna(),
-            current_year - features["year_built"],
-            np.nan,
-        )
-
         # Temporal features
         sale_dates = pd.to_datetime(df["sale_date"], errors="coerce")
         features["sale_month"] = sale_dates.dt.month.astype(float)
-        features["sale_quarter"] = sale_dates.dt.quarter.astype(float)
 
         # Interaction features
         features["bed_bath_ratio"] = np.where(
@@ -646,11 +665,17 @@ class FeatureBuilder:
         if not self._econ_cache:
             return result
 
-        # Map FRED series IDs to feature names
-        series_feature_map = {
+        # Map FRED series IDs to feature names — only include those
+        # that are in _ECONOMIC_FEATURES (others were removed for
+        # collinearity or temporal regime shift).
+        _ALL_SERIES_MAP = {
             "NASDAQCOM": "nasdaq_level",
             "GS10": "treasury_10yr",
             "UMCSENT": "consumer_sentiment",
+        }
+        series_feature_map = {
+            k: v for k, v in _ALL_SERIES_MAP.items()
+            if v in _ECONOMIC_FEATURES
         }
 
         for i, date_str in enumerate(sale_dates):
@@ -671,6 +696,8 @@ class FeatureBuilder:
                     result.iloc[i, result.columns.get_loc(feature_name)] = closest["value"]
 
             # Compute Bay Area CPI year-over-year change
+            if "cpi_sf_yoy" not in _ECONOMIC_FEATURES:
+                continue
             cpi_df = self._econ_cache.get("CUURA422SA0")
             if cpi_df is not None and not cpi_df.empty:
                 mask_now = cpi_df["observation_date"] <= sale_dt
@@ -809,18 +836,30 @@ class FeatureBuilder:
             len(self._permit_cache),
         )
 
+    @staticmethod
+    def _classify_permit(description: str) -> str:
+        """Classify a permit description into a work category.
+
+        Uses keyword matching against _PERMIT_CATEGORIES. First match wins,
+        so more specific categories (e.g. 'adu') are checked before broader
+        ones (e.g. 'remodel').
+
+        Returns category string or 'other' if no match.
+        """
+        desc_lower = description.lower()
+        for category, keywords in _PERMIT_CATEGORIES:
+            if any(kw in desc_lower for kw in keywords):
+                return category
+        return "other"
+
     def _join_permit_features(
         self, addresses: pd.Series, sale_dates: pd.Series
     ) -> pd.DataFrame:
         """Compute permit-derived features for each property sale.
 
-        For each sale, looks up all permits at that address and computes:
-        - permit_count_5yr: permits filed in the 5 years before the sale
-        - permit_count_total: total permits on record
-        - total_permit_value: sum of job_value across all permits
-        - has_major_renovation: 1 if any description contains major work keywords
-        - years_since_last_permit: years between sale and most recent permit
-        - recent_permit_value: job_value of the most recent permit
+        Classifies permits into work categories and computes aggregate,
+        composite, and recency features. Only computes features that are
+        currently in _PERMIT_FEATURES.
 
         Args:
             addresses: Series of street addresses.
@@ -829,12 +868,19 @@ class FeatureBuilder:
         Returns:
             DataFrame with permit feature columns, aligned to input index.
         """
+        active = set(_PERMIT_FEATURES)
         result = pd.DataFrame(index=addresses.index)
         for col in _PERMIT_FEATURES:
             result[col] = np.nan
 
         if not self._permit_cache:
             return result
+
+        # Columns that should be 0 (not NaN) when no permits exist
+        zero_cols = [c for c in [
+            "permit_count_5yr", "permit_count_total",
+            "maintenance_value", "modernization_recency",
+        ] if c in active]
 
         for i, (address, sale_dt) in enumerate(zip(addresses, sale_dates)):
             if pd.isna(address) or pd.isna(sale_dt):
@@ -844,12 +890,8 @@ class FeatureBuilder:
             permits = self._permit_cache.get(key, [])
 
             if not permits:
-                # Address has no permits — set counts to 0 (not NaN)
-                result.iloc[i, result.columns.get_loc("permit_count_5yr")] = 0
-                result.iloc[i, result.columns.get_loc("permit_count_total")] = 0
-                result.iloc[i, result.columns.get_loc("total_permit_value")] = 0
-                result.iloc[i, result.columns.get_loc("has_major_renovation")] = 0
-                result.iloc[i, result.columns.get_loc("recent_permit_value")] = 0
+                for col in zero_cols:
+                    result.iloc[i, result.columns.get_loc(col)] = 0
                 continue
 
             try:
@@ -858,61 +900,65 @@ class FeatureBuilder:
                 continue
 
             # Total permits
-            result.iloc[i, result.columns.get_loc("permit_count_total")] = len(permits)
+            if "permit_count_total" in active:
+                result.iloc[i, result.columns.get_loc("permit_count_total")] = len(permits)
 
-            # Total job value
-            total_value = sum(
-                p["job_value"] for p in permits if p["job_value"] is not None
-            )
-            result.iloc[i, result.columns.get_loc("total_permit_value")] = total_value
-
-            # Has major renovation
-            has_major = 0
+            # Classify each permit: (category, filed_timestamp, job_value)
+            classified: list[tuple[str, pd.Timestamp | None, float]] = []
             for p in permits:
-                desc = (p.get("description") or "").lower()
-                if any(kw in desc for kw in _MAJOR_WORK_KEYWORDS):
-                    has_major = 1
-                    break
-            result.iloc[i, result.columns.get_loc("has_major_renovation")] = has_major
-
-            # Parse filed dates for time-relative features
-            permit_dates = []
-            for p in permits:
+                desc = p.get("description") or ""
+                category = self._classify_permit(desc)
+                filed_ts = None
                 filed = p.get("filed_date")
                 if filed:
                     try:
-                        permit_dates.append(
-                            (pd.Timestamp(filed), p.get("job_value"))
-                        )
+                        filed_ts = pd.Timestamp(filed)
                     except (ValueError, TypeError):
                         pass
+                value = p.get("job_value") or 0.0
+                classified.append((category, filed_ts, value))
 
-            # Permits in the 5 years before sale
-            if permit_dates:
-                five_yr_ago = sale_timestamp - pd.Timedelta(days=5 * 365)
-                count_5yr = sum(
-                    1 for dt, _ in permit_dates
-                    if five_yr_ago <= dt <= sale_timestamp
-                )
-                result.iloc[i, result.columns.get_loc("permit_count_5yr")] = count_5yr
-
-                # Most recent permit
+            # --- Time-based features ---
+            dated_permits = [(cat, dt, val) for cat, dt, val in classified if dt is not None]
+            if dated_permits:
                 past_permits = [
-                    (dt, val) for dt, val in permit_dates if dt <= sale_timestamp
+                    (cat, dt, val) for cat, dt, val in dated_permits
+                    if dt <= sale_timestamp
                 ]
-                if past_permits:
-                    most_recent_dt, most_recent_val = max(past_permits, key=lambda x: x[0])
-                    years_since = (sale_timestamp - most_recent_dt).days / 365.25
+
+                if "permit_count_5yr" in active:
+                    five_yr_ago = sale_timestamp - pd.Timedelta(days=5 * 365)
+                    count_5yr = sum(
+                        1 for _, dt, _ in dated_permits
+                        if five_yr_ago <= dt <= sale_timestamp
+                    )
+                    result.iloc[i, result.columns.get_loc("permit_count_5yr")] = count_5yr
+
+                if past_permits and "years_since_last_permit" in active:
+                    most_recent = max(past_permits, key=lambda x: x[1])
+                    years_since = (sale_timestamp - most_recent[1]).days / 365.25
                     result.iloc[
                         i, result.columns.get_loc("years_since_last_permit")
                     ] = years_since
-                    result.iloc[
-                        i, result.columns.get_loc("recent_permit_value")
-                    ] = most_recent_val if most_recent_val is not None else 0
-                else:
-                    result.iloc[i, result.columns.get_loc("recent_permit_value")] = 0
             else:
-                result.iloc[i, result.columns.get_loc("permit_count_5yr")] = 0
-                result.iloc[i, result.columns.get_loc("recent_permit_value")] = 0
+                if "permit_count_5yr" in active:
+                    result.iloc[i, result.columns.get_loc("permit_count_5yr")] = 0
+
+            # --- Composite scores ---
+            if "maintenance_value" in active:
+                maint_value = sum(
+                    val for cat, _, val in classified
+                    if cat in _MAINTENANCE_CATEGORIES
+                )
+                result.iloc[i, result.columns.get_loc("maintenance_value")] = maint_value
+
+            if "modernization_recency" in active:
+                mod_recency = 0.0
+                for cat, dt, val in classified:
+                    if cat in _MODERNIZATION_CATEGORIES and dt is not None and dt <= sale_timestamp:
+                        years_ago = max((sale_timestamp - dt).days / 365.25, 0)
+                        decay = 1.0 / (1.0 + years_ago)
+                        mod_recency += val * decay
+                result.iloc[i, result.columns.get_loc("modernization_recency")] = mod_recency
 
         return result

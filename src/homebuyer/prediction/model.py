@@ -351,6 +351,25 @@ class ModelArtifact:
             "cpi_sf_yoy": ("Bay Area CPI (YoY)", "{:.1%}"),
             "zip_median_income": ("Zip median income", "${:,.0f}"),
             "price_to_income": ("Price-to-income ratio", "{:.1f}x"),
+            # Permit features
+            "permit_count_5yr": ("Permits (5yr)", "{:.0f}"),
+            "permit_count_total": ("Total permits", "{:.0f}"),
+            "total_permit_value": ("Total permit value", "${:,.0f}"),
+            "years_since_last_permit": ("Years since permit", "{:.1f}"),
+            "has_kitchen_remodel": ("Kitchen remodel", None),
+            "has_bath_remodel": ("Bath remodel", None),
+            "has_addition": ("Addition/expansion", None),
+            "has_adu": ("ADU/conversion", None),
+            "has_seismic_retrofit": ("Seismic retrofit", None),
+            "has_roof_work": ("Roof work", None),
+            "has_solar": ("Solar installed", None),
+            "has_electrical_upgrade": ("Electrical upgrade", None),
+            "years_since_kitchen": ("Years since kitchen", "{:.1f}"),
+            "years_since_bath": ("Years since bath", "{:.1f}"),
+            "years_since_roof": ("Years since roof", "{:.1f}"),
+            "modernization_value": ("Modernization invest.", "${:,.0f}"),
+            "maintenance_value": ("Maintenance invest.", "${:,.0f}"),
+            "modernization_recency": ("Recent modernization", "${:,.0f}"),
         }
 
         if feat_name in _LABEL_MAP:
