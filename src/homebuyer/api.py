@@ -551,6 +551,7 @@ def market_summary():
 def model_info():
     """Model metadata, metrics, and feature importances."""
     model = _require_model()
+    analyzer = _state.get_analyzer()
     return {
         "trained_at": model.trained_at.isoformat(),
         "data_cutoff_date": model.data_cutoff_date,
@@ -562,6 +563,7 @@ def model_info():
         "hyperparameters": model.hyperparameters,
         "feature_importances": model.feature_importances,
         "neighborhood_metrics": model.neighborhood_metrics,
+        "data_completeness": analyzer.get_data_completeness(),
     }
 
 
@@ -938,6 +940,10 @@ def _neighborhood_stats_to_dict(stats) -> dict:
         "median_sqft": stats.median_sqft,
         "avg_year_built": stats.avg_year_built,
         "yoy_price_change_pct": stats.yoy_price_change_pct,
+        "median_lot_size": stats.median_lot_size,
+        "property_type_breakdown": stats.property_type_breakdown,
+        "dominant_zoning": stats.dominant_zoning,
+        "zoning_breakdown": stats.zoning_breakdown,
     }
 
 

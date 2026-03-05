@@ -69,7 +69,7 @@ fn main() {
                 .args([
                     "-m", "uvicorn", "homebuyer.api:app",
                     "--host", "127.0.0.1",
-                    "--port", "8787",
+                    "--port", "10000",
                 ])
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -88,7 +88,7 @@ fn main() {
 
             // Wait for the sidecar to become ready
             let client = reqwest::Client::new();
-            let base_url = "http://127.0.0.1:8787".to_string();
+            let base_url = "http://127.0.0.1:10000".to_string();
 
             if sidecar.is_some() {
                 let health_url = format!("{}/api/health", &base_url);

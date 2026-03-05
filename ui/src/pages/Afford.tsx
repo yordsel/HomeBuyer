@@ -165,6 +165,8 @@ export function AffordPage() {
                       <th className="px-4 py-3 text-right">Recent Sales</th>
                       <th className="px-4 py-3 text-right">Avg Price</th>
                       <th className="px-4 py-3 text-right">Lowest Sale</th>
+                      <th className="px-4 py-3 text-left">Types</th>
+                      <th className="px-4 py-3 text-left">Zoning</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -179,6 +181,17 @@ export function AffordPage() {
                         </td>
                         <td className="px-4 py-3 text-right text-gray-600">
                           {formatCurrency(n.lowest_recent_sale)}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 text-xs">
+                          {Object.entries(n.property_type_breakdown || {})
+                            .slice(0, 2)
+                            .map(([type, pct]) =>
+                              `${type.replace('Single Family Residential', 'SFR').replace('Condo/Co-op', 'Condo').replace('Multi-Family (2-4 Unit)', 'Multi 2-4').replace('Multi-Family (5+ Unit)', 'Multi 5+')}: ${pct}%`
+                            )
+                            .join(', ') || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 text-xs">
+                          {(n.dominant_zoning || []).join(', ') || '—'}
                         </td>
                       </tr>
                     ))}

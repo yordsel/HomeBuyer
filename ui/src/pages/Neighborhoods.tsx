@@ -153,8 +153,9 @@ export function NeighborhoodsPage() {
                   <th className="px-4 py-3 text-right">
                     <SortHeader label="Avg Built" col="avg_year_built" />
                   </th>
-                  <th className="px-4 py-3 text-right">Min Price</th>
-                  <th className="px-4 py-3 text-right">Max Price</th>
+                  <th className="px-4 py-3 text-right">Lot Size</th>
+                  <th className="px-4 py-3 text-left">Zone</th>
+                  <th className="px-4 py-3 text-left">Property Types</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -179,10 +180,18 @@ export function NeighborhoodsPage() {
                         {n.avg_year_built != null ? Math.round(n.avg_year_built) : '—'}
                       </td>
                       <td className="px-4 py-3 text-right text-gray-600">
-                        {formatCurrency(n.min_price)}
+                        {n.median_lot_size ? `${(n.median_lot_size / 1000).toFixed(1)}K` : '—'}
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-600">
-                        {formatCurrency(n.max_price)}
+                      <td className="px-4 py-3 text-gray-600 text-xs">
+                        {n.dominant_zoning?.length > 0 ? n.dominant_zoning.join(', ') : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">
+                        {Object.entries(n.property_type_breakdown || {})
+                          .slice(0, 2)
+                          .map(([type, pct]) =>
+                            `${type.replace('Single Family Residential', 'SFR').replace('Condo/Co-op', 'Condo').replace('Multi-Family (2-4 Unit)', 'Multi 2-4').replace('Multi-Family (5+ Unit)', 'Multi 5+')}: ${pct}%`
+                          )
+                          .join(', ') || '—'}
                       </td>
                     </tr>
                   );

@@ -42,16 +42,40 @@ export function NeighborhoodCard({ stats, onClick }: NeighborhoodCardProps) {
           Sales: <span className="font-medium text-gray-700">{stats.sale_count}</span>
         </div>
         <div className="text-gray-500">
-          Avg Built: <span className="font-medium text-gray-700">
-            {stats.avg_year_built ?? '—'}
+          Lot: <span className="font-medium text-gray-700">
+            {stats.median_lot_size ? `${(stats.median_lot_size / 1000).toFixed(1)}K sqft` : '—'}
           </span>
         </div>
         <div className="text-gray-500">
-          Avg $/sqft: <span className="font-medium text-gray-700">
-            {stats.avg_ppsf ? `$${Math.round(stats.avg_ppsf)}` : '—'}
+          Zone: <span className="font-medium text-gray-700">
+            {stats.dominant_zoning?.length > 0 ? stats.dominant_zoning.join(', ') : '—'}
           </span>
         </div>
       </div>
+
+      {/* Property type mini-bar */}
+      {Object.keys(stats.property_type_breakdown || {}).length > 0 && (
+        <div className="mt-2">
+          <div className="flex h-1.5 rounded-full overflow-hidden bg-gray-100">
+            {Object.entries(stats.property_type_breakdown).map(([type, pct], i) => (
+              <div
+                key={type}
+                className={`h-full ${i === 0 ? 'bg-blue-500' : i === 1 ? 'bg-green-400' : 'bg-amber-400'}`}
+                style={{ width: `${pct}%` }}
+                title={`${type}: ${pct}%`}
+              />
+            ))}
+          </div>
+          <p className="text-[10px] text-gray-400 mt-0.5">
+            {Object.entries(stats.property_type_breakdown)
+              .slice(0, 2)
+              .map(([type, pct]) =>
+                `${type.replace('Single Family Residential', 'SFR').replace('Condo/Co-op', 'Condo').replace('Multi-Family (2-4 Unit)', 'Multi 2-4').replace('Multi-Family (5+ Unit)', 'Multi 5+')}: ${pct}%`
+              )
+              .join(' · ')}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

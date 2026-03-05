@@ -4,6 +4,7 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
+  Cell,
   XAxis,
   YAxis,
   Tooltip,
@@ -14,6 +15,36 @@ import * as api from '../lib/tauri';
 import { StatCard } from '../components/StatCard';
 import { formatCurrency, formatPct } from '../lib/utils';
 import type { ModelInfo } from '../types';
+
+// Map feature names to categories for color-coding
+const FEATURE_CATEGORIES: Record<string, string> = {
+  beds: 'Property', baths: 'Property', sqft: 'Property',
+  lot_size_sqft: 'Property', year_built: 'Property', hoa_per_month: 'Property',
+  property_age: 'Property', bed_bath_ratio: 'Property',
+  sqft_per_bed: 'Property', lot_to_living_ratio: 'Property',
+  latitude: 'Location', longitude: 'Location',
+  neighborhood_encoded: 'Location', zip_code_encoded: 'Location',
+  zoning_encoded: 'Location', property_type_encoded: 'Location',
+  sale_month: 'Temporal', sale_quarter: 'Temporal',
+  market_median_price: 'Market', market_sale_to_list: 'Market',
+  market_sold_above_pct: 'Market', market_median_dom: 'Market',
+  rate_30yr: 'Economic', nasdaq_level: 'Economic',
+  treasury_10yr: 'Economic', consumer_sentiment: 'Economic',
+  cpi_sf_yoy: 'Economic', zip_median_income: 'Economic',
+  price_to_income: 'Economic',
+  permit_count_5yr: 'Permits', permit_count_total: 'Permits',
+  total_permit_value: 'Permits', has_major_renovation: 'Permits',
+  years_since_last_permit: 'Permits', recent_permit_value: 'Permits',
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  Property: '#3b82f6',
+  Location: '#8b5cf6',
+  Temporal: '#f59e0b',
+  Market: '#059669',
+  Economic: '#dc2626',
+  Permits: '#0891b2',
+};
 
 export function ModelInfoPage() {
   const [info, setInfo] = useState<ModelInfo | null>(null);
@@ -51,14 +82,22 @@ export function ModelInfoPage() {
     );
   }
 
-  // Prepare feature importance data (top 15)
+  // Prepare feature importance data (top 15) with category colors
   const featureData = Object.entries(info.feature_importances)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 15)
-    .map(([name, value]) => ({
-      name: name.replace(/_/g, ' '),
-      importance: Math.round(value * 10000) / 100,
-    }));
+    .map(([name, value]) => {
+      const category = FEATURE_CATEGORIES[name] || 'Other';
+      return {
+        name: name.replace(/_/g, ' '),
+        importance: Math.round(value * 10000) / 100,
+        category,
+        fill: CATEGORY_COLORS[category] || '#6b7280',
+      };
+    });
+
+  // Unique categories used in top 15 for the legend
+  const usedCategories = [...new Set(featureData.map((f) => f.category))];
 
   const m = info.metrics;
 
@@ -107,9 +146,22 @@ export function ModelInfoPage() {
 
       {/* Feature Importance Chart */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h3 className="text-sm font-semibold text-gray-900 mb-4">
-          Top 15 Feature Importances (%)
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-gray-900">
+            Top 15 Feature Importances (%)
+          </h3>
+          <div className="flex items-center gap-3 flex-wrap">
+            {usedCategories.map((cat) => (
+              <div key={cat} className="flex items-center gap-1">
+                <div
+                  className="w-2.5 h-2.5 rounded-sm"
+                  style={{ backgroundColor: CATEGORY_COLORS[cat] || '#6b7280' }}
+                />
+                <span className="text-[10px] text-gray-500">{cat}</span>
+              </div>
+            ))}
+          </div>
+        </div>
         <ResponsiveContainer width="100%" height={400}>
           <BarChart data={featureData} layout="vertical" margin={{ left: 120 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -128,7 +180,11 @@ export function ModelInfoPage() {
                 fontSize: '13px',
               }}
             />
-            <Bar dataKey="importance" fill="#3b82f6" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="importance" radius={[0, 4, 4, 0]}>
+              {featureData.map((entry, index) => (
+                <Cell key={index} fill={entry.fill} />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -182,6 +238,39 @@ export function ModelInfoPage() {
                 <p className="text-sm font-mono font-medium text-gray-900">{String(val)}</p>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Data Completeness */}
+      {info.data_completeness && Object.keys(info.data_completeness).length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">Data Completeness</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {Object.entries(info.data_completeness).map(([key, dc]) => {
+              const pct = dc.pct;
+              const barColor =
+                pct >= 90 ? 'bg-green-500' : pct >= 70 ? 'bg-amber-500' : 'bg-red-500';
+              return (
+                <div key={key} className="bg-gray-50 rounded-lg px-3 py-2">
+                  <p className="text-xs text-gray-500">{dc.label}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${barColor}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-medium text-gray-700 w-10 text-right">
+                      {pct.toFixed(0)}%
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    {dc.filled.toLocaleString()} / {dc.total.toLocaleString()}
+                  </p>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

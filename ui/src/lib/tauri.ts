@@ -25,7 +25,7 @@ const isTauri = '__TAURI_INTERNALS__' in window;
 const isLocal =
   window.location.hostname === 'localhost' ||
   window.location.hostname === '127.0.0.1';
-const API_BASE = isTauri || isLocal ? 'http://127.0.0.1:8787' : '';
+const API_BASE = isTauri || isLocal ? 'http://127.0.0.1:10000' : '';
 
 /**
  * Wrapper that uses Tauri invoke() when running inside the Tauri shell,

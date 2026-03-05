@@ -204,6 +204,57 @@ export function MarketPage() {
         </div>
       )}
 
+      {/* Price by Property Type */}
+      {summary?.property_type_prices && summary.property_type_prices.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">
+            Price by Property Type (2yr avg)
+          </h3>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {summary.property_type_prices.map((pt) => (
+              <div key={pt.type} className="bg-gray-50 rounded-lg px-3 py-2">
+                <p className="text-xs text-gray-500 truncate">{pt.type}</p>
+                <p className="text-lg font-bold text-gray-900">{formatCurrency(pt.avg_price)}</p>
+                <p className="text-xs text-gray-400">{pt.count} sales</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Price by Zoning Category */}
+      {summary?.zoning_price_insights && summary.zoning_price_insights.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">
+            Price by Zoning Category (2yr avg)
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  <th className="pb-2">Zone Category</th>
+                  <th className="pb-2 text-right">Avg Price</th>
+                  <th className="pb-2 text-right">Avg $/sqft</th>
+                  <th className="pb-2 text-right">Sales</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {summary.zoning_price_insights.map((z) => (
+                  <tr key={z.zone_category}>
+                    <td className="py-2 font-medium text-gray-900">{z.zone_category}</td>
+                    <td className="py-2 text-right text-gray-700">{formatCurrency(z.avg_price)}</td>
+                    <td className="py-2 text-right text-gray-600">
+                      {z.avg_ppsf ? `$${Math.round(z.avg_ppsf)}` : '—'}
+                    </td>
+                    <td className="py-2 text-right text-gray-600">{z.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Data Coverage */}
       {summary && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">

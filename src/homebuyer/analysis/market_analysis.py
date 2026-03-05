@@ -35,6 +35,11 @@ class NeighborhoodStats:
     avg_year_built: Optional[int] = None
     # Price change year-over-year
     yoy_price_change_pct: Optional[float] = None
+    # ATTOM / zoning enrichment
+    median_lot_size: Optional[int] = None
+    property_type_breakdown: dict[str, float] = field(default_factory=dict)
+    dominant_zoning: list[str] = field(default_factory=list)
+    zoning_breakdown: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -183,6 +188,9 @@ class MarketAnalyzer:
 
         # Year-over-year price change
         stats.yoy_price_change_pct = self._calc_yoy_change(neighborhood)
+
+        # ATTOM / zoning enrichment
+        self._enrich_neighborhood_stats(stats, lookback_years)
 
         return stats
 
@@ -734,6 +742,46 @@ class MarketAnalyzer:
             (max_price,),
         ).fetchall()
 
+        # Enrich each neighborhood with property type and zoning breakdown
+        enriched = []
+        for r in affordable_neighborhoods:
+            hood = r["neighborhood"]
+            ptypes = self.db.conn.execute(
+                """
+                SELECT property_type, COUNT(*) as cnt FROM property_sales
+                WHERE neighborhood = ? AND sale_price <= ?
+                  AND sale_date >= date('now', '-2 years')
+                  AND property_type IS NOT NULL
+                GROUP BY property_type ORDER BY cnt DESC
+                """,
+                (hood, max_price),
+            ).fetchall()
+            pt_total = sum(p["cnt"] for p in ptypes)
+            pt_breakdown = {
+                p["property_type"]: round(p["cnt"] / pt_total * 100, 1)
+                for p in ptypes
+            } if pt_total > 0 else {}
+
+            zones = self.db.conn.execute(
+                """
+                SELECT zoning_class, COUNT(*) as cnt FROM property_sales
+                WHERE neighborhood = ? AND sale_price <= ?
+                  AND sale_date >= date('now', '-2 years')
+                  AND zoning_class IS NOT NULL
+                GROUP BY zoning_class ORDER BY cnt DESC LIMIT 2
+                """,
+                (hood, max_price),
+            ).fetchall()
+
+            enriched.append({
+                "name": hood,
+                "recent_sales_in_range": r["recent_sales"],
+                "avg_price": r["avg_price"],
+                "lowest_recent_sale": r["min_price"],
+                "property_type_breakdown": pt_breakdown,
+                "dominant_zoning": [z["zoning_class"] for z in zones],
+            })
+
         return {
             "monthly_budget": monthly_budget,
             "mortgage_rate_30yr": rate_30yr,
@@ -742,15 +790,7 @@ class MarketAnalyzer:
             "loan_amount": int(loan_at_max),
             "is_jumbo_loan": is_jumbo,
             "jumbo_threshold": jumbo_threshold,
-            "affordable_neighborhoods": [
-                {
-                    "name": r["neighborhood"],
-                    "recent_sales_in_range": r["recent_sales"],
-                    "avg_price": r["avg_price"],
-                    "lowest_recent_sale": r["min_price"],
-                }
-                for r in affordable_neighborhoods
-            ],
+            "affordable_neighborhoods": enriched,
         }
 
     # -------------------------------------------------------------------
@@ -833,6 +873,8 @@ class MarketAnalyzer:
                 }
                 for s in rankings[:15]
             ],
+            "property_type_prices": self._get_property_type_prices(),
+            "zoning_price_insights": self._get_zoning_price_insights(),
         }
 
     # -------------------------------------------------------------------
@@ -874,6 +916,159 @@ class MarketAnalyzer:
                 (current["avg"] - previous["avg"]) / previous["avg"] * 100, 1
             )
         return None
+
+    def _enrich_neighborhood_stats(
+        self, stats: NeighborhoodStats, lookback_years: int
+    ) -> None:
+        """Enrich stats with property type breakdown, lot size, and zoning."""
+        cutoff = (date.today() - timedelta(days=lookback_years * 365)).isoformat()
+
+        # Median lot size
+        lot_row = self.db.conn.execute(
+            """
+            SELECT lot_size_sqft FROM property_sales
+            WHERE neighborhood = ? AND sale_date >= ?
+              AND lot_size_sqft IS NOT NULL AND lot_size_sqft > 0
+            ORDER BY lot_size_sqft
+            LIMIT 1 OFFSET (
+                SELECT COUNT(*) / 2 FROM property_sales
+                WHERE neighborhood = ? AND sale_date >= ?
+                  AND lot_size_sqft IS NOT NULL AND lot_size_sqft > 0
+            )
+            """,
+            (stats.name, cutoff, stats.name, cutoff),
+        ).fetchone()
+        if lot_row:
+            stats.median_lot_size = lot_row["lot_size_sqft"]
+
+        # Property type breakdown
+        type_rows = self.db.conn.execute(
+            """
+            SELECT property_type, COUNT(*) as cnt
+            FROM property_sales
+            WHERE neighborhood = ? AND sale_date >= ?
+              AND property_type IS NOT NULL AND sale_price IS NOT NULL
+            GROUP BY property_type ORDER BY cnt DESC
+            """,
+            (stats.name, cutoff),
+        ).fetchall()
+        total = sum(r["cnt"] for r in type_rows)
+        if total > 0:
+            stats.property_type_breakdown = {
+                r["property_type"]: round(r["cnt"] / total * 100, 1)
+                for r in type_rows
+            }
+
+        # Zoning breakdown and dominant zoning
+        zone_rows = self.db.conn.execute(
+            """
+            SELECT zoning_class, COUNT(*) as cnt
+            FROM property_sales
+            WHERE neighborhood = ? AND sale_date >= ?
+              AND zoning_class IS NOT NULL AND sale_price IS NOT NULL
+            GROUP BY zoning_class ORDER BY cnt DESC
+            """,
+            (stats.name, cutoff),
+        ).fetchall()
+        zone_total = sum(r["cnt"] for r in zone_rows)
+        if zone_total > 0:
+            stats.zoning_breakdown = {
+                r["zoning_class"]: round(r["cnt"] / zone_total * 100, 1)
+                for r in zone_rows
+            }
+            cumulative = 0.0
+            dominant: list[str] = []
+            for r in zone_rows:
+                dominant.append(r["zoning_class"])
+                cumulative += r["cnt"] / zone_total * 100
+                if cumulative >= 70 or len(dominant) >= 2:
+                    break
+            stats.dominant_zoning = dominant
+
+    def _get_property_type_prices(self) -> list[dict]:
+        """Average sale price by property type (last 2 years, min 5 sales)."""
+        rows = self.db.conn.execute(
+            """
+            SELECT property_type, COUNT(*) as cnt,
+                   CAST(AVG(sale_price) AS INTEGER) as avg_price
+            FROM property_sales
+            WHERE property_type IS NOT NULL AND sale_price IS NOT NULL
+              AND sale_date >= date('now', '-2 years')
+            GROUP BY property_type HAVING COUNT(*) >= 5
+            ORDER BY avg_price DESC
+            """,
+        ).fetchall()
+        return [
+            {"type": r["property_type"], "count": r["cnt"], "avg_price": r["avg_price"]}
+            for r in rows
+        ]
+
+    def _get_zoning_price_insights(self) -> list[dict]:
+        """Average price and $/sqft grouped by zone category (last 2 years)."""
+        rows = self.db.conn.execute(
+            """
+            SELECT
+                CASE
+                    WHEN zoning_class LIKE 'R-1%' THEN 'R-1 (Single Family)'
+                    WHEN zoning_class LIKE 'R-2%' THEN 'R-2 (Two-Family)'
+                    WHEN zoning_class LIKE 'R-3%' THEN 'R-3 (Multiple Family)'
+                    WHEN zoning_class LIKE 'R-4%' THEN 'R-4 (Multi-Family)'
+                    WHEN zoning_class IN ('R-S', 'R-SMU', 'R-BMU') THEN 'R-S/Mixed (Special)'
+                    WHEN zoning_class LIKE 'ES-R%' THEN 'ES-R (Hillside)'
+                    WHEN zoning_class LIKE 'MUR%' OR zoning_class LIKE 'MRD%'
+                        THEN 'Mixed-Use Residential'
+                    ELSE 'Other'
+                END as zone_category,
+                COUNT(*) as cnt,
+                CAST(AVG(sale_price) AS INTEGER) as avg_price,
+                AVG(price_per_sqft) as avg_ppsf
+            FROM property_sales
+            WHERE zoning_class IS NOT NULL AND sale_price IS NOT NULL
+              AND sale_date >= date('now', '-2 years')
+            GROUP BY zone_category HAVING COUNT(*) >= 3
+            ORDER BY avg_price DESC
+            """,
+        ).fetchall()
+        return [
+            {
+                "zone_category": r["zone_category"],
+                "count": r["cnt"],
+                "avg_price": r["avg_price"],
+                "avg_ppsf": round(r["avg_ppsf"], 2) if r["avg_ppsf"] else None,
+            }
+            for r in rows
+        ]
+
+    def get_data_completeness(self) -> dict[str, dict]:
+        """Return fill-rate stats for key ATTOM-sourced columns."""
+        total = self.db.conn.execute(
+            "SELECT COUNT(*) FROM property_sales WHERE sale_price IS NOT NULL"
+        ).fetchone()[0]
+        if total == 0:
+            return {}
+
+        columns = [
+            ("property_type", "Property Type"),
+            ("year_built", "Year Built"),
+            ("sqft", "Square Footage"),
+            ("lot_size_sqft", "Lot Size"),
+            ("beds", "Bedrooms"),
+            ("baths", "Bathrooms"),
+            ("zoning_class", "Zoning Class"),
+            ("hoa_per_month", "HOA"),
+        ]
+        result = {}
+        for col, label in columns:
+            filled = self.db.conn.execute(
+                f"SELECT COUNT(*) FROM property_sales WHERE {col} IS NOT NULL AND sale_price IS NOT NULL",  # noqa: S608
+            ).fetchone()[0]
+            result[col] = {
+                "label": label,
+                "filled": filled,
+                "total": total,
+                "pct": round(filled / total * 100, 1),
+            }
+        return result
 
     def _get_mortgage_rate_for_date(self, date_str: str) -> Optional[float]:
         """Find the closest mortgage rate to a given date."""

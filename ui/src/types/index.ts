@@ -118,6 +118,10 @@ export interface NeighborhoodStats {
   median_sqft: number | null;
   avg_year_built: number | null;
   yoy_price_change_pct: number | null;
+  median_lot_size: number | null;
+  property_type_breakdown: Record<string, number>;
+  dominant_zoning: string[];
+  zoning_breakdown: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +163,17 @@ export interface MarketSummary {
     avg_ppsf: number | null;
     sales: number;
     yoy_change: number | null;
+  }[];
+  property_type_prices: {
+    type: string;
+    count: number;
+    avg_price: number;
+  }[];
+  zoning_price_insights: {
+    zone_category: string;
+    count: number;
+    avg_price: number;
+    avg_ppsf: number | null;
   }[];
 }
 
@@ -228,6 +243,12 @@ export interface ModelInfo {
     mae: number;
     within_10pct: number;
   }[];
+  data_completeness: Record<string, {
+    label: string;
+    filled: number;
+    total: number;
+    pct: number;
+  }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +268,8 @@ export interface AffordabilityResult {
     recent_sales_in_range: number;
     avg_price: number;
     lowest_recent_sale: number;
+    property_type_breakdown: Record<string, number>;
+    dominant_zoning: string[];
   }[];
 }
 
