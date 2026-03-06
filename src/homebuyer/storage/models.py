@@ -134,6 +134,39 @@ class BESORecord:
 
 
 @dataclass
+class BerkeleyParcel:
+    """A property parcel from the City of Berkeley Open Data / Alameda County Assessor.
+
+    Represents a physical parcel of land with its county-assessed characteristics.
+    ATTOM-enriched fields (beds, baths, year_built, etc.) are populated later
+    via batch enrichment and are nullable until then.
+    """
+
+    apn: str  # Assessor Parcel Number (primary key)
+    address: str  # Full situs address (e.g., "1234 CEDAR ST BERKELEY 94702")
+    street_number: str  # House number
+    street_name: str  # Street name
+    zip_code: str
+    latitude: float
+    longitude: float
+    lot_size_sqft: int  # From county data
+    building_sqft: Optional[int] = None  # From county data
+    use_code: str = ""  # County land use code (e.g., "1100")
+    use_description: Optional[str] = None  # Human-readable (e.g., "Single Family Residential")
+    neighborhood: Optional[str] = None  # From spatial join
+    zoning_class: Optional[str] = None  # From spatial join
+    # ATTOM-enriched fields (nullable until enriched)
+    beds: Optional[float] = None
+    baths: Optional[float] = None
+    sqft: Optional[int] = None  # ATTOM sqft (may differ from building_sqft)
+    year_built: Optional[int] = None
+    property_type: Optional[str] = None  # Standardized type
+    last_sale_date: Optional[str] = None
+    last_sale_price: Optional[int] = None
+    attom_enriched: bool = False  # Flag: has ATTOM data been fetched?
+
+
+@dataclass
 class CollectionResult:
     """Result summary from a data collection run."""
 

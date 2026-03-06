@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "/Users/srinivasjagannathan/projects/HomeBuyer/.venv/bin/python",
+      "runtimeArgs": ["-m", "uvicorn", "homebuyer.api:app", "--host", "127.0.0.1", "--port", "8787"],
+      "port": 8787
+    },
+    {
+      "name": "ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "--prefix", "/Users/srinivasjagannathan/projects/HomeBuyer/ui", "dev"],
+      "port": 1420,
+      "url": "http://localhost:1420"
+    }
+  ]
+}

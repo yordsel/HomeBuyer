@@ -396,6 +396,104 @@ export interface PotentialSummaryResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Rental Income & Investment Analysis
+// ---------------------------------------------------------------------------
+
+export interface RentEstimate {
+  unit_type: string;
+  beds: number;
+  baths: number;
+  sqft: number | null;
+  monthly_rent: number;
+  annual_rent: number;
+  estimation_method: string;
+  confidence: string;
+  notes: string;
+}
+
+export interface ExpenseBreakdown {
+  property_tax: number;
+  insurance: number;
+  maintenance: number;
+  vacancy_reserve: number;
+  management_fee: number;
+  hoa: number;
+  utilities: number;
+  total_annual: number;
+  expense_ratio_pct: number;
+}
+
+export interface MortgageAnalysis {
+  property_value: number;
+  down_payment_pct: number;
+  down_payment_amount: number;
+  loan_amount: number;
+  rate_30yr: number;
+  monthly_pi: number;
+  monthly_tax: number;
+  monthly_insurance: number;
+  monthly_piti: number;
+  is_jumbo: boolean;
+  annual_interest_yr1: number;
+  annual_principal_yr1: number;
+}
+
+export interface TaxBenefits {
+  depreciation_annual: number;
+  mortgage_interest_deduction: number;
+  operating_expense_deductions: number;
+  estimated_tax_savings: number;
+  marginal_tax_rate_used: number;
+  notes: string[];
+}
+
+export interface AnnualCashFlow {
+  year: number;
+  gross_rent: number;
+  operating_expenses: number;
+  noi: number;
+  mortgage_payment: number;
+  cash_flow: number;
+  equity_buildup: number;
+  property_value: number;
+  cumulative_equity: number;
+  total_return: number;
+}
+
+export interface InvestmentScenario {
+  scenario_name: string;
+  scenario_type: string;
+  property_value: number;
+  additional_investment: number;
+  total_investment: number;
+  units: RentEstimate[];
+  total_monthly_rent: number;
+  total_annual_rent: number;
+  expenses: ExpenseBreakdown;
+  mortgage: MortgageAnalysis;
+  cap_rate_pct: number;
+  cash_on_cash_pct: number;
+  gross_rent_multiplier: number;
+  price_to_rent_ratio: number;
+  monthly_cash_flow: number;
+  projections: AnnualCashFlow[];
+  tax_benefits: TaxBenefits;
+  development_feasible: boolean;
+  development_notes: string;
+}
+
+export interface RentalAnalysisResponse {
+  property_address: string | null;
+  property_value: number;
+  neighborhood: string;
+  scenarios: InvestmentScenario[];
+  best_scenario: string;
+  recommendation_notes: string;
+  data_sources: string[];
+  disclaimers: string[];
+}
+
+// ---------------------------------------------------------------------------
 // Faketor Chat
 // ---------------------------------------------------------------------------
 
@@ -404,9 +502,35 @@ export interface FaketorMessage {
   content: string;
 }
 
+export type ResponseBlockType =
+  | 'prediction_card'
+  | 'comps_table'
+  | 'neighborhood_stats'
+  | 'development_potential'
+  | 'improvement_sim'
+  | 'sell_vs_hold'
+  | 'rental_income'
+  | 'investment_scenarios'
+  | 'market_summary'
+  | 'property_detail';
+
+export interface ResponseBlock {
+  type: ResponseBlockType;
+  tool_name: string;
+  data: Record<string, unknown>;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  blocks?: ResponseBlock[];
+  toolsUsed?: string[];
+}
+
 export interface FaketorChatResponse {
   reply: string;
   tool_calls?: { name: string; input: Record<string, unknown> }[];
+  blocks?: ResponseBlock[];
   error?: string;
 }
 
@@ -414,4 +538,4 @@ export interface FaketorChatResponse {
 // App
 // ---------------------------------------------------------------------------
 
-export type PageId = 'predict' | 'neighborhoods' | 'market' | 'model' | 'afford' | 'potential';
+export type PageId = 'chat' | 'predict' | 'neighborhoods' | 'market' | 'model' | 'afford' | 'potential';

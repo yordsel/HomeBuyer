@@ -9,6 +9,7 @@ from typing import Optional
 
 from homebuyer.storage.models import (
     BESORecord,
+    BerkeleyParcel,
     BuildingPermit,
     CensusIncome,
     CollectionResult,
@@ -185,6 +186,41 @@ CREATE TABLE IF NOT EXISTS beso_records (
 CREATE INDEX IF NOT EXISTS idx_beso_address ON beso_records(building_address);
 CREATE INDEX IF NOT EXISTS idx_beso_year ON beso_records(reporting_year);
 
+CREATE TABLE IF NOT EXISTS properties (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    apn             TEXT NOT NULL UNIQUE,
+    address         TEXT NOT NULL,
+    street_number   TEXT,
+    street_name     TEXT,
+    zip_code        TEXT NOT NULL,
+    latitude        REAL NOT NULL,
+    longitude       REAL NOT NULL,
+    lot_size_sqft   INTEGER,
+    building_sqft   INTEGER,
+    use_code        TEXT,
+    use_description TEXT,
+    neighborhood    TEXT,
+    zoning_class    TEXT,
+    beds            REAL,
+    baths           REAL,
+    sqft            INTEGER,
+    year_built      INTEGER,
+    property_type   TEXT,
+    last_sale_date  TEXT,
+    last_sale_price INTEGER,
+    attom_enriched  INTEGER NOT NULL DEFAULT 0,
+    collected_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_properties_address ON properties(address);
+CREATE INDEX IF NOT EXISTS idx_properties_zip ON properties(zip_code);
+CREATE INDEX IF NOT EXISTS idx_properties_neighborhood ON properties(neighborhood);
+CREATE INDEX IF NOT EXISTS idx_properties_zoning ON properties(zoning_class);
+CREATE INDEX IF NOT EXISTS idx_properties_use_code ON properties(use_code);
+CREATE INDEX IF NOT EXISTS idx_properties_lot_size ON properties(lot_size_sqft);
+CREATE INDEX IF NOT EXISTS idx_properties_attom ON properties(attom_enriched);
+
 CREATE TABLE IF NOT EXISTS collection_runs (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     source              TEXT NOT NULL,
@@ -197,6 +233,37 @@ CREATE TABLE IF NOT EXISTS collection_runs (
     parameters          TEXT,
     error_message       TEXT
 );
+
+CREATE TABLE IF NOT EXISTS predictions (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    latitude                REAL NOT NULL,
+    longitude               REAL NOT NULL,
+    neighborhood            TEXT,
+    zip_code                TEXT,
+    beds                    REAL,
+    baths                   REAL,
+    sqft                    INTEGER,
+    year_built              INTEGER,
+    lot_size_sqft           INTEGER,
+    property_type           TEXT,
+    list_price              INTEGER,
+    hoa_per_month           INTEGER,
+    predicted_price         INTEGER NOT NULL,
+    price_lower             INTEGER NOT NULL,
+    price_upper             INTEGER NOT NULL,
+    base_value              INTEGER,
+    predicted_premium_pct   REAL,
+    feature_contributions   TEXT,
+    source                  TEXT NOT NULL DEFAULT 'chat',
+    created_at              TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_predictions_location
+    ON predictions(latitude, longitude);
+CREATE INDEX IF NOT EXISTS idx_predictions_neighborhood
+    ON predictions(neighborhood);
+CREATE INDEX IF NOT EXISTS idx_predictions_created
+    ON predictions(created_at);
 """
 
 
@@ -703,6 +770,373 @@ class Database:
         return {row[0] for row in rows}
 
     # ------------------------------------------------------------------
+    # Properties (Berkeley Parcels)
+    # ------------------------------------------------------------------
+
+    def upsert_properties_batch(self, parcels: list[BerkeleyParcel]) -> tuple[int, int]:
+        """Insert or update a batch of parcels. Returns (inserted_count, updated_count)."""
+        inserted = 0
+        updated = 0
+        sql = """
+            INSERT INTO properties (
+                apn, address, street_number, street_name, zip_code,
+                latitude, longitude, lot_size_sqft, building_sqft,
+                use_code, use_description, neighborhood, zoning_class
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(apn) DO UPDATE SET
+                address = excluded.address,
+                street_number = excluded.street_number,
+                street_name = excluded.street_name,
+                zip_code = excluded.zip_code,
+                latitude = excluded.latitude,
+                longitude = excluded.longitude,
+                lot_size_sqft = excluded.lot_size_sqft,
+                building_sqft = excluded.building_sqft,
+                use_code = excluded.use_code,
+                use_description = excluded.use_description,
+                updated_at = datetime('now')
+        """
+        with self.conn:
+            for p in parcels:
+                cursor = self.conn.execute(
+                    sql,
+                    (
+                        p.apn,
+                        p.address,
+                        p.street_number,
+                        p.street_name,
+                        p.zip_code,
+                        p.latitude,
+                        p.longitude,
+                        p.lot_size_sqft,
+                        p.building_sqft,
+                        p.use_code,
+                        p.use_description,
+                        p.neighborhood,
+                        p.zoning_class,
+                    ),
+                )
+                # rowcount=1 for both INSERT and UPDATE in SQLite
+                if cursor.rowcount > 0:
+                    # Check if it was a new row vs update
+                    if cursor.lastrowid and cursor.lastrowid > 0:
+                        inserted += 1
+                    else:
+                        updated += 1
+        return inserted, updated
+
+    def get_properties_missing_zoning(self) -> list[dict]:
+        """Get all properties where zoning_class is NULL, with lat/long."""
+        rows = self.conn.execute(
+            "SELECT id, latitude, longitude FROM properties "
+            "WHERE zoning_class IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_properties_missing_neighborhood(self) -> list[dict]:
+        """Get all properties where neighborhood is NULL, with lat/long."""
+        rows = self.conn.execute(
+            "SELECT id, latitude, longitude FROM properties "
+            "WHERE neighborhood IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_properties_missing_attom(self, limit: int | None = None) -> list[dict]:
+        """Get properties not yet enriched via ATTOM.
+
+        Returns rows with id, apn, address, zip_code, latitude, longitude.
+        """
+        sql = (
+            "SELECT id, apn, address, street_number, street_name, zip_code, "
+            "latitude, longitude FROM properties WHERE attom_enriched = 0"
+        )
+        if limit:
+            sql += f" LIMIT {limit}"
+        rows = self.conn.execute(sql).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_properties_zoning_batch(self, updates: list[tuple[str, int]]) -> int:
+        """Batch update zoning_class on properties. Each tuple is (zoning_class, property_id)."""
+        with self.conn:
+            self.conn.executemany(
+                "UPDATE properties SET zoning_class = ?, updated_at = datetime('now') WHERE id = ?",
+                updates,
+            )
+        return len(updates)
+
+    def update_properties_neighborhood_batch(self, updates: list[tuple[str, int]]) -> int:
+        """Batch update neighborhood on properties. Each tuple is (neighborhood, property_id)."""
+        with self.conn:
+            self.conn.executemany(
+                "UPDATE properties SET neighborhood = ?, updated_at = datetime('now') WHERE id = ?",
+                updates,
+            )
+        return len(updates)
+
+    def update_properties_attom_batch(self, updates: list[dict]) -> int:
+        """Batch update ATTOM-enriched fields on properties.
+
+        Each dict must have 'id' and any of: beds, baths, sqft, year_built,
+        property_type, last_sale_date, last_sale_price.
+        Sets attom_enriched = 1 for all updated rows.
+        """
+        count = 0
+        sql = """
+            UPDATE properties SET
+                beds = ?, baths = ?, sqft = ?, year_built = ?,
+                property_type = ?, last_sale_date = ?, last_sale_price = ?,
+                attom_enriched = 1, updated_at = datetime('now')
+            WHERE id = ?
+        """
+        with self.conn:
+            for u in updates:
+                self.conn.execute(
+                    sql,
+                    (
+                        u.get("beds"),
+                        u.get("baths"),
+                        u.get("sqft"),
+                        u.get("year_built"),
+                        u.get("property_type"),
+                        u.get("last_sale_date"),
+                        u.get("last_sale_price"),
+                        u["id"],
+                    ),
+                )
+                count += 1
+        return count
+
+    def get_properties_count(self) -> dict:
+        """Return property statistics for the status command."""
+        row = self.conn.execute(
+            "SELECT COUNT(*), "
+            "COUNT(CASE WHEN neighborhood IS NOT NULL THEN 1 END), "
+            "COUNT(CASE WHEN zoning_class IS NOT NULL THEN 1 END), "
+            "COUNT(CASE WHEN attom_enriched = 1 THEN 1 END), "
+            "COUNT(DISTINCT use_code), "
+            "COUNT(DISTINCT neighborhood), "
+            "COUNT(DISTINCT zip_code) "
+            "FROM properties"
+        ).fetchone()
+        return {
+            "total": row[0],
+            "with_neighborhood": row[1],
+            "with_zoning": row[2],
+            "attom_enriched": row[3],
+            "use_codes": row[4],
+            "neighborhoods": row[5],
+            "zip_codes": row[6],
+        }
+
+    def search_properties(self, query: str, limit: int = 5) -> list[dict]:
+        """Search properties by address (fuzzy text match).
+
+        Normalizes the query to uppercase, tries exact prefix match first,
+        then falls back to LIKE '%query%'. Returns dicts with all property fields.
+
+        Args:
+            query: Street address or partial address to search for.
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of property dicts ordered by relevance.
+        """
+        normalized = query.strip().upper()
+        if not normalized:
+            return []
+
+        # Try exact prefix match first (e.g. "1234 CEDAR")
+        rows = self.conn.execute(
+            "SELECT * FROM properties WHERE UPPER(address) LIKE ? ORDER BY address LIMIT ?",
+            (f"{normalized}%", limit),
+        ).fetchall()
+
+        if not rows:
+            # Fallback: contains match (e.g. "CEDAR ST")
+            rows = self.conn.execute(
+                "SELECT * FROM properties WHERE UPPER(address) LIKE ? ORDER BY address LIMIT ?",
+                (f"%{normalized}%", limit),
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+
+    def get_property_by_id(self, property_id: int) -> dict | None:
+        """Get a single property by its database ID.
+
+        Args:
+            property_id: The integer primary key.
+
+        Returns:
+            Property dict, or None if not found.
+        """
+        row = self.conn.execute(
+            "SELECT * FROM properties WHERE id = ?",
+            (property_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    # ------------------------------------------------------------------
+    # Predictions cache
+    # ------------------------------------------------------------------
+
+    def get_cached_prediction(
+        self,
+        latitude: float,
+        longitude: float,
+        beds: float | None = None,
+        baths: float | None = None,
+        sqft: int | None = None,
+        year_built: int | None = None,
+        lot_size_sqft: int | None = None,
+        property_type: str | None = None,
+        max_age_hours: int = 168,  # 7 days default
+    ) -> dict | None:
+        """Look up a cached prediction for the given property parameters.
+
+        Matches on lat/lon (within ~10m tolerance) and core property attributes.
+        Returns the most recent prediction within the staleness window.
+
+        Args:
+            latitude: Property latitude.
+            longitude: Property longitude.
+            beds: Number of bedrooms.
+            baths: Number of bathrooms.
+            sqft: Living area square footage.
+            year_built: Year the property was built.
+            lot_size_sqft: Lot size in square feet.
+            property_type: Property type string.
+            max_age_hours: Maximum age of cached prediction in hours.
+
+        Returns:
+            Cached prediction dict with all fields, or None if no match.
+        """
+        # ~10m tolerance in lat/lon degrees
+        lat_tol = 0.0001
+        lon_tol = 0.0001
+
+        conditions = [
+            "ABS(latitude - ?) < ?",
+            "ABS(longitude - ?) < ?",
+            "created_at > datetime('now', ?)",
+        ]
+        params: list = [latitude, lat_tol, longitude, lon_tol, f"-{max_age_hours} hours"]
+
+        # Match on property attributes if provided.
+        # Use IS for NULL-safe comparison: (col IS ?) matches both values and NULLs.
+        # This ensures that a query with beds=None matches cached rows with beds=NULL,
+        # and a query with beds=3 only matches cached rows with beds=3.
+        for col, val in [
+            ("beds", beds),
+            ("baths", baths),
+            ("sqft", sqft),
+            ("year_built", year_built),
+            ("lot_size_sqft", lot_size_sqft),
+            ("property_type", property_type),
+        ]:
+            if val is not None:
+                conditions.append(f"{col} = ?")
+                params.append(val)
+            else:
+                conditions.append(f"{col} IS NULL")
+
+        where_clause = " AND ".join(conditions)
+        sql = f"""
+            SELECT * FROM predictions
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+            LIMIT 1
+        """
+        row = self.conn.execute(sql, params).fetchone()
+        if not row:
+            return None
+
+        result = dict(row)
+        # Deserialize feature_contributions from JSON
+        if result.get("feature_contributions"):
+            try:
+                result["feature_contributions"] = json.loads(result["feature_contributions"])
+            except (json.JSONDecodeError, TypeError):
+                result["feature_contributions"] = None
+        return result
+
+    def store_prediction(
+        self,
+        latitude: float,
+        longitude: float,
+        predicted_price: int,
+        price_lower: int,
+        price_upper: int,
+        neighborhood: str | None = None,
+        zip_code: str | None = None,
+        beds: float | None = None,
+        baths: float | None = None,
+        sqft: int | None = None,
+        year_built: int | None = None,
+        lot_size_sqft: int | None = None,
+        property_type: str | None = None,
+        list_price: int | None = None,
+        hoa_per_month: int | None = None,
+        base_value: int | None = None,
+        predicted_premium_pct: float | None = None,
+        feature_contributions: list[dict] | None = None,
+        source: str = "chat",
+    ) -> int:
+        """Store a prediction result in the cache.
+
+        Args:
+            latitude: Property latitude.
+            longitude: Property longitude.
+            predicted_price: Predicted sale price.
+            price_lower: Lower bound of prediction interval.
+            price_upper: Upper bound of prediction interval.
+            neighborhood: Neighborhood name.
+            zip_code: ZIP code.
+            beds: Number of bedrooms.
+            baths: Number of bathrooms.
+            sqft: Living area square footage.
+            year_built: Year the property was built.
+            lot_size_sqft: Lot size in square feet.
+            property_type: Property type string.
+            list_price: Listing price if available.
+            hoa_per_month: Monthly HOA fee.
+            base_value: Model baseline value (SHAP).
+            predicted_premium_pct: Predicted premium over list price.
+            feature_contributions: SHAP feature contributions list.
+            source: Origin of the prediction ('chat', 'predict', 'manual').
+
+        Returns:
+            The row ID of the inserted prediction.
+        """
+        # Serialize feature contributions as JSON
+        fc_json = json.dumps(feature_contributions) if feature_contributions else None
+
+        sql = """
+            INSERT INTO predictions (
+                latitude, longitude, neighborhood, zip_code,
+                beds, baths, sqft, year_built, lot_size_sqft,
+                property_type, list_price, hoa_per_month,
+                predicted_price, price_lower, price_upper,
+                base_value, predicted_premium_pct, feature_contributions,
+                source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        cursor = self.conn.execute(sql, (
+            latitude, longitude, neighborhood, zip_code,
+            beds, baths, sqft, year_built, lot_size_sqft,
+            property_type, list_price, hoa_per_month,
+            predicted_price, price_lower, price_upper,
+            base_value, predicted_premium_pct, fc_json,
+            source,
+        ))
+        self.conn.commit()
+        row_id = cursor.lastrowid
+        logger.info(
+            "Stored prediction #%d: $%s for (%s, %s) via %s",
+            row_id, f"{predicted_price:,}", latitude, longitude, source,
+        )
+        return row_id
+
+    # ------------------------------------------------------------------
     # Neighborhoods
     # ------------------------------------------------------------------
 
@@ -891,6 +1325,15 @@ class Database:
             }
         else:
             stats["building_permits"] = {"count": 0, "addresses": 0}
+
+        # Properties (parcels)
+        props_exists = self.conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='properties'"
+        ).fetchone()[0]
+        if props_exists:
+            stats["properties"] = self.get_properties_count()
+        else:
+            stats["properties"] = {"total": 0}
 
         # Neighborhoods
         row = self.conn.execute("SELECT COUNT(*) FROM neighborhoods").fetchone()

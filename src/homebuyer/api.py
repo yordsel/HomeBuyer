@@ -9,6 +9,7 @@ Usage:
 """
 
 import logging
+import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import date
@@ -101,6 +102,24 @@ class ImprovementSimRequest(BaseModel):
     hoa_per_month: Optional[int] = None
 
 
+class RentalAnalysisRequest(BaseModel):
+    latitude: float
+    longitude: float
+    address: Optional[str] = None
+    neighborhood: Optional[str] = None
+    zip_code: Optional[str] = None
+    beds: Optional[float] = None
+    baths: Optional[float] = None
+    sqft: Optional[int] = None
+    lot_size_sqft: Optional[int] = None
+    year_built: Optional[int] = None
+    property_type: str = "Single Family Residential"
+    hoa_per_month: Optional[int] = None
+    list_price: Optional[int] = None
+    down_payment_pct: float = 20.0
+    self_managed: bool = True
+
+
 # ---------------------------------------------------------------------------
 # Application state — loaded once at startup, kept warm
 # ---------------------------------------------------------------------------
@@ -172,6 +191,12 @@ class AppState:
         else:
             logger.info("AI potential summarizer disabled (no ANTHROPIC_API_KEY)")
 
+        # Rental income & investment analyzer
+        from homebuyer.analysis.rental_analysis import RentalAnalyzer
+
+        self.rental_analyzer = RentalAnalyzer(self.db, self.dev_calc)
+        logger.info("Rental analyzer initialized")
+
         # Faketor AI chat advisor
         from homebuyer.services.faketor import FaketorService
 
@@ -181,9 +206,32 @@ class AppState:
         else:
             logger.info("Faketor AI advisor disabled (no ANTHROPIC_API_KEY)")
 
+        # In-memory TTL cache for frequently-accessed analytics
+        self._ttl_cache: dict[str, tuple[float, object]] = {}
+
     def get_analyzer(self):
         from homebuyer.analysis.market_analysis import MarketAnalyzer
         return MarketAnalyzer(self.db)
+
+    # ------------------------------------------------------------------
+    # In-memory TTL cache for frequently-requested analytics
+    # ------------------------------------------------------------------
+    _TTL_SECONDS = 3600  # 1 hour default
+
+    def cache_get(self, key: str) -> object | None:
+        """Get a value from the in-memory TTL cache, or None if expired/missing."""
+        entry = self._ttl_cache.get(key)
+        if entry is None:
+            return None
+        cached_at, value = entry
+        if time.time() - cached_at > self._TTL_SECONDS:
+            del self._ttl_cache[key]
+            return None
+        return value
+
+    def cache_set(self, key: str, value: object) -> None:
+        """Store a value in the in-memory TTL cache."""
+        self._ttl_cache[key] = (time.time(), value)
 
     def close(self) -> None:
         if self.db:
@@ -274,8 +322,32 @@ def predict_listing(req: ListingPredictRequest):
     if not listing.get("neighborhood"):
         listing["neighborhood"] = resolve_neighborhood(listing, _state.db)
 
-    # Run prediction
+    # Run prediction (with caching)
     result = model.predict_single(_state.db, listing)
+
+    # Store in predictions cache
+    if listing.get("latitude") and listing.get("longitude"):
+        _state.db.store_prediction(
+            latitude=listing["latitude"],
+            longitude=listing["longitude"],
+            predicted_price=result.predicted_price,
+            price_lower=result.price_lower,
+            price_upper=result.price_upper,
+            neighborhood=result.neighborhood or listing.get("neighborhood"),
+            zip_code=listing.get("zip_code"),
+            beds=listing.get("beds"),
+            baths=listing.get("baths"),
+            sqft=listing.get("sqft"),
+            year_built=listing.get("year_built"),
+            lot_size_sqft=listing.get("lot_size_sqft"),
+            property_type=listing.get("property_type"),
+            list_price=listing.get("list_price"),
+            hoa_per_month=listing.get("hoa_per_month"),
+            base_value=result.base_value,
+            predicted_premium_pct=result.predicted_premium_pct,
+            feature_contributions=result.feature_contributions,
+            source="predict",
+        )
 
     # Find comparable sales
     analyzer = _state.get_analyzer()
@@ -328,6 +400,30 @@ def predict_manual(req: ManualPredictRequest):
 
     prop = req.model_dump(exclude_none=True)
     result = model.predict_single(_state.db, prop)
+
+    # Store in predictions cache
+    if prop.get("latitude") and prop.get("longitude"):
+        _state.db.store_prediction(
+            latitude=prop["latitude"],
+            longitude=prop["longitude"],
+            predicted_price=result.predicted_price,
+            price_lower=result.price_lower,
+            price_upper=result.price_upper,
+            neighborhood=result.neighborhood or prop.get("neighborhood"),
+            zip_code=prop.get("zip_code"),
+            beds=prop.get("beds"),
+            baths=prop.get("baths"),
+            sqft=prop.get("sqft"),
+            year_built=prop.get("year_built"),
+            lot_size_sqft=prop.get("lot_size_sqft"),
+            property_type=prop.get("property_type"),
+            list_price=prop.get("list_price"),
+            hoa_per_month=prop.get("hoa_per_month"),
+            base_value=result.base_value,
+            predicted_premium_pct=result.predicted_premium_pct,
+            feature_contributions=result.feature_contributions,
+            source="manual",
+        )
 
     return {
         "prediction": _prediction_to_dict(result),
@@ -433,6 +529,28 @@ def predict_map_click(req: MapClickRequest):
 
         result = model.predict_single(_state.db, prop)
 
+        # Store in predictions cache
+        _state.db.store_prediction(
+            latitude=prop.get("latitude", req.latitude),
+            longitude=prop.get("longitude", req.longitude),
+            predicted_price=result.predicted_price,
+            price_lower=result.price_lower,
+            price_upper=result.price_upper,
+            neighborhood=result.neighborhood or neighborhood,
+            zip_code=prop.get("zip_code") or zip_code,
+            beds=prop.get("beds"),
+            baths=prop.get("baths"),
+            sqft=prop.get("sqft"),
+            year_built=prop.get("year_built"),
+            lot_size_sqft=prop.get("lot_size_sqft"),
+            property_type=prop.get("property_type"),
+            list_price=prop.get("list_price"),
+            base_value=result.base_value,
+            predicted_premium_pct=result.predicted_premium_pct,
+            feature_contributions=result.feature_contributions,
+            source="map-click",
+        )
+
         analyzer = _state.get_analyzer()
         comps = analyzer.find_comparables(
             neighborhood=neighborhood,
@@ -495,6 +613,28 @@ def predict_map_click(req: MapClickRequest):
         prop["address"] = address
 
         result = model.predict_single(_state.db, prop)
+
+        # Store in predictions cache
+        _state.db.store_prediction(
+            latitude=req.latitude,
+            longitude=req.longitude,
+            predicted_price=result.predicted_price,
+            price_lower=result.price_lower,
+            price_upper=result.price_upper,
+            neighborhood=result.neighborhood or neighborhood,
+            zip_code=zip_code,
+            beds=prop.get("beds"),
+            baths=prop.get("baths"),
+            sqft=prop.get("sqft"),
+            year_built=prop.get("year_built"),
+            lot_size_sqft=prop.get("lot_size_sqft"),
+            property_type=prop.get("property_type"),
+            list_price=prop.get("list_price"),
+            base_value=result.base_value,
+            predicted_premium_pct=result.predicted_premium_pct,
+            feature_contributions=result.feature_contributions,
+            source="map-click",
+        )
 
         analyzer = _state.get_analyzer()
         comps = analyzer.find_comparables(
@@ -884,6 +1024,116 @@ def improvement_simulation(req: ImprovementSimRequest):
     }
 
 
+# --- Rental Income & Investment Analysis ---
+
+
+@app.post("/api/property/rental-analysis")
+def rental_analysis(req: RentalAnalysisRequest):
+    """Run comprehensive rental income and investment scenario analysis.
+
+    Compares multiple strategies: rent as-is, add ADU, SB9 lot split,
+    and multi-unit development. Returns cash flow projections, mortgage
+    analysis, tax benefits, and key investment metrics for each scenario.
+    """
+    if not _state:
+        raise HTTPException(status_code=503, detail="Server not ready.")
+
+    # Resolve property details from DB (same pattern as improvement_simulation)
+    neighborhood = req.neighborhood
+    zip_code = req.zip_code or "94702"
+    sqft = req.sqft
+    lot_size_sqft = req.lot_size_sqft
+    address = req.address
+    beds = req.beds
+    baths = req.baths
+    year_built = req.year_built
+
+    if _state.db:
+        nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=50)
+        if nearest:
+            if not neighborhood:
+                neighborhood = nearest.get("neighborhood")
+            if sqft is None:
+                sqft = nearest.get("sqft")
+            if lot_size_sqft is None:
+                lot_size_sqft = nearest.get("lot_size_sqft")
+            if not address:
+                address = nearest.get("address")
+            if beds is None:
+                beds = nearest.get("beds")
+            if baths is None:
+                baths = nearest.get("baths")
+            if year_built is None:
+                year_built = nearest.get("year_built")
+            if not req.zip_code:
+                zip_code = nearest.get("zip_code") or zip_code
+
+    if not neighborhood:
+        if _state.geocoder:
+            neighborhood = _state.geocoder.geocode_point(req.latitude, req.longitude)
+            if not neighborhood:
+                neighborhood = _state.geocoder.geocode_nearest(req.latitude, req.longitude)
+        if not neighborhood:
+            neighborhood = "Berkeley"
+
+    prop = {
+        "latitude": req.latitude,
+        "longitude": req.longitude,
+        "neighborhood": neighborhood,
+        "zip_code": zip_code,
+        "beds": beds,
+        "baths": baths,
+        "sqft": sqft,
+        "lot_size_sqft": lot_size_sqft,
+        "year_built": year_built,
+        "property_type": req.property_type,
+        "hoa_per_month": req.hoa_per_month,
+        "address": address,
+        "list_price": req.list_price,
+    }
+
+    from homebuyer.analysis.rental_analysis import rental_analysis_to_dict
+
+    result = _state.rental_analyzer.analyze(
+        prop,
+        down_payment_pct=req.down_payment_pct,
+        self_managed=req.self_managed,
+    )
+    return rental_analysis_to_dict(result)
+
+
+@app.post("/api/property/rent-estimate")
+def rent_estimate(req: RentalAnalysisRequest):
+    """Quick single-unit rent estimate for a property."""
+    if not _state:
+        raise HTTPException(status_code=503, detail="Server not ready.")
+
+    # Resolve neighborhood
+    neighborhood = req.neighborhood
+    if not neighborhood and _state.db:
+        nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=50)
+        if nearest:
+            neighborhood = nearest.get("neighborhood")
+    if not neighborhood and _state.geocoder:
+        neighborhood = _state.geocoder.geocode_point(req.latitude, req.longitude)
+
+    beds = int(req.beds or 3)
+    baths = float(req.baths or 2.0)
+    sqft = req.sqft
+
+    rent = _state.rental_analyzer.estimate_rent(
+        beds=beds,
+        baths=baths,
+        sqft=sqft,
+        neighborhood=neighborhood,
+        property_value=req.list_price,
+    )
+
+    from homebuyer.analysis.rental_analysis import _rent_to_dict
+
+    return _rent_to_dict(rent)
+
+
 # --- Faketor Chat ---
 
 
@@ -900,7 +1150,7 @@ class FaketorChatRequest(BaseModel):
     sqft: Optional[int] = None
     lot_size_sqft: Optional[int] = None
     year_built: Optional[int] = None
-    property_type: str = "Single Family Residential"
+    property_type: Optional[str] = "Single Family Residential"
 
 
 def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
@@ -993,53 +1243,44 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         return json.dumps([_comp_to_dict(c) for c in comps[:7]], default=str)
 
     elif tool_name == "get_neighborhood_stats":
+        neighborhood = tool_input["neighborhood"]
+        years = tool_input.get("years", 2)
+        cache_key = f"neighborhood_stats:{neighborhood}:{years}"
+        cached = _state.cache_get(cache_key)
+        if cached:
+            logger.info("TTL cache HIT for %s", cache_key)
+            return json.dumps(cached, default=str)
         analyzer = _state.get_analyzer()
         from dataclasses import asdict
-        stats = analyzer.get_neighborhood_stats(
-            tool_input["neighborhood"],
-            lookback_years=tool_input.get("years", 2),
-        )
-        return json.dumps(_neighborhood_stats_to_dict(stats), default=str)
+        stats = analyzer.get_neighborhood_stats(neighborhood, lookback_years=years)
+        result_dict = _neighborhood_stats_to_dict(stats)
+        _state.cache_set(cache_key, result_dict)
+        logger.info("TTL cache MISS for %s — stored", cache_key)
+        return json.dumps(result_dict, default=str)
 
     elif tool_name == "get_market_summary":
+        cache_key = "market_summary"
+        cached = _state.cache_get(cache_key)
+        if cached:
+            logger.info("TTL cache HIT for %s", cache_key)
+            return json.dumps(cached, default=str)
         analyzer = _state.get_analyzer()
-        return json.dumps(analyzer.generate_summary_report(), default=str)
+        result_dict = analyzer.generate_summary_report()
+        _state.cache_set(cache_key, result_dict)
+        logger.info("TTL cache MISS for %s — stored", cache_key)
+        return json.dumps(result_dict, default=str)
 
     elif tool_name == "get_price_prediction":
-        model = _require_model()
-        prop = {
-            "latitude": tool_input["latitude"],
-            "longitude": tool_input["longitude"],
-            "neighborhood": tool_input.get("neighborhood", "Berkeley"),
-            "zip_code": tool_input.get("zip_code", "94702"),
-            "beds": tool_input.get("beds"),
-            "baths": tool_input.get("baths"),
-            "sqft": tool_input.get("sqft"),
-            "year_built": tool_input.get("year_built"),
-            "lot_size_sqft": tool_input.get("lot_size_sqft"),
-            "property_type": tool_input.get("property_type", "Single Family Residential"),
-        }
-        result = model.predict_single(_state.db, prop)
-        return json.dumps(_prediction_to_dict(result), default=str)
+        return json.dumps(
+            _get_or_compute_prediction(tool_input, source="chat"),
+            default=str,
+        )
 
     elif tool_name == "estimate_sell_vs_hold":
-        model = _require_model()
         analyzer = _state.get_analyzer()
-        prop = {
-            "latitude": tool_input["latitude"],
-            "longitude": tool_input["longitude"],
-            "neighborhood": tool_input.get("neighborhood", "Berkeley"),
-            "zip_code": tool_input.get("zip_code", "94702"),
-            "beds": tool_input.get("beds"),
-            "baths": tool_input.get("baths"),
-            "sqft": tool_input.get("sqft"),
-            "year_built": tool_input.get("year_built"),
-            "lot_size_sqft": tool_input.get("lot_size_sqft"),
-            "property_type": tool_input.get("property_type", "Single Family Residential"),
-        }
-        # Current predicted value
-        pred = model.predict_single(_state.db, prop)
-        current_value = pred.predicted_price
+        # Reuse cached prediction
+        pred_dict = _get_or_compute_prediction(tool_input, source="chat")
+        current_value = pred_dict["predicted_price"]
 
         # Get neighborhood YoY appreciation
         neighborhood = tool_input.get("neighborhood", "Berkeley")
@@ -1069,35 +1310,109 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 "net_gain": net_gain,
             }
 
-        # Rough rental yield estimate
-        # Berkeley typical price-to-rent ratio: ~25-30 for SFH
-        beds = tool_input.get("beds") or 3
-        # Rough monthly rent estimates by bedroom count (Berkeley 2025-26)
-        rent_estimates = {1: 2200, 2: 3000, 3: 3800, 4: 4500, 5: 5200}
-        monthly_rent = rent_estimates.get(int(beds), 3500)
-        annual_rent = monthly_rent * 12
-        # Expenses: ~35% of rent (property tax, insurance, maintenance, vacancy)
-        annual_net_rent = int(annual_rent * 0.65)
-        cap_rate = round(annual_net_rent / current_value * 100, 2) if current_value > 0 else 0
-        price_to_rent = round(current_value / annual_rent, 1) if annual_rent > 0 else 0
+        # Use RentalAnalyzer for data-driven rent estimate
+        beds = int(tool_input.get("beds") or 3)
+        rent_est = _state.rental_analyzer.estimate_rent(
+            beds=beds,
+            baths=float(tool_input.get("baths") or 2.0),
+            sqft=tool_input.get("sqft"),
+            neighborhood=neighborhood,
+            property_value=current_value,
+        )
+        expenses = _state.rental_analyzer.calculate_expenses(
+            current_value, rent_est.annual_rent,
+        )
+        noi = rent_est.annual_rent - expenses.total_annual
+        cap_rate = round(noi / current_value * 100, 2) if current_value > 0 else 0
+        price_to_rent = round(current_value / rent_est.annual_rent, 1) if rent_est.annual_rent > 0 else 0
 
         return json.dumps({
             "current_predicted_value": current_value,
-            "confidence_range": [pred.price_lower, pred.price_upper],
+            "confidence_range": [pred_dict["price_lower"], pred_dict["price_upper"]],
             "neighborhood": neighborhood,
             "yoy_appreciation_pct": yoy_pct,
             "mortgage_rate_30yr": mortgage_rate,
             "hold_scenarios": scenarios,
             "rental_estimate": {
-                "monthly_rent": monthly_rent,
-                "annual_gross_rent": annual_rent,
-                "annual_net_rent": annual_net_rent,
+                "monthly_rent": rent_est.monthly_rent,
+                "annual_gross_rent": rent_est.annual_rent,
+                "annual_net_rent": noi,
                 "cap_rate_pct": cap_rate,
                 "price_to_rent_ratio": price_to_rent,
-                "expense_ratio_pct": 35,
-                "note": "Rough estimate based on typical Berkeley price-to-rent ratios. "
-                        "Actual rents vary by condition, exact location, and amenities.",
+                "expense_ratio_pct": expenses.expense_ratio_pct,
+                "estimation_method": rent_est.estimation_method,
+                "note": rent_est.notes,
             },
+        }, default=str)
+
+    elif tool_name == "estimate_rental_income":
+        prop = {
+            "latitude": tool_input["latitude"],
+            "longitude": tool_input["longitude"],
+            "neighborhood": tool_input.get("neighborhood"),
+            "beds": tool_input.get("beds"),
+            "baths": tool_input.get("baths"),
+            "sqft": tool_input.get("sqft"),
+            "year_built": tool_input.get("year_built"),
+            "lot_size_sqft": tool_input.get("lot_size_sqft"),
+            "property_type": tool_input.get("property_type", "Single Family Residential"),
+        }
+        scenario = _state.rental_analyzer.build_scenario_as_is(
+            prop,
+            down_payment_pct=tool_input.get("down_payment_pct", 20.0),
+        )
+        from homebuyer.analysis.rental_analysis import _scenario_to_dict
+        return json.dumps(_scenario_to_dict(scenario), default=str)
+
+    elif tool_name == "analyze_investment_scenarios":
+        prop = {
+            "latitude": tool_input["latitude"],
+            "longitude": tool_input["longitude"],
+            "neighborhood": tool_input.get("neighborhood"),
+            "beds": tool_input.get("beds"),
+            "baths": tool_input.get("baths"),
+            "sqft": tool_input.get("sqft"),
+            "year_built": tool_input.get("year_built"),
+            "lot_size_sqft": tool_input.get("lot_size_sqft"),
+            "property_type": tool_input.get("property_type", "Single Family Residential"),
+        }
+        from homebuyer.analysis.rental_analysis import rental_analysis_to_dict
+        result = _state.rental_analyzer.analyze(
+            prop,
+            down_payment_pct=tool_input.get("down_payment_pct", 20.0),
+            self_managed=tool_input.get("self_managed", True),
+        )
+        return json.dumps(rental_analysis_to_dict(result), default=str)
+
+    elif tool_name == "lookup_property":
+        if not _state or not _state.db:
+            return json.dumps({"error": "Database not available"})
+        address_query = tool_input.get("address", "")
+        results = _state.db.search_properties(address_query, limit=3)
+        if not results:
+            return json.dumps({"error": f"No properties found matching '{address_query}'"})
+        # Return the best match with all details
+        best = results[0]
+        return json.dumps({
+            "id": best.get("id"),
+            "address": best.get("address"),
+            "apn": best.get("apn"),
+            "latitude": best.get("latitude"),
+            "longitude": best.get("longitude"),
+            "neighborhood": best.get("neighborhood"),
+            "zip_code": best.get("zip_code"),
+            "zoning_class": best.get("zoning_class"),
+            "lot_size_sqft": best.get("lot_size_sqft"),
+            "building_sqft": best.get("building_sqft"),
+            "beds": best.get("beds"),
+            "baths": best.get("baths"),
+            "sqft": best.get("sqft"),
+            "year_built": best.get("year_built"),
+            "property_type": best.get("property_type"),
+            "use_description": best.get("use_description"),
+            "last_sale_price": best.get("last_sale_price"),
+            "last_sale_date": best.get("last_sale_date"),
+            "attom_enriched": bool(best.get("attom_enriched")),
         }, default=str)
 
     else:
@@ -1216,6 +1531,104 @@ def _comp_to_dict(comp) -> dict:
         "latitude": comp.latitude,
         "longitude": comp.longitude,
     }
+
+
+def _get_or_compute_prediction(tool_input: dict, source: str = "chat") -> dict:
+    """Get a cached prediction or compute a fresh one and store it.
+
+    Checks the predictions table for a recent cached result matching the
+    property parameters. If found, returns it directly. Otherwise computes
+    via the ML model and stores the result for future lookups.
+
+    Args:
+        tool_input: The tool input dict with latitude, longitude, beds, etc.
+        source: Origin label for the prediction ('chat', 'predict', 'manual').
+
+    Returns:
+        Prediction dict with predicted_price, price_lower, price_upper,
+        feature_contributions, etc.
+    """
+    lat = tool_input["latitude"]
+    lon = tool_input["longitude"]
+    beds = tool_input.get("beds")
+    baths = tool_input.get("baths")
+    sqft = tool_input.get("sqft")
+    year_built = tool_input.get("year_built")
+    lot_size_sqft = tool_input.get("lot_size_sqft")
+    property_type = tool_input.get("property_type", "Single Family Residential")
+    neighborhood = tool_input.get("neighborhood", "Berkeley")
+    zip_code = tool_input.get("zip_code", "94702")
+
+    # 1) Check cache
+    cached = _state.db.get_cached_prediction(
+        latitude=lat,
+        longitude=lon,
+        beds=beds,
+        baths=baths,
+        sqft=sqft,
+        year_built=year_built,
+        lot_size_sqft=lot_size_sqft,
+        property_type=property_type,
+    )
+    if cached:
+        logger.info(
+            "Cache HIT for prediction at (%s, %s) — returning stored result #%d",
+            lat, lon, cached["id"],
+        )
+        return {
+            "predicted_price": cached["predicted_price"],
+            "price_lower": cached["price_lower"],
+            "price_upper": cached["price_upper"],
+            "neighborhood": cached["neighborhood"],
+            "list_price": cached["list_price"],
+            "predicted_premium_pct": cached["predicted_premium_pct"],
+            "base_value": cached["base_value"],
+            "feature_contributions": cached["feature_contributions"],
+            "cached": True,
+            "cached_at": cached["created_at"],
+        }
+
+    # 2) Compute fresh prediction
+    logger.info("Cache MISS for prediction at (%s, %s) — computing fresh", lat, lon)
+    model = _require_model()
+    prop = {
+        "latitude": lat,
+        "longitude": lon,
+        "neighborhood": neighborhood,
+        "zip_code": zip_code,
+        "beds": beds,
+        "baths": baths,
+        "sqft": sqft,
+        "year_built": year_built,
+        "lot_size_sqft": lot_size_sqft,
+        "property_type": property_type,
+    }
+    result = model.predict_single(_state.db, prop)
+    pred_dict = _prediction_to_dict(result)
+
+    # 3) Store in cache
+    _state.db.store_prediction(
+        latitude=lat,
+        longitude=lon,
+        predicted_price=result.predicted_price,
+        price_lower=result.price_lower,
+        price_upper=result.price_upper,
+        neighborhood=result.neighborhood or neighborhood,
+        zip_code=zip_code,
+        beds=beds,
+        baths=baths,
+        sqft=sqft,
+        year_built=year_built,
+        lot_size_sqft=lot_size_sqft,
+        property_type=property_type,
+        list_price=result.list_price,
+        base_value=result.base_value,
+        predicted_premium_pct=result.predicted_premium_pct,
+        feature_contributions=result.feature_contributions,
+        source=source,
+    )
+
+    return pred_dict
 
 
 def _prediction_to_dict(result) -> dict:

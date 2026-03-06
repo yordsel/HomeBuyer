@@ -11,9 +11,12 @@ Usage:
     homebuyer collect permits     Scrape building permits from Accela portal
     homebuyer collect permits-address ADDRESS  Permits for a single address
     homebuyer collect attom-sales Fetch ATTOM sale history for known addresses
+    homebuyer collect parcels     Download Berkeley parcel data from Open Data
     homebuyer collect all         Run all six collectors
     homebuyer process zoning      Assign zoning districts to properties
+    homebuyer process parcels     Enrich parcels with zoning + neighborhood
     homebuyer process all         Normalize, geocode, zoning, and deduplicate
+    homebuyer enrich attom        Backfill ATTOM property details for parcels
     homebuyer status              Show database statistics
     homebuyer export              Export data to CSV
     homebuyer train               Train ML price prediction model
@@ -279,6 +282,29 @@ def collect_attom_sales(ctx: click.Context, limit: int | None, delay: float) -> 
         sys.exit(1)
 
 
+@collect.command("parcels")
+@click.option("--min-lot", type=int, default=4000,
+              help="Minimum lot size in sqft (default: 4000). Set to 0 for all.")
+@click.option("--all-uses", is_flag=True, help="Include non-residential use codes.")
+@click.pass_context
+def collect_parcels(ctx: click.Context, min_lot: int, all_uses: bool) -> None:
+    """Download Berkeley parcel data from City of Berkeley Open Data."""
+    from homebuyer.collectors.parcels import ParcelCollector
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        db.initialize_schema()
+        collector = ParcelCollector(db)
+        result = collector.collect(
+            min_lot_sqft=min_lot,
+            residential_only=not all_uses,
+        )
+
+    click.echo(str(result))
+    if not result.success:
+        sys.exit(1)
+
+
 @collect.command("all")
 @click.option("--days", default=1825, help="Number of days back for sales (default: 1825).")
 @click.pass_context
@@ -406,6 +432,20 @@ def process_zoning(ctx: click.Context) -> None:
     click.echo(f"Classified: {classified} properties with zoning districts")
 
 
+@process.command("parcels")
+@click.pass_context
+def process_parcels(ctx: click.Context) -> None:
+    """Enrich properties with zoning districts and neighborhoods via spatial join."""
+    from homebuyer.processing.parcels import enrich_parcels_spatial
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        db.initialize_schema()
+        zoning_count, neighborhood_count = enrich_parcels_spatial(db)
+
+    click.echo(f"Zoning assigned: {zoning_count}, Neighborhoods assigned: {neighborhood_count}")
+
+
 @process.command("all")
 @click.pass_context
 def process_all(ctx: click.Context) -> None:
@@ -432,6 +472,37 @@ def process_all(ctx: click.Context) -> None:
     ctx.invoke(process_validate)
 
     click.echo("\nAll processing complete.")
+
+
+# ---------------------------------------------------------------------------
+# enrich
+# ---------------------------------------------------------------------------
+
+@main.group()
+def enrich() -> None:
+    """Enrich data from external APIs (ATTOM, etc.)."""
+    pass
+
+
+@enrich.command("attom")
+@click.option("--limit", type=int, default=None,
+              help="Max properties to enrich (default: all un-enriched).")
+@click.option("--delay", type=float, default=2.0,
+              help="Seconds between ATTOM API calls (default: 2.0).")
+@click.pass_context
+def enrich_attom(ctx: click.Context, limit: int | None, delay: float) -> None:
+    """Backfill ATTOM property details for un-enriched parcels."""
+    from homebuyer.collectors.attom_parcels import AttomParcelEnricher
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        db.initialize_schema()
+        enricher = AttomParcelEnricher(db)
+        result = enricher.enrich(limit=limit, delay=delay)
+
+    click.echo(str(result))
+    if not result.success:
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -497,6 +568,13 @@ def status(ctx: click.Context) -> None:
     if beso.get("count", 0) > 0:
         click.echo(f"  Buildings:       {beso['addresses']:,}")
         click.echo(f"  Years:           {beso['min_year']}–{beso['max_year']}")
+
+    props = stats.get("properties", {})
+    if props.get("total", 0) > 0:
+        click.echo(f"\nProperties:        {props['total']:,} parcels")
+        click.echo(f"  With zoning:     {props.get('with_zoning', 0):,}")
+        click.echo(f"  With nbhd:       {props.get('with_neighborhood', 0):,}")
+        click.echo(f"  ATTOM enriched:  {props.get('attom_enriched', 0):,}")
 
     nb = stats["neighborhoods"]
     click.echo(f"\nNeighborhoods:     {nb['count']:,} defined")

@@ -20,6 +20,26 @@ logger = logging.getLogger(__name__)
 
 FAKETOR_TOOLS = [
     {
+        "name": "lookup_property",
+        "description": (
+            "Look up a Berkeley property by address. Returns property details "
+            "from the citywide database including beds, baths, sqft, year built, "
+            "lot size, zoning, neighborhood, and last sale info. Use this when "
+            "the user mentions a specific address or asks about a property you "
+            "don't already have context for."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "description": "Street address to search for (e.g. '1234 Cedar St')",
+                },
+            },
+            "required": ["address"],
+        },
+    },
+    {
         "name": "get_development_potential",
         "description": (
             "Get zoning details, ADU feasibility, Middle Housing eligibility, "
@@ -163,7 +183,95 @@ FAKETOR_TOOLS = [
             "required": ["latitude", "longitude", "neighborhood"],
         },
     },
+    {
+        "name": "estimate_rental_income",
+        "description": (
+            "Estimate rental income for a Berkeley property. Returns monthly/annual "
+            "rent estimates, itemized operating expenses, mortgage analysis, cap rate, "
+            "cash-on-cash return, and cash flow projections for a rent-as-is scenario. "
+            "Use this when the user asks about rental income, what the property could "
+            "rent for, monthly rent estimates, or landlord cash flow."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "latitude": {"type": "number"},
+                "longitude": {"type": "number"},
+                "neighborhood": {"type": "string"},
+                "beds": {"type": "number"},
+                "baths": {"type": "number"},
+                "sqft": {"type": "integer"},
+                "year_built": {"type": "integer"},
+                "lot_size_sqft": {"type": "integer"},
+                "property_type": {"type": "string"},
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": "Down payment percentage (default 20)",
+                },
+            },
+            "required": ["latitude", "longitude"],
+        },
+    },
+    {
+        "name": "analyze_investment_scenarios",
+        "description": (
+            "Run comprehensive investment scenario analysis comparing multiple "
+            "strategies: rent as-is, add ADU, SB9 lot split, and multi-unit "
+            "development. For each applicable scenario, provides cash flow "
+            "projections over 1-20 years, mortgage analysis, tax benefits "
+            "(depreciation, interest deduction), and key metrics (cap rate, "
+            "cash-on-cash return, equity buildup). Integrates with development "
+            "potential data for ADU feasibility and SB9 eligibility. "
+            "Use this when the user asks about investment analysis, best scenario, "
+            "ROI of adding an ADU vs renting as-is, development returns, or "
+            "long-term investment comparison."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "latitude": {"type": "number"},
+                "longitude": {"type": "number"},
+                "neighborhood": {"type": "string"},
+                "beds": {"type": "number"},
+                "baths": {"type": "number"},
+                "sqft": {"type": "integer"},
+                "year_built": {"type": "integer"},
+                "lot_size_sqft": {"type": "integer"},
+                "property_type": {"type": "string"},
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": "Down payment percentage (default 20)",
+                },
+                "self_managed": {
+                    "type": "boolean",
+                    "description": "Whether owner self-manages (no mgmt fee). Default true.",
+                },
+            },
+            "required": ["latitude", "longitude"],
+        },
+    },
 ]
+
+# ---------------------------------------------------------------------------
+# Tool name → block type mapping for structured response blocks
+# ---------------------------------------------------------------------------
+
+TOOL_TO_BLOCK_TYPE: dict[str, str] = {
+    "lookup_property": "property_detail",
+    "get_price_prediction": "prediction_card",
+    "get_comparable_sales": "comps_table",
+    "get_neighborhood_stats": "neighborhood_stats",
+    "get_development_potential": "development_potential",
+    "get_improvement_simulation": "improvement_sim",
+    "estimate_sell_vs_hold": "sell_vs_hold",
+    "estimate_rental_income": "rental_income",
+    "analyze_investment_scenarios": "investment_scenarios",
+    "get_market_summary": "market_summary",
+}
+
+# ---------------------------------------------------------------------------
+# System prompt
+# ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """You are Faketor, a witty and knowledgeable Berkeley real estate advisor AI. \
 You help home buyers evaluate properties in Berkeley, California by pulling real data from \
@@ -176,27 +284,38 @@ PERSONALITY:
 - When you don't have data, say so honestly
 
 CAPABILITIES (use your tools!):
+- Property lookup: search any Berkeley property by address (17,000+ parcels in our database)
 - Development potential: zoning, ADU, Middle Housing, SB 9 lot splitting
 - Improvement ROI: ML-simulated value impact of renovations
 - Comparable sales and neighborhood statistics
 - Market-wide trends, mortgage rates, inventory
 - Price prediction from the ML model
 - Sell-vs-hold analysis with appreciation projections and rental yield estimates
+- Rental income estimation with data-driven rent estimates and expense modeling
+- Investment scenario comparison (as-is, ADU, SB9, multi-unit) with cash flow projections, \
+mortgage analysis, and tax benefits
 
 RULES:
 - Always ground your advice in data from the tools — call them before answering
 - If the user asks something you can answer with a tool, use it
+- When the user mentions a specific address, use lookup_property first to get property details, \
+then use those details when calling other tools
+- You can call multiple tools in sequence — e.g. lookup_property → get_development_potential
 - Do NOT provide specific investment advice or guaranteed returns
 - Mention that your projections are estimates based on historical data
 - Keep responses concise — 2-4 paragraphs max unless asked for detail
 - Use dollar amounts and percentages to make your points concrete
-- When discussing sell vs rent, always mention that rental estimates are rough \
-  (based on typical Berkeley price-to-rent ratios, not actual rental comps)
+- When discussing rental income, note that estimates use local price-to-rent ratios \
+  and neighborhood data, but actual rents depend on condition, exact location, \
+  and current market conditions
+- For investment scenarios, compare the as-is scenario with the best development option \
+  and highlight the trade-offs (capital required, timeline, risk)
 
 CONTEXT:
-The user is looking at a specific property on the Development Potential page. \
-Property details (address, coordinates, etc.) are provided in the conversation context. \
-Use these details when calling tools — do NOT ask the user for coordinates or addresses."""
+You are the primary interface for the HomeBuyer app. Users may ask about any Berkeley property \
+by address, or about the overall market. If property details (address, coordinates, etc.) are \
+provided in the conversation context, use them when calling tools. If the user asks about a \
+different property, use lookup_property to find it first."""
 
 
 class FaketorService:
@@ -234,7 +353,7 @@ class FaketorService:
             tool_executor: Callable(tool_name, tool_input) -> str that executes tools.
 
         Returns:
-            {"reply": str, "tool_calls": list[dict]} or {"error": str}
+            {"reply": str, "tool_calls": list, "blocks": list} or {"error": str}
         """
         if not self._enabled or not self._client:
             return {"error": "Faketor is unavailable (no API key configured)"}
@@ -246,6 +365,7 @@ class FaketorService:
         messages = list(history) + [{"role": "user", "content": message}]
 
         tool_calls_log = []
+        blocks = []  # Structured response blocks for frontend rendering
 
         try:
             # Agentic loop: keep going until Claude stops calling tools
@@ -267,6 +387,7 @@ class FaketorService:
                     return {
                         "reply": "\n".join(text_parts),
                         "tool_calls": tool_calls_log,
+                        "blocks": blocks,
                     }
 
                 # Extract tool use blocks
@@ -279,6 +400,7 @@ class FaketorService:
                     return {
                         "reply": "\n".join(text_parts) if text_parts else "I'm not sure how to help with that.",
                         "tool_calls": tool_calls_log,
+                        "blocks": blocks,
                     }
 
                 # Append assistant response (with tool_use blocks)
@@ -303,12 +425,27 @@ class FaketorService:
                         "content": result_str,
                     })
 
+                    # Accumulate structured blocks for frontend rendering
+                    block_type = TOOL_TO_BLOCK_TYPE.get(tool_block.name)
+                    if block_type:
+                        try:
+                            result_data = json.loads(result_str)
+                            if not isinstance(result_data, dict) or not result_data.get("error"):
+                                blocks.append({
+                                    "type": block_type,
+                                    "tool_name": tool_block.name,
+                                    "data": result_data,
+                                })
+                        except (json.JSONDecodeError, TypeError):
+                            pass  # Skip blocks for non-JSON results
+
                 messages.append({"role": "user", "content": tool_results})
 
             # If we hit max iterations, return what we have
             return {
                 "reply": "I gathered a lot of data but hit my analysis limit. Could you ask a more specific question?",
                 "tool_calls": tool_calls_log,
+                "blocks": blocks,
             }
 
         except Exception as e:

@@ -13,6 +13,8 @@ import {
 import { toast } from 'sonner';
 import { AddressSearch } from '../components/AddressSearch';
 import { ImprovementSimCard } from '../components/ImprovementSimCard';
+import { RentalIncomeCard } from '../components/RentalIncomeCard';
+import { InvestmentScenarioCard } from '../components/InvestmentScenarioCard';
 import { usePropertyContext } from '../context/PropertyContext';
 import * as api from '../lib/tauri';
 import { formatNumber } from '../lib/utils';
@@ -141,6 +143,24 @@ export function PotentialPage() {
           {/* Improvement Simulation */}
           {selectedCoords && (
             <ImprovementSimCard
+              latitude={selectedCoords.lat}
+              longitude={selectedCoords.lng}
+              address={selectedAddress}
+            />
+          )}
+
+          {/* Rental Income Analysis */}
+          {selectedCoords && (
+            <RentalIncomeCard
+              latitude={selectedCoords.lat}
+              longitude={selectedCoords.lng}
+              address={selectedAddress}
+            />
+          )}
+
+          {/* Investment Scenario Comparison */}
+          {selectedCoords && (
+            <InvestmentScenarioCard
               latitude={selectedCoords.lat}
               longitude={selectedCoords.lng}
               address={selectedAddress}

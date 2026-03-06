@@ -262,6 +262,156 @@ pub async fn get_comparables(
 }
 
 // ---------------------------------------------------------------------------
+// Development Potential
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_property_potential(
+    state: State<'_, AppState>,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let resp = state
+        .client
+        .post(format!("{}/api/property/potential", state.base_url))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(map_err)?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        let detail = body["detail"].as_str().unwrap_or("Unknown error");
+        return Err(format!("{}: {}", status, detail));
+    }
+
+    resp.json().await.map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn get_property_potential_summary(
+    state: State<'_, AppState>,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let resp = state
+        .client
+        .post(format!("{}/api/property/potential/summary", state.base_url))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(map_err)?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        let detail = body["detail"].as_str().unwrap_or("Unknown error");
+        return Err(format!("{}: {}", status, detail));
+    }
+
+    resp.json().await.map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn get_improvement_simulation(
+    state: State<'_, AppState>,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let resp = state
+        .client
+        .post(format!("{}/api/property/improvement-sim", state.base_url))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(map_err)?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        let detail = body["detail"].as_str().unwrap_or("Unknown error");
+        return Err(format!("{}: {}", status, detail));
+    }
+
+    resp.json().await.map_err(map_err)
+}
+
+// ---------------------------------------------------------------------------
+// Rental Analysis
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_rental_analysis(
+    state: State<'_, AppState>,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let resp = state
+        .client
+        .post(format!("{}/api/property/rental-analysis", state.base_url))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(map_err)?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        let detail = body["detail"].as_str().unwrap_or("Unknown error");
+        return Err(format!("{}: {}", status, detail));
+    }
+
+    resp.json().await.map_err(map_err)
+}
+
+#[tauri::command]
+pub async fn get_rent_estimate(
+    state: State<'_, AppState>,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let resp = state
+        .client
+        .post(format!("{}/api/property/rent-estimate", state.base_url))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(map_err)?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        let detail = body["detail"].as_str().unwrap_or("Unknown error");
+        return Err(format!("{}: {}", status, detail));
+    }
+
+    resp.json().await.map_err(map_err)
+}
+
+// ---------------------------------------------------------------------------
+// Faketor Chat
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn faketor_chat(
+    state: State<'_, AppState>,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let resp = state
+        .client
+        .post(format!("{}/api/faketor/chat", state.base_url))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(map_err)?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        let detail = body["detail"].as_str().unwrap_or("Unknown error");
+        return Err(format!("{}: {}", status, detail));
+    }
+
+    resp.json().await.map_err(map_err)
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

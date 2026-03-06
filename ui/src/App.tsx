@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Toaster } from 'sonner';
 import { Sidebar } from './components/Sidebar';
+import { ChatPage } from './pages/Chat';
 import { PredictPage } from './pages/Predict';
 import { NeighborhoodsPage } from './pages/Neighborhoods';
 import { MarketPage } from './pages/Market';
@@ -8,14 +9,15 @@ import { ModelInfoPage } from './pages/ModelInfo';
 import { AffordPage } from './pages/Afford';
 import { PotentialPage } from './pages/Potential';
 import { PropertyProvider } from './context/PropertyContext';
-import { FaketorFAB } from './components/FaketorFAB';
 import type { PageId } from './types';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<PageId>('predict');
+  const [currentPage, setCurrentPage] = useState<PageId>('chat');
 
   function renderPage() {
     switch (currentPage) {
+      case 'chat':
+        return <ChatPage />;
       case 'predict':
         return <PredictPage onNavigate={setCurrentPage} />;
       case 'neighborhoods':
@@ -29,7 +31,7 @@ function App() {
       case 'potential':
         return <PotentialPage />;
       default:
-        return <PredictPage onNavigate={setCurrentPage} />;
+        return <ChatPage />;
     }
   }
 
@@ -46,7 +48,6 @@ function App() {
 
         <Toaster position="bottom-right" richColors closeButton />
       </div>
-      <FaketorFAB />
     </PropertyProvider>
   );
 }

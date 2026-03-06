@@ -54,6 +54,9 @@ CENSUS_ACS_BASE_URL = "https://api.census.gov/data"
 # Berkeley Open Data (Socrata) — BESO energy benchmarking
 BERKELEY_OPENDATA_BESO_URL = "https://data.cityofberkeley.info/resource/8k7b-6awf.json"
 
+# Berkeley Open Data (Socrata) — City parcels
+BERKELEY_OPENDATA_PARCELS_URL = "https://data.cityofberkeley.info/resource/rax9-nuvx.json"
+
 # ---------------------------------------------------------------------------
 # ATTOM Property Data API (optional — enables auto-fill for map-click)
 # ---------------------------------------------------------------------------

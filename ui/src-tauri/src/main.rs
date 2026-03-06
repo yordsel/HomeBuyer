@@ -133,6 +133,12 @@ fn main() {
             commands::get_model_info,
             commands::get_affordability,
             commands::get_comparables,
+            commands::get_property_potential,
+            commands::get_property_potential_summary,
+            commands::get_improvement_simulation,
+            commands::get_rental_analysis,
+            commands::get_rent_estimate,
+            commands::faketor_chat,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

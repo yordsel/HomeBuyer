@@ -15,6 +15,8 @@ import type {
   PotentialSummaryResponse,
   ImprovementSimResponse,
   FaketorChatResponse,
+  RentalAnalysisResponse,
+  RentEstimate,
 } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -29,7 +31,7 @@ const isTauri = '__TAURI_INTERNALS__' in window;
 const isLocal =
   window.location.hostname === 'localhost' ||
   window.location.hostname === '127.0.0.1';
-const API_BASE = isTauri || isLocal ? 'http://127.0.0.1:10000' : '';
+const API_BASE = isTauri || isLocal ? 'http://127.0.0.1:8787' : '';
 
 /**
  * Wrapper that uses Tauri invoke() when running inside the Tauri shell,
@@ -252,6 +254,44 @@ export async function getImprovementSimulation(payload: {
 }): Promise<ImprovementSimResponse> {
   if (isTauri) return tauriInvoke('get_improvement_simulation', { payload });
   return apiPost('/api/property/improvement-sim', payload);
+}
+
+// ============================================================================
+// Rental Income & Investment Analysis
+// ============================================================================
+
+export async function getRentalAnalysis(payload: {
+  latitude: number;
+  longitude: number;
+  address?: string;
+  neighborhood?: string;
+  zip_code?: string;
+  beds?: number;
+  baths?: number;
+  sqft?: number;
+  lot_size_sqft?: number;
+  year_built?: number;
+  property_type?: string;
+  list_price?: number;
+  hoa_per_month?: number;
+  down_payment_pct?: number;
+  self_managed?: boolean;
+}): Promise<RentalAnalysisResponse> {
+  if (isTauri) return tauriInvoke('get_rental_analysis', { payload });
+  return apiPost('/api/property/rental-analysis', payload);
+}
+
+export async function getRentEstimate(payload: {
+  latitude: number;
+  longitude: number;
+  beds?: number;
+  baths?: number;
+  sqft?: number;
+  neighborhood?: string;
+  list_price?: number;
+}): Promise<RentEstimate> {
+  if (isTauri) return tauriInvoke('get_rent_estimate', { payload });
+  return apiPost('/api/property/rent-estimate', payload);
 }
 
 // ============================================================================

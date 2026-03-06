@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  MessageCircle,
   Search,
   MapPin,
   TrendingUp,
@@ -17,6 +18,7 @@ interface SidebarProps {
 }
 
 const NAV_ITEMS: { id: PageId; label: string; icon: typeof Search }[] = [
+  { id: 'chat', label: 'Chat', icon: MessageCircle },
   { id: 'predict', label: 'Predict', icon: Search },
   { id: 'neighborhoods', label: 'Neighborhoods', icon: MapPin },
   { id: 'market', label: 'Market', icon: TrendingUp },
