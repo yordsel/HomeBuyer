@@ -138,8 +138,8 @@ class BerkeleyParcel:
     """A property parcel from the City of Berkeley Open Data / Alameda County Assessor.
 
     Represents a physical parcel of land with its county-assessed characteristics.
-    ATTOM-enriched fields (beds, baths, year_built, etc.) are populated later
-    via batch enrichment and are nullable until then.
+    API-enriched fields (beds, baths, year_built, etc.) are populated later
+    via batch enrichment (RentCast) and are nullable until then.
     """
 
     apn: str  # Assessor Parcel Number (primary key)
@@ -155,15 +155,15 @@ class BerkeleyParcel:
     use_description: Optional[str] = None  # Human-readable (e.g., "Single Family Residential")
     neighborhood: Optional[str] = None  # From spatial join
     zoning_class: Optional[str] = None  # From spatial join
-    # ATTOM-enriched fields (nullable until enriched)
+    # API-enriched fields (nullable until enriched via RentCast)
     beds: Optional[float] = None
     baths: Optional[float] = None
-    sqft: Optional[int] = None  # ATTOM sqft (may differ from building_sqft)
+    sqft: Optional[int] = None  # API sqft (may differ from building_sqft)
     year_built: Optional[int] = None
     property_type: Optional[str] = None  # Standardized type
     last_sale_date: Optional[str] = None
     last_sale_price: Optional[int] = None
-    attom_enriched: bool = False  # Flag: has ATTOM data been fetched?
+    attom_enriched: bool = False  # Flag: has API enrichment been fetched? (column name kept for DB compat)
 
 
 @dataclass

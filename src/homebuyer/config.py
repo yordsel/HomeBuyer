@@ -58,9 +58,9 @@ BERKELEY_OPENDATA_BESO_URL = "https://data.cityofberkeley.info/resource/8k7b-6aw
 BERKELEY_OPENDATA_PARCELS_URL = "https://data.cityofberkeley.info/resource/rax9-nuvx.json"
 
 # ---------------------------------------------------------------------------
-# ATTOM Property Data API (optional — enables auto-fill for map-click)
+# RentCast Property Data API (optional — property enrichment & sale history)
 # ---------------------------------------------------------------------------
-ATTOM_API_KEY = os.environ.get("ATTOM_API_KEY", "")
+RENTCAST_API_KEY = os.environ.get("RENTCAST_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # Anthropic Claude API (optional — enables AI-powered property summaries)

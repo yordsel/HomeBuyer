@@ -264,6 +264,23 @@ CREATE INDEX IF NOT EXISTS idx_predictions_neighborhood
     ON predictions(neighborhood);
 CREATE INDEX IF NOT EXISTS idx_predictions_created
     ON predictions(created_at);
+
+CREATE TABLE IF NOT EXISTS api_response_cache (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    source          TEXT NOT NULL,
+    endpoint        TEXT NOT NULL,
+    cache_key       TEXT NOT NULL,
+    request_params  TEXT,
+    response_json   TEXT NOT NULL,
+    http_status     INTEGER DEFAULT 200,
+    fetched_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(source, endpoint, cache_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_cache_lookup
+    ON api_response_cache(source, endpoint, cache_key);
+CREATE INDEX IF NOT EXISTS idx_api_cache_fetched
+    ON api_response_cache(fetched_at);
 """
 
 
@@ -841,8 +858,8 @@ class Database:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_properties_missing_attom(self, limit: int | None = None) -> list[dict]:
-        """Get properties not yet enriched via ATTOM.
+    def get_properties_missing_enrichment(self, limit: int | None = None) -> list[dict]:
+        """Get properties not yet enriched via external API.
 
         Returns rows with id, apn, address, zip_code, latitude, longitude.
         """
@@ -873,12 +890,12 @@ class Database:
             )
         return len(updates)
 
-    def update_properties_attom_batch(self, updates: list[dict]) -> int:
-        """Batch update ATTOM-enriched fields on properties.
+    def update_properties_enrichment_batch(self, updates: list[dict]) -> int:
+        """Batch update API-enriched fields on properties.
 
         Each dict must have 'id' and any of: beds, baths, sqft, year_built,
         property_type, last_sale_date, last_sale_price.
-        Sets attom_enriched = 1 for all updated rows.
+        Sets attom_enriched = 1 (enrichment flag) for all updated rows.
         """
         count = 0
         sql = """
@@ -922,11 +939,101 @@ class Database:
             "total": row[0],
             "with_neighborhood": row[1],
             "with_zoning": row[2],
-            "attom_enriched": row[3],
+            "enriched": row[3],
             "use_codes": row[4],
             "neighborhoods": row[5],
             "zip_codes": row[6],
         }
+
+    # ------------------------------------------------------------------
+    # API Response Cache
+    # ------------------------------------------------------------------
+
+    def cache_api_response(
+        self,
+        source: str,
+        endpoint: str,
+        cache_key: str,
+        request_params: dict | None = None,
+        response_json: str = "",
+        http_status: int = 200,
+    ) -> None:
+        """Store a raw API response in the cache (upsert)."""
+        params_json = json.dumps(request_params) if request_params else None
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO api_response_cache
+                    (source, endpoint, cache_key, request_params, response_json, http_status, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(source, endpoint, cache_key) DO UPDATE SET
+                    request_params = excluded.request_params,
+                    response_json  = excluded.response_json,
+                    http_status    = excluded.http_status,
+                    fetched_at     = excluded.fetched_at
+                """,
+                (source, endpoint, cache_key, params_json, response_json, http_status),
+            )
+
+    def get_cached_api_response(
+        self,
+        source: str,
+        endpoint: str,
+        cache_key: str,
+        max_age_hours: int = 0,
+    ) -> dict | None:
+        """Retrieve a cached API response.
+
+        Args:
+            source: API source name (e.g. 'rentcast').
+            endpoint: API endpoint (e.g. '/v1/properties').
+            cache_key: Normalized lookup key.
+            max_age_hours: If > 0, reject entries older than this. 0 = no expiry.
+
+        Returns:
+            Dict with response_json (parsed), http_status, fetched_at, or None.
+        """
+        sql = (
+            "SELECT response_json, http_status, fetched_at FROM api_response_cache "
+            "WHERE source = ? AND endpoint = ? AND cache_key = ?"
+        )
+        params: list = [source, endpoint, cache_key]
+        if max_age_hours > 0:
+            sql += " AND fetched_at > datetime('now', ?)"
+            params.append(f"-{max_age_hours} hours")
+        row = self.conn.execute(sql, params).fetchone()
+        if not row:
+            return None
+        try:
+            parsed = json.loads(row[0])
+        except (json.JSONDecodeError, TypeError):
+            parsed = row[0]
+        return {
+            "response": parsed,
+            "http_status": row[1],
+            "fetched_at": row[2],
+        }
+
+    def get_cached_api_responses_by_source(
+        self,
+        source: str,
+        endpoint: str = "",
+        limit: int = 100,
+    ) -> list[dict]:
+        """List cached responses for a source (for debugging/export)."""
+        sql = "SELECT cache_key, http_status, fetched_at FROM api_response_cache WHERE source = ?"
+        params: list = [source]
+        if endpoint:
+            sql += " AND endpoint = ?"
+            params.append(endpoint)
+        sql += " ORDER BY fetched_at DESC LIMIT ?"
+        params.append(limit)
+        rows = self.conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Property Search
+    # ------------------------------------------------------------------
 
     def search_properties(self, query: str, limit: int = 5) -> list[dict]:
         """Search properties by address (fuzzy text match).
@@ -1453,7 +1560,7 @@ class Database:
             )
 
     def get_unique_redfin_addresses(self) -> list[dict]:
-        """Return unique addresses from Redfin-sourced sales with lat/lng for ATTOM lookups."""
+        """Return unique addresses from Redfin-sourced sales with lat/lng for enrichment lookups."""
         rows = self.conn.execute(
             """
             SELECT DISTINCT address, city, state, zip_code, latitude, longitude

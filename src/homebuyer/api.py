@@ -177,10 +177,14 @@ class AppState:
             self.dev_calc = None
             logger.warning("Development calculator initialization failed.")
 
-        # ATTOM property data client (optional — auto-fills property details)
-        from homebuyer.collectors.attom import AttomClient
+        # RentCast property data client (PRIMARY — property enrichment)
+        from homebuyer.collectors.rentcast import RentcastClient
 
-        self.attom = AttomClient()
+        self.rentcast = RentcastClient()
+        if self.rentcast.enabled:
+            logger.info("RentCast property enrichment enabled (primary)")
+        else:
+            logger.warning("RentCast API key not configured — on-demand enrichment limited")
 
         # AI-powered development potential summarizer (optional)
         from homebuyer.services.ai_summary import PotentialSummarizer
@@ -271,7 +275,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 def _require_model():
     """Raise 503 if model is not loaded."""
     if not _state or not _state.model_loaded:
@@ -359,27 +362,25 @@ def predict_listing(req: ListingPredictRequest):
         year_built=listing.get("year_built"),
     )
 
-    # Persist ATTOM sale history for this listing address
-    # Build a lightweight AttomPropertyDetail from listing for property-only fallback
-    from homebuyer.collectors.attom import AttomPropertyDetail as _APD
-    _listing_detail = _APD(
-        beds=listing.get("beds"),
-        baths=listing.get("baths"),
-        sqft=listing.get("sqft"),
-        year_built=listing.get("year_built"),
-        lot_size_sqft=listing.get("lot_size_sqft"),
-        property_type=listing.get("property_type"),
-    )
-    _persist_attom_sales(
-        address=listing.get("address", ""),
-        city=listing.get("city", "Berkeley"),
-        state=listing.get("state", "CA"),
-        zip_code=listing.get("zip_code", ""),
-        latitude=listing.get("latitude", 0),
-        longitude=listing.get("longitude", 0),
-        neighborhood=listing.get("neighborhood"),
-        attom_detail=_listing_detail,
-    )
+    # Persist RentCast sale history for this listing address
+    if _state.rentcast and _state.rentcast.enabled:
+        _rc_addr = "{}, {}, {} {}".format(
+            listing.get("address", ""),
+            listing.get("city", "Berkeley"),
+            listing.get("state", "CA"),
+            listing.get("zip_code", ""),
+        ).strip()
+        _rc_detail = _state.rentcast.lookup_property(address=_rc_addr)
+        _persist_rentcast_sales(
+            address=listing.get("address", ""),
+            city=listing.get("city", "Berkeley"),
+            state=listing.get("state", "CA"),
+            zip_code=listing.get("zip_code", ""),
+            latitude=listing.get("latitude", 0),
+            longitude=listing.get("longitude", 0),
+            neighborhood=listing.get("neighborhood"),
+            detail=_rc_detail,
+        )
 
     # Collect building permits in background (Playwright, ~8-10s)
     listing_addr = listing.get("address", "")
@@ -452,19 +453,39 @@ def predict_map_click(req: MapClickRequest):
         # Point may be in a gap between neighborhood polygons — try nearest
         neighborhood = _state.geocoder.geocode_nearest(req.latitude, req.longitude)
 
-    # Step 1b: "In Berkeley?" check — use ATTOM city as fallback when
-    # neighborhood polygons have gaps
-    if not neighborhood and _state.attom and _state.attom.enabled:
-        attom_check = _state.attom.lookup_property_by_coords(
-            latitude=req.latitude, longitude=req.longitude, radius_m=50,
-        )
-        if attom_check and attom_check.resolved_city:
-            if attom_check.resolved_city.upper() == "BERKELEY":
-                # We're in Berkeley but outside known neighborhood polygons
+    # Step 1b: "In Berkeley?" check — Nominatim reverse geocode fallback
+    # when neighborhood polygons have gaps (~0.24% of properties).
+    # Uses OpenStreetMap city field to verify the point is in Berkeley.
+    if not neighborhood:
+        try:
+            import requests as _requests
+            _nom_resp = _requests.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params={
+                    "lat": req.latitude,
+                    "lon": req.longitude,
+                    "format": "json",
+                    "addressdetails": 1,
+                },
+                headers={"User-Agent": "HomeBuyer-Berkeley/0.1"},
+                timeout=5,
+            )
+            _nom_resp.raise_for_status()
+            _nom_city = (
+                _nom_resp.json()
+                .get("address", {})
+                .get("city", "")
+                .upper()
+            )
+            if _nom_city == "BERKELEY":
                 neighborhood = "Berkeley"
                 logger.info(
-                    "ATTOM confirmed Berkeley via city field (no polygon match)"
+                    "Nominatim confirmed Berkeley via city field "
+                    "(lat=%.6f, lon=%.6f — no polygon match)",
+                    req.latitude, req.longitude,
                 )
+        except Exception as e:
+            logger.debug("Nominatim Berkeley check failed: %s", e)
     if not neighborhood:
         return {
             "status": "error",
@@ -498,34 +519,33 @@ def predict_map_click(req: MapClickRequest):
         prop = dict(nearest)
         prop["neighborhood"] = neighborhood  # ensure current geocoded neighborhood
 
-        # If the DB record is missing key property details, try ATTOM to fill gaps
+        # If the DB record is missing key property details, try RentCast
         _key_fields = ("beds", "baths", "sqft", "property_type")
         if any(prop.get(f) is None for f in _key_fields):
-            if _state.attom and _state.attom.enabled:
-                _enrich_detail = None
-                address = prop.get("address")
-                zip_code_val = prop.get("zip_code") or zip_code
-                if address:
-                    _enrich_detail = _state.attom.lookup_property(
-                        address1=address,
-                        address2=f"Berkeley, CA {zip_code_val}",
-                    )
-                if not _enrich_detail:
-                    _enrich_detail = _state.attom.lookup_property_by_coords(
-                        latitude=req.latitude,
-                        longitude=req.longitude,
-                        radius_m=5,
-                    )
-                if _enrich_detail:
-                    enriched = _enrich_detail.to_dict()
-                    for field in ("beds", "baths", "sqft", "lot_size_sqft",
-                                  "year_built", "property_type"):
-                        if prop.get(field) is None and enriched.get(field) is not None:
-                            prop[field] = enriched[field]
-                    logger.info(
-                        "Enriched DB record for %s with ATTOM data: %s",
-                        address, list(enriched.keys()),
-                    )
+            _enrich_detail = None
+            address = prop.get("address")
+            zip_code_val = prop.get("zip_code") or zip_code
+
+            if _state.rentcast and _state.rentcast.enabled and address:
+                import re
+                _street = re.sub(r"\s+\d{5}(-\d{4})?$", "", address.strip())
+                for _city in ("BERKELEY", "ALBANY", "EMERYVILLE", "OAKLAND", "KENSINGTON"):
+                    if _street.upper().endswith(f" {_city}"):
+                        _street = _street[:-(len(_city) + 1)].strip()
+                        break
+                _full_addr = f"{_street}, Berkeley, CA {zip_code_val}".strip()
+                _enrich_detail = _state.rentcast.lookup_property(address=_full_addr)
+
+            if _enrich_detail:
+                enriched = _enrich_detail.to_dict()
+                for field in ("beds", "baths", "sqft", "lot_size_sqft",
+                              "year_built", "property_type"):
+                    if prop.get(field) is None and enriched.get(field) is not None:
+                        prop[field] = enriched[field]
+                logger.info(
+                    "Enriched DB record for %s with property data: %s",
+                    address, list(enriched.keys()),
+                )
 
         result = model.predict_single(_state.db, prop)
 
@@ -567,45 +587,29 @@ def predict_map_click(req: MapClickRequest):
             "comparables": [_comp_to_dict(c) for c in comps[:7]],
         }
 
-    # Step 5: Try ATTOM coords-based property lookup first (most reliable)
+    # Step 5: Resolve address via reverse geocode, then enrich via RentCast
     address = None
-    attom_detail = None
+    prop_detail = None  # RentcastPropertyDetail
     last_sale_price, last_sale_date = None, None
 
-    if _state.attom and _state.attom.enabled:
-        attom_detail = _state.attom.lookup_property_by_coords(
-            latitude=req.latitude,
-            longitude=req.longitude,
-            radius_m=5,
-        )
-        if attom_detail and attom_detail.resolved_address:
-            address = attom_detail.resolved_address
-            logger.info("ATTOM coords lookup resolved address: %s", address)
+    # 5a: Resolve address via Nominatim reverse geocode
+    address = _reverse_geocode(req.latitude, req.longitude)
 
-            # Fetch last sale using the resolved address
-            last_sale_price, last_sale_date = _state.attom.lookup_last_sale(
-                address1=address,
-                address2=f"Berkeley, CA {zip_code}",
-            )
+    # 5b: Enrich via RentCast
+    if address and _state.rentcast and _state.rentcast.enabled:
+        _rc_addr = f"{address}, Berkeley, CA {zip_code}".strip()
+        _rc_detail = _state.rentcast.lookup_property(address=_rc_addr)
+        if _rc_detail:
+            prop_detail = _rc_detail
+            if _rc_detail.last_sale_price:
+                last_sale_price = _rc_detail.last_sale_price
+            if _rc_detail.last_sale_date:
+                last_sale_date = _rc_detail.last_sale_date
+            logger.info("RentCast enriched map-click for %s", address)
 
-    # Step 5a: Fall back to Nominatim reverse geocode if ATTOM didn't resolve
-    if not address:
-        address = _reverse_geocode(req.latitude, req.longitude)
-
-    # Step 5b: If we have an address but no ATTOM detail yet, try address-based lookup
-    if address and not attom_detail and _state.attom and _state.attom.enabled:
-        attom_detail = _state.attom.lookup_property(
-            address1=address,
-            address2=f"Berkeley, CA {zip_code}",
-        )
-        last_sale_price, last_sale_date = _state.attom.lookup_last_sale(
-            address1=address,
-            address2=f"Berkeley, CA {zip_code}",
-        )
-
-    # Step 5c: If ATTOM returned complete data, run prediction immediately
-    if attom_detail and attom_detail.is_complete:
-        prop = attom_detail.to_dict()
+    # Step 5e: If we have complete property data, run prediction immediately
+    if prop_detail and prop_detail.is_complete:
+        prop = prop_detail.to_dict()
         prop["neighborhood"] = neighborhood
         prop["zip_code"] = zip_code
         prop["latitude"] = req.latitude
@@ -645,8 +649,8 @@ def predict_map_click(req: MapClickRequest):
             year_built=prop.get("year_built"),
         )
 
-        # Persist ATTOM sale history for future predictions & model training
-        _persist_attom_sales(
+        # Persist RentCast sale history for future predictions & model training
+        _persist_rentcast_sales(
             address=address,
             city="Berkeley",
             state="CA",
@@ -654,7 +658,7 @@ def predict_map_click(req: MapClickRequest):
             latitude=req.latitude,
             longitude=req.longitude,
             neighborhood=neighborhood,
-            attom_detail=attom_detail,
+            detail=prop_detail,
         )
 
         # Collect building permits in background (Playwright, ~8-10s)
@@ -663,7 +667,7 @@ def predict_map_click(req: MapClickRequest):
 
         return {
             "status": "prediction",
-            "listing": _attom_to_listing(
+            "listing": _property_to_listing(
                 prop, neighborhood, zone_class,
                 last_sale_price=last_sale_price,
                 last_sale_date=last_sale_date,
@@ -682,9 +686,9 @@ def predict_map_click(req: MapClickRequest):
         "address": address,
     }
 
-    # Enrich with partial ATTOM data for form pre-fill
-    if attom_detail:
-        location_info["attom_prefill"] = attom_detail.to_dict()
+    # Enrich with partial property data for form pre-fill
+    if prop_detail:
+        location_info["property_prefill"] = prop_detail.to_dict()
 
     return {
         "status": "needs_details",
@@ -1278,9 +1282,25 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
 
     elif tool_name == "estimate_sell_vs_hold":
         analyzer = _state.get_analyzer()
-        # Reuse cached prediction
-        pred_dict = _get_or_compute_prediction(tool_input, source="chat")
-        current_value = pred_dict["predicted_price"]
+
+        # Owner-context overrides
+        purchase_price = tool_input.get("purchase_price")
+        purchase_date = tool_input.get("purchase_date")
+        mortgage_rate_override = tool_input.get("mortgage_rate")
+        current_value_override = tool_input.get("current_value_override")
+
+        # Reuse cached prediction (or override with user-stated value)
+        if current_value_override:
+            current_value = int(current_value_override)
+        else:
+            pred_dict = _get_or_compute_prediction(tool_input, source="chat")
+            current_value = pred_dict["predicted_price"]
+
+        # If no override, still need pred_dict for confidence range
+        if not current_value_override:
+            pred_dict = _get_or_compute_prediction(tool_input, source="chat")
+        else:
+            pred_dict = {"price_lower": current_value, "price_upper": current_value}
 
         # Get neighborhood YoY appreciation
         neighborhood = tool_input.get("neighborhood", "Berkeley")
@@ -1289,8 +1309,8 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
 
         # Get current market conditions
         market = analyzer.generate_summary_report()
-        mortgage_rate = None
-        if market and market.get("current_market"):
+        mortgage_rate = mortgage_rate_override
+        if mortgage_rate is None and market and market.get("current_market"):
             mortgage_rate = market["current_market"].get("mortgage_rate_30yr")
 
         # Project future values
@@ -1302,16 +1322,23 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             # Rough selling costs: 5% agent fees + 1% closing
             sell_costs = int(round(projected * 0.06, -3))
             net_gain = gain - sell_costs
-            scenarios[f"{years}yr"] = {
+            scenario_data = {
                 "projected_value": projected,
                 "appreciation_pct": round((appreciation - 1) * 100, 1),
                 "gross_gain": gain,
                 "estimated_sell_costs": sell_costs,
                 "net_gain": net_gain,
             }
+            # Add equity-from-purchase if owner context
+            if purchase_price:
+                equity_from_purchase = projected - int(purchase_price)
+                scenario_data["equity_from_purchase"] = equity_from_purchase
+            scenarios[f"{years}yr"] = scenario_data
 
         # Use RentalAnalyzer for data-driven rent estimate
         beds = int(tool_input.get("beds") or 3)
+        # Use purchase_price for expense basis if owner
+        expense_basis = int(purchase_price) if purchase_price else current_value
         rent_est = _state.rental_analyzer.estimate_rent(
             beds=beds,
             baths=float(tool_input.get("baths") or 2.0),
@@ -1320,15 +1347,15 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             property_value=current_value,
         )
         expenses = _state.rental_analyzer.calculate_expenses(
-            current_value, rent_est.annual_rent,
+            expense_basis, rent_est.annual_rent,
         )
         noi = rent_est.annual_rent - expenses.total_annual
         cap_rate = round(noi / current_value * 100, 2) if current_value > 0 else 0
         price_to_rent = round(current_value / rent_est.annual_rent, 1) if rent_est.annual_rent > 0 else 0
 
-        return json.dumps({
+        result = {
             "current_predicted_value": current_value,
-            "confidence_range": [pred_dict["price_lower"], pred_dict["price_upper"]],
+            "confidence_range": [pred_dict.get("price_lower", current_value), pred_dict.get("price_upper", current_value)],
             "neighborhood": neighborhood,
             "yoy_appreciation_pct": yoy_pct,
             "mortgage_rate_30yr": mortgage_rate,
@@ -1343,9 +1370,22 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 "estimation_method": rent_est.estimation_method,
                 "note": rent_est.notes,
             },
-        }, default=str)
+        }
+        # Include owner context if provided
+        if purchase_price:
+            result["purchase_price"] = int(purchase_price)
+            result["current_equity_gain"] = current_value - int(purchase_price)
+        if purchase_date:
+            result["purchase_date"] = purchase_date
+
+        return json.dumps(result, default=str)
 
     elif tool_name == "estimate_rental_income":
+        # Owner-context overrides
+        purchase_price = tool_input.get("purchase_price")
+        current_value_override = tool_input.get("current_value_override")
+        mortgage_rate_override = tool_input.get("mortgage_rate")
+
         prop = {
             "latitude": tool_input["latitude"],
             "longitude": tool_input["longitude"],
@@ -1357,14 +1397,28 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             "lot_size_sqft": tool_input.get("lot_size_sqft"),
             "property_type": tool_input.get("property_type", "Single Family Residential"),
         }
+        # Inject owner context into property dict
+        if purchase_price:
+            prop["purchase_price"] = int(purchase_price)
+        if tool_input.get("purchase_date"):
+            prop["purchase_date"] = tool_input["purchase_date"]
+        if current_value_override:
+            prop["list_price"] = int(current_value_override)  # _resolve_property_value picks up list_price first
+
         scenario = _state.rental_analyzer.build_scenario_as_is(
             prop,
             down_payment_pct=tool_input.get("down_payment_pct", 20.0),
+            rate_override=mortgage_rate_override,
         )
         from homebuyer.analysis.rental_analysis import _scenario_to_dict
         return json.dumps(_scenario_to_dict(scenario), default=str)
 
     elif tool_name == "analyze_investment_scenarios":
+        # Owner-context overrides
+        purchase_price = tool_input.get("purchase_price")
+        current_value_override = tool_input.get("current_value_override")
+        mortgage_rate_override = tool_input.get("mortgage_rate")
+
         prop = {
             "latitude": tool_input["latitude"],
             "longitude": tool_input["longitude"],
@@ -1376,11 +1430,20 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             "lot_size_sqft": tool_input.get("lot_size_sqft"),
             "property_type": tool_input.get("property_type", "Single Family Residential"),
         }
+        # Inject owner context into property dict
+        if purchase_price:
+            prop["purchase_price"] = int(purchase_price)
+        if tool_input.get("purchase_date"):
+            prop["purchase_date"] = tool_input["purchase_date"]
+        if current_value_override:
+            prop["list_price"] = int(current_value_override)  # _resolve_property_value picks up list_price first
+
         from homebuyer.analysis.rental_analysis import rental_analysis_to_dict
         result = _state.rental_analyzer.analyze(
             prop,
             down_payment_pct=tool_input.get("down_payment_pct", 20.0),
             self_managed=tool_input.get("self_managed", True),
+            rate_override=mortgage_rate_override,
         )
         return json.dumps(rental_analysis_to_dict(result), default=str)
 
@@ -1392,7 +1455,50 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         if not results:
             return json.dumps({"error": f"No properties found matching '{address_query}'"})
         # Return the best match with all details
-        best = results[0]
+        best = dict(results[0])
+
+        # On-demand enrichment if key fields are missing
+        _key_fields = ("beds", "baths", "sqft", "property_type")
+        if any(best.get(f) is None for f in _key_fields):
+            _enrich_detail = None
+            address = best.get("address")
+            zip_code_val = best.get("zip_code", "")
+
+            if _state.rentcast and _state.rentcast.enabled and address:
+                import re
+                _street = re.sub(r"\s+\d{5}(-\d{4})?$", "", address.strip())
+                for _city in ("BERKELEY", "ALBANY", "EMERYVILLE", "OAKLAND", "KENSINGTON"):
+                    if _street.upper().endswith(f" {_city}"):
+                        _street = _street[:-(len(_city) + 1)].strip()
+                        break
+                _full_addr = f"{_street}, Berkeley, CA {zip_code_val}".strip()
+                _enrich_detail = _state.rentcast.lookup_property(address=_full_addr)
+
+            if _enrich_detail:
+                enriched = _enrich_detail.to_dict()
+                for field_name in ("beds", "baths", "sqft", "lot_size_sqft",
+                                   "year_built", "property_type",
+                                   "last_sale_price", "last_sale_date"):
+                    if best.get(field_name) is None and enriched.get(field_name) is not None:
+                        best[field_name] = enriched[field_name]
+                # Persist enrichment to DB so future lookups are faster
+                try:
+                    _state.db.update_properties_enrichment_batch([{
+                        "id": best["id"],
+                        "attom_enriched": True,
+                        **{k: enriched[k] for k in ("beds", "baths", "sqft",
+                           "year_built", "property_type",
+                           "last_sale_price", "last_sale_date")
+                           if enriched.get(k) is not None},
+                    }])
+                except Exception as e:
+                    logger.warning("Failed to persist RentCast enrichment for %s: %s", address, e)
+                logger.info(
+                    "On-demand RentCast enrichment for %s: found %s",
+                    address,
+                    [k for k in _key_fields if best.get(k) is not None],
+                )
+
         return json.dumps({
             "id": best.get("id"),
             "address": best.get("address"),
@@ -1412,7 +1518,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             "use_description": best.get("use_description"),
             "last_sale_price": best.get("last_sale_price"),
             "last_sale_date": best.get("last_sale_date"),
-            "attom_enriched": bool(best.get("attom_enriched")),
+            "enriched": bool(best.get("attom_enriched")),
         }, default=str)
 
     else:
@@ -1745,14 +1851,14 @@ def _sale_to_listing(prop: dict, neighborhood: str | None = None) -> dict:
     }
 
 
-def _attom_to_listing(
+def _property_to_listing(
     prop: dict,
     neighborhood: str,
     zone_class: str | None = None,
     last_sale_price: int | None = None,
     last_sale_date: str | None = None,
 ) -> dict:
-    """Convert ATTOM-sourced property details to ListingData format."""
+    """Convert enriched property details to ListingData format."""
     return {
         "address": prop.get("address", ""),
         "city": "Berkeley",
@@ -1821,7 +1927,7 @@ def _estimate_zip_from_coords(lat: float, lon: float) -> str:
     return dict(row)["zip_code"] if row else "94702"
 
 
-def _persist_attom_sales(
+def _persist_rentcast_sales(
     address: str,
     city: str,
     state: str,
@@ -1829,9 +1935,9 @@ def _persist_attom_sales(
     latitude: float,
     longitude: float,
     neighborhood: str | None,
-    attom_detail: "AttomPropertyDetail | None" = None,
+    detail: "RentcastPropertyDetail | None" = None,
 ) -> None:
-    """Fetch full sale history from ATTOM and persist to the database.
+    """Persist RentCast sale history to the database.
 
     Called after a successful prediction for a property not already in the DB.
     If no sale history is found, persists a property-only record (null
@@ -1839,9 +1945,9 @@ def _persist_attom_sales(
 
     Errors are logged but never raised so the prediction response is unaffected.
     """
-    if not _state.attom or not _state.attom.enabled:
-        return
     if not address:
+        return
+    if not detail:
         return
 
     try:
@@ -1849,60 +1955,44 @@ def _persist_attom_sales(
 
         from homebuyer.storage.models import PropertySale
 
-        address2 = f"{city}, {state} {zip_code}".strip()
-        history = _state.attom.lookup_sale_history(
-            address1=address, address2=address2,
-        )
-
         inserted = 0
 
-        if history:
-            for txn in history:
-                txn_lat = txn.get("latitude") or latitude
-                txn_lng = txn.get("longitude") or longitude
-                if not txn_lat or not txn_lng:
-                    continue
-
+        if detail.sale_history:
+            for txn in detail.sale_history:
                 try:
-                    sale_date_obj = date_type.fromisoformat(txn["sale_date"])
-                except (KeyError, ValueError):
+                    sale_date_obj = date_type.fromisoformat(txn.sale_date)
+                except ValueError:
                     continue
 
-                sale_price = txn.get("sale_price")
-                if not sale_price or sale_price <= 0:
-                    continue
-
-                sqft = txn.get("sqft")
-                price_per_sqft = (
-                    round(sale_price / sqft, 2) if sqft and sqft > 0 else None
-                )
+                price_per_sqft = None
+                if detail.sqft and detail.sqft > 0:
+                    price_per_sqft = round(txn.sale_price / detail.sqft, 2)
 
                 sale = PropertySale(
                     address=address,
                     city=city,
                     state=state,
                     zip_code=zip_code,
-                    latitude=float(txn_lat),
-                    longitude=float(txn_lng),
+                    latitude=latitude,
+                    longitude=longitude,
                     sale_date=sale_date_obj,
-                    sale_price=sale_price,
-                    sale_type=txn.get("sale_type"),
-                    property_type=txn.get("property_type"),
-                    beds=txn.get("beds"),
-                    baths=txn.get("baths"),
-                    sqft=sqft,
-                    lot_size_sqft=txn.get("lot_size_sqft"),
-                    year_built=txn.get("year_built"),
+                    sale_price=txn.sale_price,
+                    sale_type=txn.event_type,
+                    property_type=detail.property_type,
+                    beds=detail.beds,
+                    baths=detail.baths,
+                    sqft=detail.sqft,
+                    lot_size_sqft=detail.lot_size_sqft,
+                    year_built=detail.year_built,
                     price_per_sqft=price_per_sqft,
                     neighborhood=neighborhood,
-                    data_source="attom",
+                    data_source="rentcast",
                 )
                 if _state.db.upsert_sale(sale):
                     inserted += 1
 
-        # If no sale history was persisted, save a property-only record
-        # from ATTOM property details so we don't re-query ATTOM next time
-        if inserted == 0 and attom_detail:
+        # If no sale history, save a property-only record for future caching
+        if inserted == 0:
             prop_record = PropertySale(
                 address=address,
                 city=city,
@@ -1912,14 +2002,14 @@ def _persist_attom_sales(
                 longitude=longitude,
                 sale_date=None,
                 sale_price=None,
-                property_type=attom_detail.property_type,
-                beds=attom_detail.beds,
-                baths=attom_detail.baths,
-                sqft=attom_detail.sqft,
-                lot_size_sqft=attom_detail.lot_size_sqft,
-                year_built=attom_detail.year_built,
+                property_type=detail.property_type,
+                beds=detail.beds,
+                baths=detail.baths,
+                sqft=detail.sqft,
+                lot_size_sqft=detail.lot_size_sqft,
+                year_built=detail.year_built,
                 neighborhood=neighborhood,
-                data_source="attom",
+                data_source="rentcast",
             )
             if _state.db.upsert_sale(prop_record):
                 inserted = 1
@@ -1928,13 +2018,13 @@ def _persist_attom_sales(
                     address,
                 )
 
-        if inserted and history:
+        if inserted and detail.sale_history:
             logger.info(
-                "Persisted %d ATTOM sale records for %s", inserted, address,
+                "Persisted %d RentCast sale records for %s", inserted, address,
             )
     except Exception:
         logger.warning(
-            "Failed to persist ATTOM sales for %s", address, exc_info=True,
+            "Failed to persist RentCast sales for %s", address, exc_info=True,
         )
 
 

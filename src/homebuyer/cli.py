@@ -10,13 +10,12 @@ Usage:
     homebuyer collect beso         Fetch BESO energy benchmarking data
     homebuyer collect permits     Scrape building permits from Accela portal
     homebuyer collect permits-address ADDRESS  Permits for a single address
-    homebuyer collect attom-sales Fetch ATTOM sale history for known addresses
     homebuyer collect parcels     Download Berkeley parcel data from Open Data
-    homebuyer collect all         Run all six collectors
+    homebuyer collect all         Run all collectors
     homebuyer process zoning      Assign zoning districts to properties
     homebuyer process parcels     Enrich parcels with zoning + neighborhood
     homebuyer process all         Normalize, geocode, zoning, and deduplicate
-    homebuyer enrich attom        Backfill ATTOM property details for parcels
+    homebuyer enrich rentcast     Backfill RentCast property details for parcels
     homebuyer status              Show database statistics
     homebuyer export              Export data to CSV
     homebuyer train               Train ML price prediction model
@@ -264,24 +263,6 @@ def collect_permits_address(ctx: click.Context, address: str) -> None:
         click.echo(f"No permits found for {address}.")
 
 
-@collect.command("attom-sales")
-@click.option("--limit", type=int, default=None, help="Max addresses to process.")
-@click.option("--delay", type=float, default=2.0, help="Seconds between ATTOM API calls.")
-@click.pass_context
-def collect_attom_sales(ctx: click.Context, limit: int | None, delay: float) -> None:
-    """Collect historical sale data from ATTOM for known addresses."""
-    from homebuyer.collectors.attom_sales import AttomSalesCollector
-
-    db_path = ctx.obj["db_path"]
-    with Database(db_path) as db:
-        collector = AttomSalesCollector(db)
-        result = collector.collect(limit=limit, delay=delay)
-
-    click.echo(str(result))
-    if not result.success:
-        sys.exit(1)
-
-
 @collect.command("parcels")
 @click.option("--min-lot", type=int, default=4000,
               help="Minimum lot size in sqft (default: 4000). Set to 0 for all.")
@@ -480,29 +461,124 @@ def process_all(ctx: click.Context) -> None:
 
 @main.group()
 def enrich() -> None:
-    """Enrich data from external APIs (ATTOM, etc.)."""
+    """Enrich data from external APIs (RentCast, etc.)."""
     pass
 
 
-@enrich.command("attom")
+@enrich.command("rentcast")
 @click.option("--limit", type=int, default=None,
-              help="Max properties to enrich (default: all un-enriched).")
-@click.option("--delay", type=float, default=2.0,
-              help="Seconds between ATTOM API calls (default: 2.0).")
+              help="Max properties to enrich (default: all missing beds/baths/sqft).")
+@click.option("--delay", type=float, default=0.06,
+              help="Min seconds between API calls per worker (default: 0.06).")
+@click.option("--force", is_flag=True, default=False,
+              help="Re-enrich ALL properties (ignore existing data).")
+@click.option("--workers", type=int, default=8,
+              help="Concurrent threads (default: 8). RentCast allows 20 req/s.")
 @click.pass_context
-def enrich_attom(ctx: click.Context, limit: int | None, delay: float) -> None:
-    """Backfill ATTOM property details for un-enriched parcels."""
-    from homebuyer.collectors.attom_parcels import AttomParcelEnricher
+def enrich_rentcast(ctx: click.Context, limit: int | None, delay: float, force: bool, workers: int) -> None:
+    """Backfill property details from RentCast for properties missing beds/baths/sqft."""
+    from homebuyer.collectors.rentcast_parcels import RentcastParcelEnricher
 
     db_path = ctx.obj["db_path"]
     with Database(db_path) as db:
         db.initialize_schema()
-        enricher = AttomParcelEnricher(db)
-        result = enricher.enrich(limit=limit, delay=delay)
+        enricher = RentcastParcelEnricher(db)
+        result = enricher.enrich(limit=limit, delay=delay, force=force, workers=workers)
 
     click.echo(str(result))
     if not result.success:
         sys.exit(1)
+
+
+@enrich.command("backfill-sales")
+@click.pass_context
+def enrich_backfill_sales(ctx: click.Context) -> None:
+    """Backfill property_sales from cached RentCast API responses."""
+    import json
+    from datetime import date as date_type
+
+    from homebuyer.storage.models import PropertySale
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        db.initialize_schema()
+
+        rows = db.conn.execute(
+            "SELECT cache_key, response_json FROM api_response_cache "
+            "WHERE source = 'rentcast' AND endpoint = '/v1/properties'"
+        ).fetchall()
+
+        click.echo(f"Processing {len(rows)} cached RentCast responses...")
+
+        total_inserted = 0
+        total_skipped = 0
+        total_with_history = 0
+        batch: list[PropertySale] = []
+
+        for row in rows:
+            data = json.loads(row[1])
+            history = data.get("history") or {}
+            if not history:
+                continue
+
+            total_with_history += 1
+            address = data.get("addressLine1") or data.get("formattedAddress", "")
+            city = data.get("city", "Berkeley")
+            state = data.get("state", "CA")
+            zip_code = data.get("zipCode", "")
+            latitude = data.get("latitude", 0.0)
+            longitude = data.get("longitude", 0.0)
+            beds = data.get("bedrooms")
+            baths = data.get("bathrooms")
+            sqft = data.get("squareFootage")
+            lot_size = data.get("lotSize")
+            year_built = data.get("yearBuilt")
+            prop_type = data.get("propertyType")
+
+            for date_key in sorted(history.keys()):
+                txn = history[date_key]
+                price = txn.get("price")
+                if not price or price <= 0:
+                    continue
+
+                try:
+                    sale_date_obj = date_type.fromisoformat(date_key[:10])
+                except ValueError:
+                    continue
+
+                price_per_sqft = None
+                if sqft and sqft > 0:
+                    price_per_sqft = round(price / sqft, 2)
+
+                batch.append(PropertySale(
+                    address=address,
+                    city=city,
+                    state=state,
+                    zip_code=zip_code,
+                    latitude=latitude,
+                    longitude=longitude,
+                    sale_date=sale_date_obj,
+                    sale_price=price,
+                    sale_type=txn.get("event"),
+                    property_type=prop_type,
+                    beds=beds,
+                    baths=baths,
+                    sqft=sqft,
+                    lot_size_sqft=lot_size,
+                    year_built=year_built,
+                    price_per_sqft=price_per_sqft,
+                    data_source="rentcast",
+                ))
+
+        if batch:
+            inserted, dupes = db.upsert_sales_batch(batch)
+            total_inserted += inserted
+            total_skipped += dupes
+
+        click.echo(
+            f"Done: {total_with_history} properties had history, "
+            f"{total_inserted} sales inserted, {total_skipped} duplicates skipped."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +650,7 @@ def status(ctx: click.Context) -> None:
         click.echo(f"\nProperties:        {props['total']:,} parcels")
         click.echo(f"  With zoning:     {props.get('with_zoning', 0):,}")
         click.echo(f"  With nbhd:       {props.get('with_neighborhood', 0):,}")
-        click.echo(f"  ATTOM enriched:  {props.get('attom_enriched', 0):,}")
+        click.echo(f"  Enriched:        {props.get('enriched', 0):,}")
 
     nb = stats["neighborhoods"]
     click.echo(f"\nNeighborhoods:     {nb['count']:,} defined")

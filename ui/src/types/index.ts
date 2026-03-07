@@ -70,7 +70,7 @@ export interface ManualPredictPayload {
 
 export type PredictMode = 'url' | 'map';
 
-export interface AttomPrefill {
+export interface PropertyPrefill {
   beds?: number;
   baths?: number;
   sqft?: number;
@@ -86,7 +86,7 @@ export interface MapClickLocationInfo {
   zip_code: string;
   zoning_class: string | null;
   address: string | null;
-  attom_prefill?: AttomPrefill;
+  property_prefill?: PropertyPrefill;
 }
 
 export interface MapClickResponse {

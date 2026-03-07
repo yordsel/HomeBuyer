@@ -13,7 +13,7 @@ export function PropertyDetailsForm({
   onSubmit,
   isLoading,
 }: PropertyDetailsFormProps) {
-  const prefill = locationInfo.attom_prefill;
+  const prefill = locationInfo.property_prefill;
   const [beds, setBeds] = useState<string>(prefill?.beds?.toString() ?? '');
   const [baths, setBaths] = useState<string>(prefill?.baths?.toString() ?? '');
   const [sqft, setSqft] = useState<string>(prefill?.sqft?.toString() ?? '');

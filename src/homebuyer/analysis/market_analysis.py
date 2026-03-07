@@ -35,7 +35,7 @@ class NeighborhoodStats:
     avg_year_built: Optional[int] = None
     # Price change year-over-year
     yoy_price_change_pct: Optional[float] = None
-    # ATTOM / zoning enrichment
+    # API / zoning enrichment
     median_lot_size: Optional[int] = None
     property_type_breakdown: dict[str, float] = field(default_factory=dict)
     dominant_zoning: list[str] = field(default_factory=list)
@@ -189,7 +189,7 @@ class MarketAnalyzer:
         # Year-over-year price change
         stats.yoy_price_change_pct = self._calc_yoy_change(neighborhood)
 
-        # ATTOM / zoning enrichment
+        # API / zoning enrichment
         self._enrich_neighborhood_stats(stats, lookback_years)
 
         return stats
@@ -1040,7 +1040,7 @@ class MarketAnalyzer:
         ]
 
     def get_data_completeness(self) -> dict[str, dict]:
-        """Return fill-rate stats for key ATTOM-sourced columns."""
+        """Return fill-rate stats for key API-enriched columns."""
         total = self.db.conn.execute(
             "SELECT COUNT(*) FROM property_sales WHERE sale_price IS NOT NULL"
         ).fetchone()[0]
