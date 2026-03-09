@@ -33,7 +33,7 @@ export function ChatPredictionCard({ data }: { data: Record<string, unknown> }) 
           {formatCurrency(d.predicted_price)}
         </p>
         <p className="text-xs text-gray-500 mt-0.5">
-          90% range: {formatCurrency(d.price_lower)} \u2013 {formatCurrency(d.price_upper)}
+          90% range: {formatCurrency(d.price_lower)} {'\u2013'} {formatCurrency(d.price_upper)}
         </p>
       </div>
 

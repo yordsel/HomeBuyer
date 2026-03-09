@@ -512,12 +512,78 @@ export type ResponseBlockType =
   | 'rental_income'
   | 'investment_scenarios'
   | 'market_summary'
-  | 'property_detail';
+  | 'property_detail'
+  | 'property_search_results'
+  | 'query_result';
 
 export interface ResponseBlock {
   type: ResponseBlockType;
   tool_name: string;
   data: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Search result types (from search_properties tool)
+// ---------------------------------------------------------------------------
+
+export interface SearchResultDevelopment {
+  adu_eligible?: boolean;
+  adu_max_sqft?: number;
+  sb9_eligible?: boolean;
+  sb9_can_split?: boolean;
+  sb9_max_units?: number;
+  effective_max_units?: number;
+  middle_housing_eligible?: boolean;
+  zone_class?: string;
+  zone_desc?: string;
+}
+
+export interface SearchResultProperty {
+  id?: number;
+  address: string;
+  neighborhood?: string;
+  zip_code?: string;
+  zoning_class?: string;
+  beds?: number;
+  baths?: number;
+  sqft?: number;
+  building_sqft?: number;
+  lot_size_sqft?: number;
+  building_to_lot_ratio?: number;
+  year_built?: number;
+  property_type?: string;
+  property_category?: string;
+  record_type?: string;
+  last_sale_price?: number;
+  last_sale_date?: string;
+  predicted_price?: number;
+  prediction_confidence?: number;
+  data_quality?: string;
+  data_quality_note?: string;
+  development?: SearchResultDevelopment;
+  latitude?: number;
+  longitude?: number;
+}
+
+export interface PropertySearchResultsData {
+  results: SearchResultProperty[];
+  total_found: number;
+  total_matching: number;
+  filters_applied?: Record<string, unknown>;
+  message?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Query result types (from query_database tool)
+// ---------------------------------------------------------------------------
+
+export interface QueryResultData {
+  query: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  row_count: number;
+  explanation?: string;
+  error?: string;
 }
 
 export interface ChatMessage {
@@ -527,11 +593,46 @@ export interface ChatMessage {
   toolsUsed?: string[];
 }
 
+export interface WorkingSetMeta {
+  count: number;
+  descriptor: string;
+  session_id: string;
+}
+
+export interface WorkingSetProperty {
+  id: number;
+  address: string;
+  neighborhood: string | null;
+  beds: number | null;
+  baths: number | null;
+  sqft: number | null;
+  building_sqft: number | null;
+  lot_size_sqft: number | null;
+  zoning_class: string | null;
+  property_type: string | null;
+  last_sale_price: number | null;
+  year_built: number | null;
+  latitude: number | null;
+  longitude: number | null;
+  property_category: string | null;
+  record_type: string | null;
+}
+
+export interface WorkingSetPage {
+  properties: WorkingSetProperty[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  descriptor: string;
+}
+
 export interface FaketorChatResponse {
   reply: string;
   tool_calls?: { name: string; input: Record<string, unknown> }[];
   blocks?: ResponseBlock[];
   error?: string;
+  working_set?: WorkingSetMeta;
 }
 
 // ---------------------------------------------------------------------------

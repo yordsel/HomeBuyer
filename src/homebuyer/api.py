@@ -1201,6 +1201,7 @@ class FaketorChatRequest(BaseModel):
     lot_size_sqft: Optional[int] = None
     year_built: Optional[int] = None
     property_type: Optional[str] = "Single Family Residential"
+    property_category: Optional[str] = None  # sfr, condo, duplex, etc.
 
 
 # ---------------------------------------------------------------------------
@@ -1350,14 +1351,29 @@ def _update_working_set(working_set, tool_name: str, tool_input: dict, result_st
         if not results:
             return
         filters = data.get("filters_applied", {})
+        total_matching = data.get("total_matching", len(results))
         desc = _describe_search_filters(filters)
-        if working_set.count == 0:
-            # Initial population
-            working_set.set_properties(results, desc, tool_name)
+
+        # If there are more matches than returned, fetch ALL for the working set
+        if total_matching > len(results) and _state and _state.db:
+            try:
+                all_rows = _state.db.search_properties_lightweight(**filters)
+            except Exception as e:
+                logger.warning("Lightweight search for working set failed: %s", e, exc_info=True)
+                all_rows = results  # fallback to the 25
+
+            if working_set.count == 0:
+                working_set.set_properties(all_rows, desc, tool_name)
+            else:
+                new_ids = {r["id"] for r in all_rows if r.get("id")}
+                working_set.push_filter(new_ids, desc, tool_name)
         else:
-            # Narrowing: push filter
-            new_ids = {r["id"] for r in results if r.get("id")}
-            working_set.push_filter(new_ids, desc, tool_name)
+            # Results already contain everything
+            if working_set.count == 0:
+                working_set.set_properties(results, desc, tool_name)
+            else:
+                new_ids = {r["id"] for r in results if r.get("id")}
+                working_set.push_filter(new_ids, desc, tool_name)
 
     elif tool_name == "query_database":
         rows = data.get("rows", [])
@@ -1387,7 +1403,7 @@ def _populate_working_set_from_ids(
     sql = (
         f"SELECT id, address, neighborhood, beds, baths, sqft, building_sqft, "
         f"lot_size_sqft, zoning_class, property_type, last_sale_price, year_built, "
-        f"latitude, longitude "
+        f"latitude, longitude, property_category, record_type, lot_group_key, situs_unit "
         f"FROM properties WHERE id IN ({placeholders})"
     )
     try:
@@ -1449,7 +1465,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                     address = nearest.get("address")
             # Look up record_type and lot_group_key from properties table
             prop_row = _state.db.conn.execute(
-                "SELECT record_type, lot_group_key, building_sqft "
+                "SELECT record_type, lot_group_key, building_sqft, property_category "
                 "FROM properties "
                 "WHERE ABS(latitude - ?) < 0.0002 AND ABS(longitude - ?) < 0.0002 "
                 "LIMIT 1",
@@ -1461,12 +1477,18 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 # Use building_sqft from properties if we don't have sqft from sale
                 if sqft is None and prop_row["building_sqft"]:
                     sqft = prop_row["building_sqft"]
+                property_category = prop_row.get("property_category")
+            else:
+                property_category = None
+        else:
+            property_category = None
         result = _state.dev_calc.compute(
             lat=lat, lon=lon,
             lot_size_sqft=lot_size, sqft=sqft,
             address=address,
             record_type=record_type,
             lot_group_key=lot_group_key,
+            property_category=property_category,
         )
         return json.dumps(_development_potential_to_dict(result), default=str)
 
@@ -1544,6 +1566,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             baths=tool_input.get("baths"),
             sqft=tool_input.get("sqft"),
             year_built=tool_input.get("year_built"),
+            property_type=tool_input.get("property_type"),
         )
         return json.dumps([_comp_to_dict(c) for c in comps[:7]], default=str)
 
@@ -1769,6 +1792,22 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         if current_value_override:
             prop["list_price"] = int(current_value_override)  # _resolve_property_value picks up list_price first
 
+        # Resolve property_category for guardrail checks
+        inv_property_category = tool_input.get("property_category")
+        if not inv_property_category and _state.db:
+            try:
+                inv_lat, inv_lon = tool_input["latitude"], tool_input["longitude"]
+                _delta = 50 / 111_139.0
+                _pr = _state.db.conn.execute(
+                    "SELECT property_category FROM properties "
+                    "WHERE latitude BETWEEN ? AND ? AND longitude BETWEEN ? AND ? LIMIT 1",
+                    (inv_lat - _delta, inv_lat + _delta, inv_lon - _delta, inv_lon + _delta),
+                ).fetchone()
+                if _pr:
+                    inv_property_category = _pr["property_category"]
+            except Exception:
+                pass
+
         from homebuyer.analysis.rental_analysis import rental_analysis_to_dict, PropertyValueRequired
         try:
             result = _state.rental_analyzer.analyze(
@@ -1776,6 +1815,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 down_payment_pct=tool_input.get("down_payment_pct", 20.0),
                 self_managed=tool_input.get("self_managed", True),
                 rate_override=mortgage_rate_override,
+                property_category=inv_property_category,
             )
         except PropertyValueRequired:
             return json.dumps({
@@ -2030,7 +2070,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             "total_matching": total_matching,
             "filters_applied": {
                 k: v for k, v in tool_input.items()
-                if v is not None and k != "limit"
+                if v is not None and k not in ("limit", "adu_eligible", "sb9_eligible")
             },
         }, default=str)
 
@@ -2124,6 +2164,7 @@ def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
     year_built = req.year_built
     address = req.address
     zip_code = req.zip_code
+    property_category = req.property_category
 
     if _state.db:
         nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=50)
@@ -2145,6 +2186,24 @@ def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
             if not zip_code:
                 zip_code = nearest.get("zip_code")
 
+        # Enrich property_category from properties table if not provided
+        if not property_category:
+            try:
+                delta = 50 / 111_139.0  # ~50m bounding box
+                row = _state.db.conn.execute(
+                    """SELECT property_category, record_type
+                       FROM properties
+                       WHERE latitude BETWEEN ? AND ?
+                         AND longitude BETWEEN ? AND ?
+                       LIMIT 1""",
+                    (req.latitude - delta, req.latitude + delta,
+                     req.longitude - delta, req.longitude + delta),
+                ).fetchone()
+                if row:
+                    property_category = row["property_category"]
+            except Exception:
+                pass
+
     if not neighborhood and _state.geocoder:
         neighborhood = _state.geocoder.geocode_point(req.latitude, req.longitude)
         if not neighborhood:
@@ -2164,6 +2223,7 @@ def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
         "lot_size_sqft": lot_size,
         "year_built": year_built,
         "property_type": req.property_type,
+        "property_category": property_category,
     }
 
 
@@ -2188,6 +2248,15 @@ def faketor_chat(req: FaketorChatRequest):
         tool_executor=tool_executor,
         working_set_descriptor=working_set.get_descriptor() if working_set else "",
     )
+
+    # Attach working set metadata for the frontend sidebar
+    if working_set and working_set.count > 0:
+        result["working_set"] = {
+            "count": working_set.count,
+            "descriptor": working_set.get_descriptor(),
+            "session_id": req.session_id,
+        }
+
     return result
 
 
@@ -2217,6 +2286,15 @@ def faketor_chat_stream(req: FaketorChatRequest):
             data = json.dumps(event["data"], default=str)
             yield f"event: {event_type}\ndata: {data}\n\n"
 
+        # Emit working set metadata after the chat is done
+        if working_set and working_set.count > 0:
+            ws_data = json.dumps({
+                "count": working_set.count,
+                "descriptor": working_set.get_descriptor(),
+                "session_id": req.session_id,
+            }, default=str)
+            yield f"event: working_set\ndata: {ws_data}\n\n"
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
@@ -2226,6 +2304,63 @@ def faketor_chat_stream(req: FaketorChatRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get("/api/faketor/working-set/{session_id}")
+def get_working_set_properties(
+    session_id: str,
+    page: int = 0,
+    page_size: int = 25,
+    sort_by: str = "address",
+    sort_dir: str = "asc",
+    search: str | None = None,
+):
+    """Return paginated properties from the session working set."""
+    if not _state:
+        raise HTTPException(status_code=503, detail="Server not initialized")
+
+    working_set = _state.sessions.get(session_id)
+    if working_set is None:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+
+    # Get all properties as dicts
+    all_props = [prop.to_dict() for prop in working_set.properties.values()]
+
+    # Apply search filter
+    if search:
+        q = search.lower()
+        all_props = [
+            p for p in all_props
+            if q in (p.get("address") or "").lower()
+            or q in (p.get("neighborhood") or "").lower()
+            or q in (p.get("zoning_class") or "").lower()
+        ]
+
+    # Sort
+    from homebuyer.services.session_cache import PropertyRecord
+    valid_fields = set(PropertyRecord.__dataclass_fields__)
+    sort_key = sort_by if sort_by in valid_fields else "address"
+    reverse = sort_dir == "desc"
+    all_props.sort(
+        key=lambda p: (p.get(sort_key) is None, p.get(sort_key, "")),
+        reverse=reverse,
+    )
+
+    # Paginate
+    total = len(all_props)
+    page_size = min(page_size, 100)
+    start = page * page_size
+    end = start + page_size
+    page_items = all_props[start:end]
+
+    return {
+        "properties": page_items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": max(1, -(-total // page_size)),  # ceil division
+        "descriptor": working_set.get_descriptor(),
+    }
 
 
 # --- Comparables ---
@@ -2395,6 +2530,15 @@ def _prediction_to_dict(result) -> dict:
 def _development_potential_to_dict(result) -> dict:
     """Convert DevelopmentPotential to JSON-serializable dict."""
     resp: dict = {}
+
+    # If the analysis was not applicable for this property type, return early
+    if getattr(result, "not_applicable", False):
+        resp["not_applicable"] = True
+        resp["not_applicable_reason"] = getattr(result, "not_applicable_reason", "")
+        return resp
+
+    resp["not_applicable"] = False
+    resp["not_applicable_reason"] = ""
 
     if result.zoning:
         resp["zoning"] = {

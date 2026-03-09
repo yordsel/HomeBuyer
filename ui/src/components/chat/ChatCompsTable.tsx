@@ -1,8 +1,10 @@
 /**
  * Compact comparable sales table for chat inline display.
  * Shows up to 5 comps with address, date, price, and $/sqft.
+ * Addresses are clickable chips that open the PropertyDetailModal.
  */
-import { formatCurrency, formatDate, truncate } from '../../lib/utils';
+import { formatCurrency, formatDate } from '../../lib/utils';
+import { AddressChip } from './AddressChip';
 
 interface CompData {
   address: string;
@@ -14,7 +16,12 @@ interface CompData {
   price_per_sqft?: number;
 }
 
-export function ChatCompsTable({ data }: { data: Record<string, unknown> }) {
+interface ChatCompsTableProps {
+  data: Record<string, unknown>;
+  onAddressClick?: (address: string) => void;
+}
+
+export function ChatCompsTable({ data, onAddressClick }: ChatCompsTableProps) {
   // data is an array of comps
   const comps = (Array.isArray(data) ? data : []) as CompData[];
   const display = comps.slice(0, 5);
@@ -47,9 +54,17 @@ export function ChatCompsTable({ data }: { data: Record<string, unknown> }) {
           </thead>
           <tbody className="divide-y divide-gray-50">
             {display.map((comp, i) => (
-              <tr key={i} className="hover:bg-gray-50">
-                <td className="px-4 py-2 font-medium text-gray-900">
-                  {truncate(comp.address, 28)}
+              <tr
+                key={i}
+                className={`hover:bg-gray-50 ${onAddressClick ? 'cursor-pointer' : ''}`}
+                onClick={onAddressClick && comp.address ? () => onAddressClick(comp.address) : undefined}
+              >
+                <td className="px-4 py-2">
+                  {onAddressClick && comp.address ? (
+                    <AddressChip address={comp.address} onClick={onAddressClick} maxLength={26} />
+                  ) : (
+                    <span className="font-medium text-gray-900">{comp.address}</span>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-gray-500">{formatDate(comp.sale_date)}</td>
                 <td className="px-3 py-2 text-right font-medium text-gray-900">

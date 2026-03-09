@@ -17,6 +17,7 @@ import type {
   FaketorChatResponse,
   RentalAnalysisResponse,
   RentEstimate,
+  WorkingSetPage,
 } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -303,6 +304,7 @@ export async function sendFaketorMessage(payload: {
   longitude: number;
   message: string;
   history?: { role: string; content: string }[];
+  session_id?: string;
   address?: string;
   neighborhood?: string;
   zip_code?: string;
@@ -312,7 +314,26 @@ export async function sendFaketorMessage(payload: {
   lot_size_sqft?: number;
   year_built?: number;
   property_type?: string;
+  property_category?: string;
 }): Promise<FaketorChatResponse> {
   if (isTauri) return tauriInvoke('faketor_chat', { payload });
   return apiPost('/api/faketor/chat', payload);
+}
+
+export async function getWorkingSetProperties(params: {
+  session_id: string;
+  page?: number;
+  page_size?: number;
+  sort_by?: string;
+  sort_dir?: string;
+  search?: string;
+}): Promise<WorkingSetPage> {
+  const qs = new URLSearchParams();
+  if (params.page != null) qs.set('page', String(params.page));
+  if (params.page_size != null) qs.set('page_size', String(params.page_size));
+  if (params.sort_by) qs.set('sort_by', params.sort_by);
+  if (params.sort_dir) qs.set('sort_dir', params.sort_dir);
+  if (params.search) qs.set('search', params.search);
+  const query = qs.toString();
+  return apiGet(`/api/faketor/working-set/${params.session_id}${query ? `?${query}` : ''}`);
 }

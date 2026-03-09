@@ -149,6 +149,8 @@ class RentalAnalysisResponse:
     recommendation_notes: str
     data_sources: list[str]
     disclaimers: list[str]
+    not_applicable: bool = False  # True if rental analysis is N/A for this property type
+    not_applicable_reason: str = ""  # Human-readable explanation
 
 
 # ---------------------------------------------------------------------------
@@ -913,11 +915,52 @@ class RentalAnalyzer:
         property_dict: dict,
         down_payment_pct: float = 20.0,
         self_managed: bool = True,
+        property_category: Optional[str] = None,
+        rate_override: Optional[float] = None,
     ) -> RentalAnalysisResponse:
-        """Run complete rental analysis with all applicable scenarios."""
+        """Run complete rental analysis with all applicable scenarios.
+
+        Args:
+            property_dict: Property data dict with address, lat/lon, sqft, etc.
+            down_payment_pct: Down payment percentage for mortgage analysis.
+            self_managed: Whether the owner self-manages (lower expense ratio).
+            property_category: Property type (sfr, condo, etc.) for guardrail checks.
+            rate_override: Optional mortgage rate override (passed through to scenarios).
+        """
+        from homebuyer.processing.property_guardrails import (
+            Applicability,
+            check_applicability,
+            get_restricted_scenarios,
+        )
+
         address = property_dict.get("address")
         neighborhood = property_dict.get("neighborhood", "Berkeley")
         value = self._resolve_property_value(property_dict)
+
+        # Check if rental/investment analysis is applicable at all
+        rental_app, rental_reason = check_applicability(
+            "rental_income", property_category,
+        )
+        if rental_app == Applicability.NOT_APPLICABLE:
+            logger.info(
+                "Rental analysis N/A for %s (category=%s): %s",
+                address or "?", property_category, rental_reason,
+            )
+            return RentalAnalysisResponse(
+                property_address=address,
+                property_value=value,
+                neighborhood=neighborhood,
+                scenarios=[],
+                best_scenario="",
+                recommendation_notes=rental_reason,
+                data_sources=[],
+                disclaimers=[],
+                not_applicable=True,
+                not_applicable_reason=rental_reason,
+            )
+
+        # Determine which scenario types to exclude for this property category
+        excluded_scenarios = set(get_restricted_scenarios(property_category))
 
         # Get development potential if calculator available
         dev_potential = None
@@ -931,38 +974,57 @@ class RentalAnalyzer:
                     lot_size_sqft=property_dict.get("lot_size_sqft"),
                     sqft=property_dict.get("sqft"),
                     address=address,
+                    property_category=property_category,
                 )
 
         # Build all applicable scenarios
         scenarios: list[InvestmentScenario] = []
         data_sources: list[str] = []
 
-        # Always build as-is
-        as_is = self.build_scenario_as_is(property_dict, down_payment_pct, self_managed)
-        scenarios.append(as_is)
-        data_sources.append("Berkeley property sales (price-to-rent ratios)")
-        data_sources.append("FRED mortgage rates")
+        # Always build as-is (unless explicitly excluded, e.g. for land)
+        if "as_is" not in excluded_scenarios:
+            as_is = self.build_scenario_as_is(property_dict, down_payment_pct, self_managed)
+            scenarios.append(as_is)
+            data_sources.append("Berkeley property sales (price-to-rent ratios)")
+            data_sources.append("FRED mortgage rates")
 
-        # ADU scenario
-        adu = self.build_scenario_adu(property_dict, dev_potential, down_payment_pct, self_managed)
-        if adu:
-            scenarios.append(adu)
-            data_sources.append("Berkeley building permits (ADU costs)")
-            data_sources.append("Berkeley zoning (ADU eligibility)")
+        # ADU scenario (skip if excluded for property category)
+        if "adu" not in excluded_scenarios:
+            adu = self.build_scenario_adu(property_dict, dev_potential, down_payment_pct, self_managed)
+            if adu:
+                scenarios.append(adu)
+                data_sources.append("Berkeley building permits (ADU costs)")
+                data_sources.append("Berkeley zoning (ADU eligibility)")
 
-        # SB9 scenario
-        sb9 = self.build_scenario_sb9(property_dict, dev_potential, down_payment_pct, self_managed)
-        if sb9:
-            scenarios.append(sb9)
-            data_sources.append("SB 9 eligibility from zoning data")
+        # SB9 scenario (skip if excluded for property category)
+        if "sb9_split" not in excluded_scenarios:
+            sb9 = self.build_scenario_sb9(property_dict, dev_potential, down_payment_pct, self_managed)
+            if sb9:
+                scenarios.append(sb9)
+                data_sources.append("SB 9 eligibility from zoning data")
 
-        # Multi-unit scenario
-        multi = self.build_scenario_multi_unit(
-            property_dict, dev_potential, down_payment_pct, self_managed,
-        )
-        if multi:
-            scenarios.append(multi)
-            data_sources.append("Middle Housing Ordinance unit limits")
+        # Multi-unit scenario (skip if excluded for property category)
+        if "multi_unit" not in excluded_scenarios:
+            multi = self.build_scenario_multi_unit(
+                property_dict, dev_potential, down_payment_pct, self_managed,
+            )
+            if multi:
+                scenarios.append(multi)
+                data_sources.append("Middle Housing Ordinance unit limits")
+
+        if not scenarios:
+            return RentalAnalysisResponse(
+                property_address=address,
+                property_value=value,
+                neighborhood=neighborhood,
+                scenarios=[],
+                best_scenario="",
+                recommendation_notes="No applicable investment scenarios for this property type.",
+                data_sources=[],
+                disclaimers=[],
+                not_applicable=True,
+                not_applicable_reason="No applicable investment scenarios for this property type.",
+            )
 
         # Pick best by cash-on-cash return
         best = max(scenarios, key=lambda s: s.cash_on_cash_pct)
@@ -1069,7 +1131,24 @@ class RentalAnalyzer:
 
 def rental_analysis_to_dict(resp: RentalAnalysisResponse) -> dict:
     """Convert a RentalAnalysisResponse to a JSON-serializable dict."""
+    # If the analysis was not applicable for this property type, return early
+    if resp.not_applicable:
+        return {
+            "not_applicable": True,
+            "not_applicable_reason": resp.not_applicable_reason,
+            "property_address": resp.property_address,
+            "property_value": resp.property_value,
+            "neighborhood": resp.neighborhood,
+            "scenarios": [],
+            "best_scenario": None,
+            "recommendation_notes": resp.recommendation_notes,
+            "data_sources": [],
+            "disclaimers": [],
+        }
+
     return {
+        "not_applicable": False,
+        "not_applicable_reason": "",
         "property_address": resp.property_address,
         "property_value": resp.property_value,
         "neighborhood": resp.neighborhood,

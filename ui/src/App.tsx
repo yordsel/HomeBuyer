@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Toaster } from 'sonner';
 import { Sidebar } from './components/Sidebar';
+import { ContextPanel } from './components/context/ContextPanel';
 import { ChatPage } from './pages/Chat';
 import { PredictPage } from './pages/Predict';
 import { NeighborhoodsPage } from './pages/Neighborhoods';
@@ -45,6 +46,9 @@ function App() {
             {renderPage()}
           </div>
         </main>
+
+        {/* Right context panel — only visible on Chat page */}
+        {currentPage === 'chat' && <ContextPanel />}
 
         <Toaster position="bottom-right" richColors closeButton />
       </div>

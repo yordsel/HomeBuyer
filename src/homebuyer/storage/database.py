@@ -1415,8 +1415,10 @@ class Database:
 
         return [dict(row) for row in rows]
 
-    def search_properties_advanced(
-        self,
+    # -- Shared filter builder for advanced property queries ------------------
+
+    @staticmethod
+    def _build_property_filter_clause(
         *,
         neighborhoods: list[str] | None = None,
         zoning_classes: list[str] | None = None,
@@ -1437,14 +1439,11 @@ class Database:
         max_sqft: int | None = None,
         min_year_built: int | None = None,
         max_year_built: int | None = None,
-        limit: int = 25,
-    ) -> list[dict]:
-        """Search properties by multiple criteria with precomputed data.
+    ) -> tuple[str, list]:
+        """Build a WHERE clause + params list from property search filters.
 
-        Returns property dicts with ``prediction_json`` and ``potential_json``
-        from the precomputed scenarios table (LEFT JOIN).
-
-        All filters are optional; only those provided are applied.
+        Shared by search_properties_advanced, count_properties_advanced, and
+        search_properties_lightweight. Table alias must be ``p``.
         """
         clauses: list[str] = []
         params: list = []
@@ -1510,6 +1509,50 @@ class Database:
             params.append(max_year_built)
 
         where = (" AND ".join(clauses)) if clauses else "1=1"
+        return where, params
+
+    def search_properties_advanced(
+        self,
+        *,
+        neighborhoods: list[str] | None = None,
+        zoning_classes: list[str] | None = None,
+        zoning_pattern: str | None = None,
+        property_type: str | None = None,
+        property_category: str | None = None,
+        record_type: str | None = None,
+        ownership_type: str | None = None,
+        min_price: int | None = None,
+        max_price: int | None = None,
+        min_beds: float | None = None,
+        max_beds: float | None = None,
+        min_baths: float | None = None,
+        max_baths: float | None = None,
+        min_lot_sqft: int | None = None,
+        max_lot_sqft: int | None = None,
+        min_sqft: int | None = None,
+        max_sqft: int | None = None,
+        min_year_built: int | None = None,
+        max_year_built: int | None = None,
+        limit: int = 25,
+    ) -> list[dict]:
+        """Search properties by multiple criteria with precomputed data.
+
+        Returns property dicts with ``prediction_json`` and ``potential_json``
+        from the precomputed scenarios table (LEFT JOIN).
+
+        All filters are optional; only those provided are applied.
+        """
+        where, params = self._build_property_filter_clause(
+            neighborhoods=neighborhoods, zoning_classes=zoning_classes,
+            zoning_pattern=zoning_pattern, property_type=property_type,
+            property_category=property_category, record_type=record_type,
+            ownership_type=ownership_type, min_price=min_price,
+            max_price=max_price, min_beds=min_beds, max_beds=max_beds,
+            min_baths=min_baths, max_baths=max_baths,
+            min_lot_sqft=min_lot_sqft, max_lot_sqft=max_lot_sqft,
+            min_sqft=min_sqft, max_sqft=max_sqft,
+            min_year_built=min_year_built, max_year_built=max_year_built,
+        )
         params.append(min(limit, 100))
 
         sql = f"""
@@ -1550,73 +1593,78 @@ class Database:
         max_year_built: int | None = None,
     ) -> int:
         """Count properties matching criteria (same filters as search_properties_advanced)."""
-        clauses: list[str] = []
-        params: list = []
-
-        if neighborhoods:
-            placeholders = ",".join("?" for _ in neighborhoods)
-            clauses.append(f"p.neighborhood IN ({placeholders})")
-            params.extend(neighborhoods)
-        if zoning_classes:
-            placeholders = ",".join("?" for _ in zoning_classes)
-            clauses.append(f"p.zoning_class IN ({placeholders})")
-            params.extend(zoning_classes)
-        if zoning_pattern:
-            clauses.append("p.zoning_class LIKE ?")
-            params.append(zoning_pattern)
-        if property_type:
-            clauses.append("p.property_type = ?")
-            params.append(property_type)
-        if property_category:
-            clauses.append("p.property_category = ?")
-            params.append(property_category)
-        if record_type:
-            clauses.append("p.record_type = ?")
-            params.append(record_type)
-        if ownership_type:
-            clauses.append("p.ownership_type = ?")
-            params.append(ownership_type)
-        if min_price is not None:
-            clauses.append("p.last_sale_price >= ?")
-            params.append(min_price)
-        if max_price is not None:
-            clauses.append("p.last_sale_price <= ?")
-            params.append(max_price)
-        if min_beds is not None:
-            clauses.append("p.beds >= ?")
-            params.append(min_beds)
-        if max_beds is not None:
-            clauses.append("p.beds <= ?")
-            params.append(max_beds)
-        if min_baths is not None:
-            clauses.append("p.baths >= ?")
-            params.append(min_baths)
-        if max_baths is not None:
-            clauses.append("p.baths <= ?")
-            params.append(max_baths)
-        if min_lot_sqft is not None:
-            clauses.append("p.lot_size_sqft >= ?")
-            params.append(min_lot_sqft)
-        if max_lot_sqft is not None:
-            clauses.append("p.lot_size_sqft <= ?")
-            params.append(max_lot_sqft)
-        if min_sqft is not None:
-            clauses.append("p.sqft >= ?")
-            params.append(min_sqft)
-        if max_sqft is not None:
-            clauses.append("p.sqft <= ?")
-            params.append(max_sqft)
-        if min_year_built is not None:
-            clauses.append("p.year_built >= ?")
-            params.append(min_year_built)
-        if max_year_built is not None:
-            clauses.append("p.year_built <= ?")
-            params.append(max_year_built)
-
-        where = (" AND ".join(clauses)) if clauses else "1=1"
+        where, params = self._build_property_filter_clause(
+            neighborhoods=neighborhoods, zoning_classes=zoning_classes,
+            zoning_pattern=zoning_pattern, property_type=property_type,
+            property_category=property_category, record_type=record_type,
+            ownership_type=ownership_type, min_price=min_price,
+            max_price=max_price, min_beds=min_beds, max_beds=max_beds,
+            min_baths=min_baths, max_baths=max_baths,
+            min_lot_sqft=min_lot_sqft, max_lot_sqft=max_lot_sqft,
+            min_sqft=min_sqft, max_sqft=max_sqft,
+            min_year_built=min_year_built, max_year_built=max_year_built,
+        )
         sql = f"SELECT COUNT(*) FROM properties p WHERE {where}"
         row = self.conn.execute(sql, params).fetchone()
         return row[0] if row else 0
+
+    def search_properties_lightweight(
+        self,
+        *,
+        neighborhoods: list[str] | None = None,
+        zoning_classes: list[str] | None = None,
+        zoning_pattern: str | None = None,
+        property_type: str | None = None,
+        property_category: str | None = None,
+        record_type: str | None = None,
+        ownership_type: str | None = None,
+        min_price: int | None = None,
+        max_price: int | None = None,
+        min_beds: float | None = None,
+        max_beds: float | None = None,
+        min_baths: float | None = None,
+        max_baths: float | None = None,
+        min_lot_sqft: int | None = None,
+        max_lot_sqft: int | None = None,
+        min_sqft: int | None = None,
+        max_sqft: int | None = None,
+        min_year_built: int | None = None,
+        max_year_built: int | None = None,
+        max_results: int = 5000,
+    ) -> list[dict]:
+        """Return lightweight property records for ALL matches (working set).
+
+        Same filters as ``search_properties_advanced`` but:
+        - No JOIN to ``precomputed_scenarios`` (faster, less memory)
+        - SELECT only working-set fields
+        - Safety cap at *max_results* (default 5000)
+        """
+        where, params = self._build_property_filter_clause(
+            neighborhoods=neighborhoods, zoning_classes=zoning_classes,
+            zoning_pattern=zoning_pattern, property_type=property_type,
+            property_category=property_category, record_type=record_type,
+            ownership_type=ownership_type, min_price=min_price,
+            max_price=max_price, min_beds=min_beds, max_beds=max_beds,
+            min_baths=min_baths, max_baths=max_baths,
+            min_lot_sqft=min_lot_sqft, max_lot_sqft=max_lot_sqft,
+            min_sqft=min_sqft, max_sqft=max_sqft,
+            min_year_built=min_year_built, max_year_built=max_year_built,
+        )
+        params.append(min(max_results, 5000))
+
+        sql = f"""
+            SELECT p.id, p.address, p.neighborhood, p.beds, p.baths,
+                   p.sqft, p.building_sqft, p.lot_size_sqft, p.zoning_class,
+                   p.property_type, p.last_sale_price, p.year_built,
+                   p.latitude, p.longitude, p.property_category,
+                   p.record_type, p.lot_group_key, p.situs_unit
+            FROM properties p
+            WHERE {where}
+            ORDER BY p.last_sale_price DESC NULLS LAST
+            LIMIT ?
+        """
+        rows = self.conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
 
     def get_property_by_id(self, property_id: int) -> dict | None:
         """Get a single property by its database ID.

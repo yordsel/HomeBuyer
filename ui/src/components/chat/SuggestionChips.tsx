@@ -2,7 +2,7 @@
  * Context-aware follow-up suggestion chips for the chat interface.
  *
  * Shows different prompts based on:
- * - Whether a property is active
+ * - Whether a property is active (and its property_category)
  * - Which tools have been called already
  * - The conversation stage
  */
@@ -11,6 +11,8 @@ interface SuggestionChipsProps {
   hasProperty: boolean;
   toolsUsed: string[];
   onSelect: (prompt: string) => void;
+  /** Granular property type (sfr, condo, land, etc.) for smarter suggestions. */
+  propertyCategory?: string;
 }
 
 const INITIAL_PROMPTS = [
@@ -20,33 +22,138 @@ const INITIAL_PROMPTS = [
   'How are mortgage rates affecting prices?',
 ];
 
-const PROPERTY_PROMPTS = [
-  'What\'s this property worth?',
-  'What can I build on this lot?',
-  'Show comparable sales',
-  'Should I sell or hold?',
-  'What improvements add the most value?',
-  'Run an investment analysis',
-  'Estimate rental income',
+/** Property-type-aware initial prompts when a property is selected. */
+function getPropertyPrompts(category?: string): string[] {
+  const base = [
+    'What\'s this property worth?',
+    'Show comparable sales',
+    'Should I sell or hold?',
+  ];
+
+  switch (category) {
+    case 'sfr':
+      return [
+        ...base,
+        'What can I build on this lot?',
+        'What improvements add the most value?',
+        'Run an investment analysis',
+        'Estimate rental income',
+      ];
+
+    case 'condo':
+    case 'coop':
+    case 'townhouse':
+      return [
+        ...base,
+        'What improvements add the most value?',
+        'Estimate rental income',
+        'How does this compare to similar units?',
+      ];
+
+    case 'duplex':
+    case 'triplex':
+    case 'fourplex':
+      return [
+        ...base,
+        'Can I add an ADU?',
+        'What improvements add the most value?',
+        'Run an investment analysis',
+        'Estimate rental income',
+      ];
+
+    case 'apartment':
+      return [
+        ...base,
+        'What improvements add the most value?',
+        'Estimate rental income for all units',
+      ];
+
+    case 'land':
+      return [
+        ...base,
+        'What can I build here?',
+        'What does the zoning allow?',
+      ];
+
+    case 'mixed_use':
+      return [
+        ...base,
+        'What can I build on the residential portion?',
+        'What improvements add the most value?',
+        'Estimate rental income',
+      ];
+
+    default:
+      return [
+        ...base,
+        'What can I build on this lot?',
+        'What improvements add the most value?',
+        'Run an investment analysis',
+      ];
+  }
+}
+
+/** Post-prediction follow-ups, filtered by property type. */
+function getPostPredictionPrompts(category?: string): string[] {
+  const base = [
+    'What drives this price?',
+    'Show comps nearby',
+  ];
+
+  switch (category) {
+    case 'condo':
+    case 'coop':
+    case 'townhouse':
+      return [...base, 'Sell vs hold analysis', 'Estimate rental income'];
+    case 'land':
+      return [...base, 'Sell vs hold analysis', 'What can I build here?'];
+    case 'apartment':
+      return [...base, 'Sell vs hold analysis', 'Estimate rental income'];
+    default:
+      return [...base, 'What can I build here?', 'Investment scenarios'];
+  }
+}
+
+/** Post-development follow-ups, filtered by property type. */
+function getPostDevelopmentPrompts(category?: string): string[] {
+  switch (category) {
+    case 'condo':
+    case 'coop':
+    case 'townhouse':
+      // Development potential shouldn't have been run, but handle gracefully
+      return [
+        'Show comparable sales',
+        'Estimate rental income',
+      ];
+    case 'land':
+      return [
+        'Show comparable land sales',
+        'What are the construction costs?',
+      ];
+    default:
+      return [
+        'What\'s the ROI on adding an ADU?',
+        'Compare investment scenarios',
+        'Show comparable sales',
+        'Estimate rental income with an ADU',
+      ];
+  }
+}
+
+const POST_SEARCH_PROMPTS = [
+  'Which of these have the best development potential?',
+  'Compare the top results by price per sqft',
+  'Tell me more about the first property',
+  'What are the average prices by neighborhood?',
 ];
 
-const POST_PREDICTION_PROMPTS = [
-  'What drives this price?',
-  'Show comps nearby',
-  'What can I build here?',
-  'Sell vs hold analysis',
-  'Investment scenarios',
-];
-
-const POST_DEVELOPMENT_PROMPTS = [
-  'What\'s the ROI on adding an ADU?',
-  'Compare investment scenarios',
-  'Show comparable sales',
-  'Estimate rental income with an ADU',
-];
-
-export function SuggestionChips({ hasProperty, toolsUsed, onSelect }: SuggestionChipsProps) {
-  const prompts = getPrompts(hasProperty, toolsUsed);
+export function SuggestionChips({
+  hasProperty,
+  toolsUsed,
+  onSelect,
+  propertyCategory,
+}: SuggestionChipsProps) {
+  const prompts = getPrompts(hasProperty, toolsUsed, propertyCategory);
 
   if (prompts.length === 0) return null;
 
@@ -67,26 +174,35 @@ export function SuggestionChips({ hasProperty, toolsUsed, onSelect }: Suggestion
   );
 }
 
-function getPrompts(hasProperty: boolean, toolsUsed: string[]): string[] {
+function getPrompts(
+  hasProperty: boolean,
+  toolsUsed: string[],
+  propertyCategory?: string,
+): string[] {
   const tools = new Set(toolsUsed);
+
+  // After property search, suggest exploration follow-ups
+  if (tools.has('search_properties')) {
+    return POST_SEARCH_PROMPTS.slice(0, 4);
+  }
 
   // After development potential, suggest related follow-ups
   if (tools.has('get_development_potential')) {
-    return POST_DEVELOPMENT_PROMPTS.filter(
-      (p) => !tools.has(promptToTool(p)),
-    ).slice(0, 4);
+    return getPostDevelopmentPrompts(propertyCategory)
+      .filter((p) => !tools.has(promptToTool(p)))
+      .slice(0, 4);
   }
 
   // After prediction, suggest deeper analysis
   if (tools.has('get_price_prediction')) {
-    return POST_PREDICTION_PROMPTS.filter(
-      (p) => !tools.has(promptToTool(p)),
-    ).slice(0, 4);
+    return getPostPredictionPrompts(propertyCategory)
+      .filter((p) => !tools.has(promptToTool(p)))
+      .slice(0, 4);
   }
 
   // Property is active but no tools called yet
   if (hasProperty) {
-    return PROPERTY_PROMPTS.slice(0, 4);
+    return getPropertyPrompts(propertyCategory).slice(0, 4);
   }
 
   // No property, no tools — initial prompts

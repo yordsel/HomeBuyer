@@ -736,6 +736,48 @@ When a user says they OWN a property, BOUGHT it, or refers to it as "my property
 6. Property tax under CA Prop 13 is assessed on purchase price, so this is important for accuracy
 7. If the user gives a current value estimate, pass it as current_value_override
 
+PROPERTY TYPE ANALYSIS RULES:
+When analyzing a property, always consider its property_category (shown in the CURRENT PROPERTY \
+CONTEXT) before recommending or running analyses. The backend enforces guardrails, but you should \
+also frame your responses appropriately:
+
+**Single-Family Residential (sfr):**
+- Full analysis suite: price prediction, comps, development potential (ADU, SB9, lot split), \
+  improvement ROI, rental income, all investment scenarios.
+
+**Duplex / Triplex / Fourplex:**
+- All analyses EXCEPT SB9 lot splitting (SB9 only applies to single-family in R-1/R-1H zones).
+- ADU may apply depending on lot size and zoning.
+- When discussing investment scenarios, note that SB9 is excluded and explain why.
+
+**Condo / Co-op / Townhouse:**
+- Price prediction, comparable sales, sell vs hold, improvement simulation, as-is rental income.
+- Do NOT suggest or run development potential tools (the owner does not control the lot).
+- Do NOT suggest lot-split, ADU, or SB9 scenarios.
+- Investment analysis is limited to as-is rental scenario only.
+- Frame analysis around: unit value, HOA considerations, comparable unit sales, rental yield.
+
+**Apartment (5+ units):**
+- Price prediction, comparable sales, sell vs hold, improvement simulation, as-is rental income.
+- Do NOT suggest ADU/SB9/lot-split (irrelevant at this scale).
+- Investment analysis is limited to as-is existing unit rental analysis.
+- Frame analysis around: per-unit economics, cap rate, gross rent multiplier, building-level value.
+
+**Land / Vacant:**
+- Price prediction, comparable land sales, sell vs hold, zoning-based development analysis.
+- Do NOT suggest improvement simulation (no structure to improve).
+- Do NOT suggest rental income (no units to rent).
+- Focus on: zoning capacity, what CAN be built, new construction feasibility, permitted uses.
+
+**Mixed-Use:**
+- Price prediction, comparable sales, sell vs hold, improvement simulation.
+- Development potential is limited to the residential portion.
+- Rental income analysis covers existing residential units only.
+
+**Commercial:**
+- Price prediction, comparable sales, sell vs hold.
+- Do NOT suggest residential-focused analyses (ADU, SB9, improvement ROI, residential rental).
+
 CONTEXT:
 You are the primary interface for the HomeBuyer app. Users may ask about any Berkeley property \
 by address, or about the overall market. If property details (address, coordinates, etc.) are \
@@ -799,7 +841,7 @@ class FaketorService:
 
         try:
             # Agentic loop: keep going until Claude stops calling tools
-            max_iterations = 6
+            max_iterations = 12
             for _ in range(max_iterations):
                 # Inject accumulated facts summary into system prompt
                 system = base_system
@@ -808,7 +850,7 @@ class FaketorService:
 
                 response = self._client.messages.create(
                     model="claude-sonnet-4-20250514",
-                    max_tokens=2048,
+                    max_tokens=4096,
                     system=system,
                     tools=FAKETOR_TOOLS,
                     messages=messages,
@@ -895,9 +937,14 @@ class FaketorService:
 
                 messages.append({"role": "user", "content": tool_results})
 
-            # If we hit max iterations, return what we have
+            # If we hit max iterations, return what we have with a graceful message
+            fallback_reply = (
+                "Here's what I found based on my analysis so far."
+                if blocks
+                else "I gathered a lot of data but ran out of room to summarize it. Could you ask a more specific question?"
+            )
             return {
-                "reply": "I gathered a lot of data but hit my analysis limit. Could you ask a more specific question?",
+                "reply": fallback_reply,
                 "tool_calls": tool_calls_log,
                 "blocks": blocks,
             }
@@ -965,7 +1012,7 @@ class FaketorService:
         accumulator = AnalysisAccumulator()
 
         try:
-            max_iterations = 6
+            max_iterations = 12
             for _ in range(max_iterations):
                 # Inject accumulated facts summary into system prompt
                 system = base_system
@@ -975,7 +1022,7 @@ class FaketorService:
                 # Stream this iteration's response
                 with self._client.messages.stream(
                     model="claude-sonnet-4-20250514",
-                    max_tokens=2048,
+                    max_tokens=4096,
                     system=system,
                     tools=FAKETOR_TOOLS,
                     messages=messages,
@@ -1084,7 +1131,11 @@ class FaketorService:
             # Yield done event with complete response
             full_reply = "".join(all_text_parts)
             if not full_reply:
-                full_reply = "I gathered a lot of data but hit my analysis limit. Could you ask a more specific question?"
+                full_reply = (
+                    "Here's what I found based on my analysis so far."
+                    if blocks
+                    else "I gathered a lot of data but ran out of room to summarize it. Could you ask a more specific question?"
+                )
             yield {
                 "event": "done",
                 "data": {

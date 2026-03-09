@@ -8,17 +8,33 @@
  * - Context-aware suggestion chips
  * - Enhanced markdown rendering
  */
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Send, Loader2, Bot, User, MessageCircle, Search } from 'lucide-react';
 import { toast } from 'sonner';
 
 import * as api from '../lib/tauri';
 import { usePropertyContext } from '../context/PropertyContext';
+import type { PropertyContextData, TrackedProperty } from '../context/PropertyContext';
 import { MarkdownLite } from '../components/chat/MarkdownLite';
 import { BlockRenderer } from '../components/chat/BlockRenderer';
 import { SuggestionChips } from '../components/chat/SuggestionChips';
 import { AddressSearch } from '../components/AddressSearch';
-import type { ChatMessage, FaketorMessage } from '../types';
+import { PropertyDetailModal } from '../components/context/PropertyDetailModal';
+import type {
+  ChatMessage,
+  FaketorMessage,
+  PropertySearchResultsData,
+  SearchResultProperty,
+} from '../types';
+
+// Block types to show inline in chat. Analysis blocks (prediction_card,
+// comps_table, neighborhood_stats, etc.) are available in the sidebar and
+// property detail modal, so we hide them from chat to reduce clutter.
+const INLINE_BLOCK_TYPES = new Set([
+  'property_detail',
+  'property_search_results',
+  'query_result',
+]);
 
 // ---------------------------------------------------------------------------
 // ChatPage
@@ -30,7 +46,77 @@ export function ChatPage() {
   const [thinking, setThinking] = useState(false);
   const [allToolsUsed, setAllToolsUsed] = useState<string[]>([]);
 
-  const { activeProperty, setActiveProperty } = usePropertyContext();
+  const {
+    activeProperty,
+    setActiveProperty,
+    trackProperty,
+    trackProperties,
+    trackedProperties,
+    addBlocksToProperty,
+    clearTrackedProperties,
+    setSendChatMessage,
+    setWorkingSetMeta,
+  } = usePropertyContext();
+
+  // Stable session ID for this conversation — ties frontend to backend working set
+  const [sessionId] = useState(() => crypto.randomUUID());
+
+  // Property detail modal state — opened when clicking an address chip/card in chat
+  const [detailAddress, setDetailAddress] = useState<string | null>(null);
+  const detailTracked: TrackedProperty | null = useMemo(() => {
+    if (!detailAddress) return null;
+    const lower = detailAddress.toLowerCase();
+    // First try: find in tracked properties (case-insensitive)
+    const tracked = trackedProperties.find(
+      (t) => t.property.address.toLowerCase() === lower,
+    );
+    if (tracked) return tracked;
+    // Fallback: build a minimal TrackedProperty from chat message blocks
+    // so the modal can still open for properties shown in chat but not yet
+    // in the tracked list (e.g. from search results or comps table)
+    for (const msg of messages) {
+      if (!msg.blocks) continue;
+      const propBlock = msg.blocks.find(
+        (b) =>
+          b.type === 'property_detail' &&
+          (b.data as Record<string, unknown>)?.address &&
+          String((b.data as Record<string, unknown>).address).toLowerCase() === lower,
+      );
+      if (propBlock) {
+        const pd = propBlock.data as Record<string, unknown>;
+        return {
+          property: {
+            latitude: (pd.latitude as number) ?? 0,
+            longitude: (pd.longitude as number) ?? 0,
+            address: String(pd.address),
+            neighborhood: pd.neighborhood as string | undefined,
+            zip_code: pd.zip_code as string | undefined,
+            beds: pd.beds as number | undefined,
+            baths: pd.baths as number | undefined,
+            sqft: pd.sqft as number | undefined,
+            lot_size_sqft: pd.lot_size_sqft as number | undefined,
+            year_built: pd.year_built as number | undefined,
+            property_type: pd.property_type as string | undefined,
+            zoning_class: pd.zoning_class as string | undefined,
+            last_sale_price: pd.last_sale_price as number | undefined,
+            last_sale_date: pd.last_sale_date as string | undefined,
+            property_category: pd.property_category as string | undefined,
+            record_type: pd.record_type as string | undefined,
+          },
+          blocks: msg.blocks,
+          addedAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+      }
+    }
+    return null;
+  }, [detailAddress, trackedProperties, messages]);
+
+  // Collect known addresses for inline chip rendering in chat text
+  const knownAddresses = useMemo(
+    () => trackedProperties.map((t) => t.property.address),
+    [trackedProperties],
+  );
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -41,6 +127,15 @@ export function ChatPage() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, thinking]);
+
+  // Clear stale context on mount — each ChatPage instance is a fresh conversation
+  // (sessionId is unique per mount), so sidebar shouldn't show leftovers from prior sessions
+  useEffect(() => {
+    clearTrackedProperties();
+    setActiveProperty(null);
+    setWorkingSetMeta(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Focus input on mount
   useEffect(() => {
@@ -72,6 +167,7 @@ export function ChatPage() {
           longitude: activeProperty?.longitude ?? -122.2727,
           message: msg,
           history,
+          session_id: sessionId,
           address: activeProperty?.address,
           neighborhood: activeProperty?.neighborhood,
           zip_code: activeProperty?.zip_code,
@@ -81,12 +177,18 @@ export function ChatPage() {
           lot_size_sqft: activeProperty?.lot_size_sqft,
           year_built: activeProperty?.year_built,
           property_type: activeProperty?.property_type,
+          property_category: activeProperty?.property_category,
         });
 
         if (resp.error) {
           toast.error(resp.error);
           setMessages(messages); // revert
         } else {
+          // Propagate backend working set metadata to context
+          if (resp.working_set) {
+            setWorkingSetMeta(resp.working_set);
+          }
+
           const toolNames = resp.tool_calls?.map((t) => t.name) ?? [];
           const assistantMsg: ChatMessage = {
             role: 'assistant',
@@ -97,13 +199,21 @@ export function ChatPage() {
           setMessages([...updatedMessages, assistantMsg]);
           setAllToolsUsed((prev) => [...prev, ...toolNames]);
 
-          // Auto-set active property from lookup_property results
+          // Auto-set active property from lookup_property results and
+          // track properties + analysis blocks in the context sidebar
           if (resp.blocks) {
-            const propBlock = resp.blocks.find((b) => b.type === 'property_detail');
+            const propBlock = resp.blocks.find(
+              (b) => b.type === 'property_detail',
+            );
+            const searchBlock = resp.blocks.find(
+              (b) => b.type === 'property_search_results',
+            );
+
             if (propBlock?.data) {
+              // Single property lookup — set active and track with all blocks
               const pd = propBlock.data as Record<string, unknown>;
               if (pd.latitude && pd.longitude && pd.address) {
-                setActiveProperty({
+                const propData: PropertyContextData = {
                   latitude: pd.latitude as number,
                   longitude: pd.longitude as number,
                   address: pd.address as string,
@@ -118,7 +228,46 @@ export function ChatPage() {
                   zoning_class: pd.zoning_class as string | undefined,
                   last_sale_price: pd.last_sale_price as number | undefined,
                   last_sale_date: pd.last_sale_date as string | undefined,
-                });
+                  property_category: pd.property_category as string | undefined,
+                  record_type: pd.record_type as string | undefined,
+                };
+                setActiveProperty(propData);
+                // Track in sidebar with all response blocks
+                trackProperty(propData, resp.blocks);
+              }
+            } else if (searchBlock?.data) {
+              // Search results — batch-track all returned properties
+              const searchData =
+                searchBlock.data as unknown as PropertySearchResultsData;
+              const results = searchData.results ?? [];
+              const propsToTrack: PropertyContextData[] = [];
+
+              for (const r of results) {
+                if (r.latitude && r.longitude && r.address) {
+                  propsToTrack.push(
+                    searchResultToContextData(r),
+                  );
+                }
+              }
+
+              if (propsToTrack.length > 0) {
+                trackProperties(propsToTrack);
+                // Don't change activeProperty — user asked a broad question
+              }
+            } else if (activeProperty) {
+              // No new property block, but we have analysis blocks for the
+              // currently active property — append them
+              const analysisBlocks = resp.blocks.filter(
+                (b) =>
+                  b.type !== 'property_detail' &&
+                  b.type !== 'property_search_results' &&
+                  b.type !== 'query_result',
+              );
+              if (analysisBlocks.length > 0) {
+                addBlocksToProperty(
+                  activeProperty.address,
+                  analysisBlocks,
+                );
               }
             }
           }
@@ -131,22 +280,26 @@ export function ChatPage() {
         setThinking(false);
       }
     },
-    [input, thinking, messages, activeProperty, setActiveProperty],
+    [input, thinking, messages, activeProperty, setActiveProperty, trackProperty, trackProperties, addBlocksToProperty],
   );
 
   // ---- Handle address search selection ----
   const handleAddressSelect = useCallback(
     (lat: number, lng: number, address: string) => {
-      setActiveProperty({
-        latitude: lat,
-        longitude: lng,
-        address,
-      });
+      const propData = { latitude: lat, longitude: lng, address };
+      setActiveProperty(propData);
+      trackProperty(propData);
       // Auto-send a lookup message
       handleSend(`Tell me about ${address}`);
     },
-    [setActiveProperty, handleSend],
+    [setActiveProperty, trackProperty, handleSend],
   );
+
+  // Register handleSend in context so sidebar components can trigger messages
+  useEffect(() => {
+    setSendChatMessage(handleSend);
+    return () => setSendChatMessage(null);
+  }, [handleSend, setSendChatMessage]);
 
   // ---- Keyboard ----
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -191,7 +344,12 @@ export function ChatPage() {
 
         {/* Message list */}
         {messages.map((msg, i) => (
-          <MessageBubble key={i} message={msg} />
+          <MessageBubble
+            key={i}
+            message={msg}
+            onAddressClick={setDetailAddress}
+            knownAddresses={knownAddresses}
+          />
         ))}
 
         {/* Thinking indicator */}
@@ -218,6 +376,7 @@ export function ChatPage() {
             hasProperty={!!activeProperty}
             toolsUsed={allToolsUsed}
             onSelect={handleSend}
+            propertyCategory={activeProperty?.property_category}
           />
         )}
 
@@ -249,6 +408,13 @@ export function ChatPage() {
           </button>
         </div>
       </div>
+
+      {/* Property detail modal — opens when clicking an address chip in chat blocks */}
+      <PropertyDetailModal
+        open={!!detailAddress}
+        onClose={() => setDetailAddress(null)}
+        tracked={detailTracked}
+      />
     </div>
   );
 }
@@ -306,8 +472,23 @@ function WelcomeScreen({
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({
+  message,
+  onAddressClick,
+  knownAddresses,
+}: {
+  message: ChatMessage;
+  onAddressClick?: (address: string) => void;
+  /** Known property addresses for inline chip rendering in text. */
+  knownAddresses?: string[];
+}) {
   const isUser = message.role === 'user';
+
+  // Only show "summary" blocks inline in chat — analysis blocks live in the
+  // sidebar / modal and don't need to duplicate here.
+  const inlineBlocks = message.blocks?.filter((b) =>
+    INLINE_BLOCK_TYPES.has(b.type),
+  );
 
   return (
     <div className={`flex items-start gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}>
@@ -335,15 +516,19 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           {isUser ? (
             <p className="text-sm leading-relaxed">{message.content}</p>
           ) : (
-            <MarkdownLite text={message.content} />
+            <MarkdownLite
+              text={message.content}
+              knownAddresses={knownAddresses}
+              onAddressClick={onAddressClick}
+            />
           )}
         </div>
 
-        {/* Rich blocks (assistant only) */}
-        {!isUser && message.blocks && message.blocks.length > 0 && (
+        {/* Rich blocks (assistant only) — only summary / reference blocks */}
+        {!isUser && inlineBlocks && inlineBlocks.length > 0 && (
           <div className="mt-2 space-y-2">
-            {message.blocks.map((block, i) => (
-              <BlockRenderer key={i} block={block} />
+            {inlineBlocks.map((block, i) => (
+              <BlockRenderer key={i} block={block} onAddressClick={onAddressClick} />
             ))}
           </div>
         )}
@@ -364,4 +549,38 @@ function formatToolName(name: string): string {
     .replace(/^(get_|estimate_|analyze_|lookup_)/, '')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Convert a search result property to PropertyContextData for tracking. */
+function searchResultToContextData(
+  r: SearchResultProperty,
+): PropertyContextData {
+  return {
+    latitude: r.latitude!,
+    longitude: r.longitude!,
+    address: r.address,
+    neighborhood: r.neighborhood,
+    zip_code: r.zip_code,
+    beds: r.beds,
+    baths: r.baths,
+    sqft: r.sqft,
+    lot_size_sqft: r.lot_size_sqft,
+    year_built: r.year_built,
+    property_type: r.property_type,
+    zoning_class: r.zoning_class ?? r.development?.zone_class,
+    last_sale_price: r.last_sale_price,
+    last_sale_date: r.last_sale_date,
+    predicted_price: r.predicted_price,
+    prediction_confidence: r.prediction_confidence,
+    property_category: r.property_category,
+    record_type: r.record_type,
+    development_summary: r.development
+      ? {
+          adu_eligible: r.development.adu_eligible,
+          sb9_eligible: r.development.sb9_eligible,
+          effective_max_units: r.development.effective_max_units,
+          middle_housing_eligible: r.development.middle_housing_eligible,
+        }
+      : undefined,
+  };
 }

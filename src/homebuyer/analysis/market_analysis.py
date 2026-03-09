@@ -320,6 +320,7 @@ class MarketAnalyzer:
         year_built: Optional[int] = None,
         lookback_months: int = 24,
         max_results: int = 10,
+        property_type: Optional[str] = None,
     ) -> list[ComparableProperty]:
         """Find comparable property sales matching given criteria.
 
@@ -331,6 +332,9 @@ class MarketAnalyzer:
             year_built: Year built (within ±15 years).
             lookback_months: How far back to search.
             max_results: Maximum comparables to return.
+            property_type: Property type string to filter comps
+                (e.g. "Single Family Residential", "Condo/Co-op").
+                Ensures condo comps are compared to other condos, etc.
 
         Returns:
             List of ComparableProperty sorted by similarity score.
@@ -350,6 +354,11 @@ class MarketAnalyzer:
         """
         params: list = [neighborhood, cutoff.isoformat()]
 
+        # Filter by property type for better comps (SFR vs condo vs multi-family)
+        if property_type:
+            query += " AND property_type = ?"
+            params.append(property_type)
+
         # Add soft filters (wider range, we'll score later)
         if beds is not None:
             query += " AND beds BETWEEN ? AND ?"
@@ -366,6 +375,35 @@ class MarketAnalyzer:
         query += " ORDER BY sale_date DESC LIMIT 50"
 
         rows = self.db.conn.execute(query, params).fetchall()
+
+        # Fallback: if property_type filter yielded too few results, retry without it
+        if property_type and len(rows) < 3:
+            logger.info(
+                "Only %d comps with property_type=%s, retrying without filter",
+                len(rows), property_type,
+            )
+            fallback_query = """
+                SELECT
+                    address, sale_date, sale_price, beds, baths, sqft,
+                    lot_size_sqft, year_built, neighborhood, price_per_sqft,
+                    latitude, longitude
+                FROM property_sales
+                WHERE neighborhood = ?
+                  AND sale_date >= ?
+                  AND sale_price IS NOT NULL
+            """
+            fb_params: list = [neighborhood, cutoff.isoformat()]
+            if beds is not None:
+                fallback_query += " AND beds BETWEEN ? AND ?"
+                fb_params.extend([beds - 1, beds + 1])
+            if baths is not None:
+                fallback_query += " AND baths BETWEEN ? AND ?"
+                fb_params.extend([baths - 1, baths + 1])
+            if sqft is not None:
+                fallback_query += " AND sqft BETWEEN ? AND ?"
+                fb_params.extend([int(sqft * 0.7), int(sqft * 1.3)])
+            fallback_query += " ORDER BY sale_date DESC LIMIT 50"
+            rows = self.db.conn.execute(fallback_query, fb_params).fetchall()
 
         # Score comparables by similarity
         comps = []

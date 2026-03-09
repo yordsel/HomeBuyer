@@ -60,7 +60,7 @@ export function ChatDevelopmentCard({ data }: { data: Record<string, unknown> })
           </div>
           {d.zone_rule && (
             <p className="text-[10px] text-gray-400 mt-1">
-              Max coverage: {d.zone_rule.max_lot_coverage_pct}% \u2022
+              Max coverage: {d.zone_rule.max_lot_coverage_pct}% {'\u2022'}{' '}
               Height: {d.zone_rule.max_height_ft}ft
               {d.zone_rule.is_hillside ? ' \u2022 Hillside overlay' : ''}
             </p>

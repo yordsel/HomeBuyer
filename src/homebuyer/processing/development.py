@@ -238,6 +238,8 @@ class DevelopmentPotential:
     improvements: list[ImprovementROI] = field(default_factory=list)
     lot_aggregate: Optional[LotAggregate] = None  # Set when analyzing a condo unit's lot
     is_unit_not_lot: bool = False  # True if the analyzed property is a unit within a larger lot
+    not_applicable: bool = False  # True if dev analysis is N/A for this property type
+    not_applicable_reason: str = ""  # Human-readable explanation
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +268,7 @@ class DevelopmentPotentialCalculator:
         address: Optional[str] = None,
         record_type: Optional[str] = None,
         lot_group_key: Optional[str] = None,
+        property_category: Optional[str] = None,
     ) -> DevelopmentPotential:
         """Compute development potential for a location.
 
@@ -278,10 +281,35 @@ class DevelopmentPotentialCalculator:
             record_type: 'lot' or 'unit' — if 'unit', aggregates the
                 entire lot for development analysis.
             lot_group_key: Grouping key for aggregating condo units on a lot.
+            property_category: Property type category (sfr, condo, etc.)
+                for guardrail checks.
 
         Returns:
             A DevelopmentPotential with all computed results.
         """
+        from homebuyer.processing.property_guardrails import (
+            Applicability,
+            check_applicability,
+            get_dev_sub_skips,
+        )
+
+        # Check if development analysis is applicable for this property type
+        applicability, reason = check_applicability(
+            "development_potential", property_category, record_type,
+        )
+        if applicability == Applicability.NOT_APPLICABLE:
+            logger.info(
+                "Development potential N/A for %s (category=%s): %s",
+                address or "?", property_category, reason,
+            )
+            return DevelopmentPotential(
+                not_applicable=True,
+                not_applicable_reason=reason,
+            )
+
+        # Determine which sub-analyses to skip for restricted categories
+        dev_skips = get_dev_sub_skips(property_category)
+
         result = DevelopmentPotential()
 
         # If this is a condo/co-op unit, aggregate to the lot level first
@@ -326,18 +354,21 @@ class DevelopmentPotentialCalculator:
         # 3. Compute unit potential
         result.units = self._compute_units(rule, lot_size_sqft)
 
-        # 4. Compute ADU feasibility
-        result.adu = self._compute_adu(rule, lot_size_sqft, sqft)
+        # 4. Compute ADU feasibility (skip for restricted categories)
+        if "adu" not in dev_skips:
+            result.adu = self._compute_adu(rule, lot_size_sqft, sqft)
 
-        # 5. Compute SB 9 eligibility
-        result.sb9 = self._compute_sb9(rule, lot_size_sqft)
+        # 5. Compute SB 9 eligibility (skip for restricted categories)
+        if "sb9" not in dev_skips:
+            result.sb9 = self._compute_sb9(rule, lot_size_sqft)
 
         # 6. BESO lookup
         if address:
             result.beso = self.db.lookup_beso_by_address(address)
 
-        # 7. Improvement ROI
-        result.improvements = self._compute_improvement_roi()
+        # 7. Improvement ROI (skip for land / categories with no structure)
+        if "improvements" not in dev_skips:
+            result.improvements = self._compute_improvement_roi()
 
         return result
 
