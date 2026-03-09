@@ -17,6 +17,7 @@ from homebuyer.storage.models import (
     MarketMetric,
     MortgageRate,
     PropertySale,
+    UseCode,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,30 +188,36 @@ CREATE INDEX IF NOT EXISTS idx_beso_address ON beso_records(building_address);
 CREATE INDEX IF NOT EXISTS idx_beso_year ON beso_records(reporting_year);
 
 CREATE TABLE IF NOT EXISTS properties (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    apn             TEXT NOT NULL UNIQUE,
-    address         TEXT NOT NULL,
-    street_number   TEXT,
-    street_name     TEXT,
-    zip_code        TEXT NOT NULL,
-    latitude        REAL NOT NULL,
-    longitude       REAL NOT NULL,
-    lot_size_sqft   INTEGER,
-    building_sqft   INTEGER,
-    use_code        TEXT,
-    use_description TEXT,
-    neighborhood    TEXT,
-    zoning_class    TEXT,
-    beds            REAL,
-    baths           REAL,
-    sqft            INTEGER,
-    year_built      INTEGER,
-    property_type   TEXT,
-    last_sale_date  TEXT,
-    last_sale_price INTEGER,
-    attom_enriched  INTEGER NOT NULL DEFAULT 0,
-    collected_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    apn                 TEXT NOT NULL UNIQUE,
+    address             TEXT NOT NULL,
+    street_number       TEXT,
+    street_name         TEXT,
+    zip_code            TEXT NOT NULL,
+    latitude            REAL NOT NULL,
+    longitude           REAL NOT NULL,
+    lot_size_sqft       INTEGER,
+    building_sqft       INTEGER,
+    use_code            TEXT,
+    use_description     TEXT,
+    neighborhood        TEXT,
+    zoning_class        TEXT,
+    beds                REAL,
+    baths               REAL,
+    sqft                INTEGER,
+    year_built          INTEGER,
+    property_type       TEXT,
+    last_sale_date      TEXT,
+    last_sale_price     INTEGER,
+    attom_enriched      INTEGER NOT NULL DEFAULT 0,
+    situs_unit          TEXT,
+    property_category   TEXT,
+    ownership_type      TEXT,
+    record_type         TEXT,
+    lot_group_key       TEXT,
+    parcel_lot_size_sqft INTEGER,
+    collected_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_properties_address ON properties(address);
@@ -220,6 +227,21 @@ CREATE INDEX IF NOT EXISTS idx_properties_zoning ON properties(zoning_class);
 CREATE INDEX IF NOT EXISTS idx_properties_use_code ON properties(use_code);
 CREATE INDEX IF NOT EXISTS idx_properties_lot_size ON properties(lot_size_sqft);
 CREATE INDEX IF NOT EXISTS idx_properties_attom ON properties(attom_enriched);
+CREATE INDEX IF NOT EXISTS idx_properties_lot_group ON properties(lot_group_key);
+CREATE INDEX IF NOT EXISTS idx_properties_record_type ON properties(record_type);
+CREATE INDEX IF NOT EXISTS idx_properties_category ON properties(property_category);
+
+CREATE TABLE IF NOT EXISTS use_codes (
+    use_code            TEXT PRIMARY KEY,
+    description         TEXT NOT NULL,
+    property_category   TEXT NOT NULL,
+    ownership_type      TEXT NOT NULL,
+    record_type         TEXT NOT NULL,
+    estimated_units     INTEGER,
+    is_residential      INTEGER NOT NULL DEFAULT 1,
+    lot_size_meaning    TEXT,
+    building_ar_meaning TEXT
+);
 
 CREATE TABLE IF NOT EXISTS collection_runs (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -281,6 +303,24 @@ CREATE INDEX IF NOT EXISTS idx_api_cache_lookup
     ON api_response_cache(source, endpoint, cache_key);
 CREATE INDEX IF NOT EXISTS idx_api_cache_fetched
     ON api_response_cache(fetched_at);
+
+CREATE TABLE IF NOT EXISTS precomputed_scenarios (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id      INTEGER NOT NULL,
+    scenario_type    TEXT NOT NULL DEFAULT 'buyer',
+    prediction_json  TEXT NOT NULL,
+    rental_json      TEXT,
+    potential_json   TEXT,
+    comparables_json TEXT,
+    computed_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    model_version    TEXT,
+    UNIQUE(property_id, scenario_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_precomputed_property
+    ON precomputed_scenarios(property_id);
+CREATE INDEX IF NOT EXISTS idx_precomputed_type
+    ON precomputed_scenarios(scenario_type);
 """
 
 
@@ -351,7 +391,36 @@ class Database:
                 self.conn.commit()
                 logger.info("Migration: added data_source column, backfilled as 'redfin'.")
 
+        # --- Properties table migrations ---
+        props_exists = self.conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='properties'"
+        ).fetchone()[0]
+
+        if props_exists:
+            props_cols = {
+                row[1]
+                for row in self.conn.execute("PRAGMA table_info(properties)").fetchall()
+            }
+            new_props_cols = {
+                "situs_unit": "TEXT",
+                "property_category": "TEXT",
+                "ownership_type": "TEXT",
+                "record_type": "TEXT",
+                "lot_group_key": "TEXT",
+                "parcel_lot_size_sqft": "INTEGER",
+            }
+            for col_name, col_type in new_props_cols.items():
+                if col_name not in props_cols:
+                    self.conn.execute(
+                        f"ALTER TABLE properties ADD COLUMN {col_name} {col_type}"
+                    )
+                    self.conn.commit()
+                    logger.info("Migration: added %s column to properties.", col_name)
+
         self.conn.executescript(_SCHEMA_SQL)
+
+        # Seed use_codes reference data after schema is created
+        self._seed_use_codes()
 
         # Record schema version if not already set
         existing = self.conn.execute(
@@ -365,6 +434,110 @@ class Database:
             self.conn.commit()
 
         logger.info("Database schema initialized (version %d).", SCHEMA_VERSION)
+
+    # ------------------------------------------------------------------
+    # Use Codes Reference
+    # ------------------------------------------------------------------
+
+    def _seed_use_codes(self) -> None:
+        """Populate the use_codes reference table with Alameda County Assessor codes.
+
+        Uses INSERT OR REPLACE so descriptions can be corrected on re-run.
+        Source: Alameda County Assessor propinfo.acgov.org/UseCodeList
+        """
+        # fmt: off
+        codes: list[tuple] = [
+            # (use_code, description, property_category, ownership_type, record_type, estimated_units, is_residential, lot_size_meaning, building_ar_meaning)
+            # --- Vacant land ---
+            ("1000", "Vacant Residential Land", "land", "fee_simple", "lot", 0, 1, "parcel", None),
+            # --- Single Family Residential ---
+            ("1100", "Single Family Residential", "sfr", "fee_simple", "lot", 1, 1, "parcel", "building_footprint"),
+            ("1200", "SFR with Misc. Improvements", "sfr", "fee_simple", "lot", 1, 1, "parcel", "building_footprint"),
+            ("1400", "SFR Rural", "sfr", "fee_simple", "lot", 1, 1, "parcel", "building_footprint"),
+            ("1500", "SFR Rural with Misc. Improvements", "sfr", "fee_simple", "lot", 1, 1, "parcel", "building_footprint"),
+            ("1505", "Townhouse Style Condominium", "townhouse", "common_interest", "unit", 1, 1, "shared", "unit_area"),
+            ("1600", "SFR Detached Site Condominium", "condo", "common_interest", "unit", 1, 1, "shared", "unit_area"),
+            ("1800", "SFR Other", "sfr", "fee_simple", "lot", 1, 1, "parcel", "building_footprint"),
+            # --- Multi-Family (2-4 units) ---
+            ("2100", "Duplex", "duplex", "fee_simple", "lot", 2, 1, "parcel", "building_footprint"),
+            ("2200", "Duplex – Better Quality", "duplex", "fee_simple", "lot", 2, 1, "parcel", "building_footprint"),
+            ("2300", "Triplex", "triplex", "fee_simple", "lot", 3, 1, "parcel", "building_footprint"),
+            ("2400", "Fourplex", "fourplex", "fee_simple", "lot", 4, 1, "parcel", "building_footprint"),
+            ("2500", "2 Units – Lesser Quality", "duplex", "fee_simple", "lot", 2, 1, "parcel", "building_footprint"),
+            ("2501", "5+ Unit Apartment – Garden Style", "apartment", "fee_simple", "lot", None, 1, "parcel", "building_footprint"),
+            ("2502", "5+ Unit Apartment – High Rise", "apartment", "fee_simple", "lot", None, 1, "parcel", "building_footprint"),
+            ("2600", "Mixed Residential/Commercial", "mixed_use", "fee_simple", "lot", None, 1, "parcel", "building_footprint"),
+            ("2700", "Multi-Family Other", "apartment", "fee_simple", "lot", None, 1, "parcel", "building_footprint"),
+            # --- Condominiums / Co-ops / PUDs ---
+            ("7100", "Condominium", "condo", "common_interest", "unit", 1, 1, "shared", "unit_area"),
+            ("7200", "Planned Unit Development (PUD)", "pud", "common_interest", "lot", 1, 1, "parcel", "building_footprint"),
+            ("7300", "Condominium – Single Residential Living Unit", "condo", "common_interest", "unit", 1, 1, "shared", "unit_area"),
+            ("7301", "Condominium – Residential Live/Work Unit", "condo", "common_interest", "unit", 1, 1, "shared", "unit_area"),
+            ("7390", "Condominium – Common Area", "condo", "common_interest", "lot", 0, 0, "shared", None),
+            ("7400", "Cooperative", "coop", "cooperative", "unit", 1, 1, "shared", "unit_area"),
+            ("7700", "Multi-Residential (5+ Condos/Co-ops)", "condo", "common_interest", "unit", None, 1, "shared", "unit_area"),
+            # --- Commercial / Other (non-residential, included for completeness) ---
+            ("3100", "Store", "commercial", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("3200", "Store and Office Combination", "commercial", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("3500", "Service Station", "commercial", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("3600", "Garage and Auto Sales/Service", "commercial", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("4100", "Office Building – 1 Story", "commercial", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("4200", "Office Building – Multi-Story", "commercial", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("5100", "Industrial/Light Manufacturing", "commercial", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("5200", "Industrial/Heavy Manufacturing", "commercial", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("6100", "Church/Religious", "other", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("6200", "School/College", "other", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("6300", "Hospital/Medical", "other", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("6600", "Fraternity/Sorority", "other", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("6700", "Club/Lodge/Hall", "other", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("6800", "Parking Lot – Commercial", "commercial", "fee_simple", "lot", 0, 0, "parcel", None),
+            ("6900", "Misc. Improvements (non-res.)", "other", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("8800", "Government Owned", "other", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("9100", "Utility Property", "other", "fee_simple", "lot", 0, 0, "parcel", "building_footprint"),
+            ("9900", "Other/Miscellaneous", "other", "fee_simple", "lot", 0, 0, "parcel", None),
+        ]
+        # fmt: on
+
+        sql = """
+            INSERT OR REPLACE INTO use_codes (
+                use_code, description, property_category, ownership_type,
+                record_type, estimated_units, is_residential,
+                lot_size_meaning, building_ar_meaning
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        with self.conn:
+            self.conn.executemany(sql, codes)
+        logger.info("Seeded %d use codes into use_codes table.", len(codes))
+
+    def get_use_codes(self, residential_only: bool = False) -> dict[str, UseCode]:
+        """Load use codes from reference table as a dict keyed by use_code."""
+        where = " WHERE is_residential = 1" if residential_only else ""
+        rows = self.conn.execute(
+            f"SELECT use_code, description, property_category, ownership_type, "
+            f"record_type, estimated_units, is_residential, lot_size_meaning, "
+            f"building_ar_meaning FROM use_codes{where}"
+        ).fetchall()
+        result: dict[str, UseCode] = {}
+        for r in rows:
+            result[r[0]] = UseCode(
+                use_code=r[0],
+                description=r[1],
+                property_category=r[2],
+                ownership_type=r[3],
+                record_type=r[4],
+                estimated_units=r[5],
+                is_residential=bool(r[6]),
+                lot_size_meaning=r[7],
+                building_ar_meaning=r[8],
+            )
+        return result
+
+    def get_residential_use_codes(self) -> set[str]:
+        """Get the set of use codes classified as residential."""
+        rows = self.conn.execute(
+            "SELECT use_code FROM use_codes WHERE is_residential = 1"
+        ).fetchall()
+        return {r[0] for r in rows}
 
     # ------------------------------------------------------------------
     # Property Sales
@@ -786,6 +959,51 @@ class Database:
         ).fetchall()
         return {row[0] for row in rows}
 
+    def lookup_permits_by_address(self, address: str, limit: int = 50) -> list[dict]:
+        """Return building permits for the given address, most recent first.
+
+        Handles mismatched address formats by extracting the street number + name
+        and using a LIKE match (permits use short addresses like '2822 BENVENUE Ave'
+        while properties use full addresses like '2822 BENVENUE AVE BERKELEY 94705').
+        """
+        clean = address.strip().upper()
+        # Try exact match first
+        rows = self.conn.execute(
+            """
+            SELECT record_number, permit_type, status, address, zip_code,
+                   description, job_value, construction_type, filed_date, detail_url
+            FROM building_permits
+            WHERE UPPER(TRIM(address)) = ?
+            ORDER BY filed_date DESC
+            LIMIT ?
+            """,
+            (clean, limit),
+        ).fetchall()
+
+        if not rows:
+            # Extract street number + street name for fuzzy match
+            # e.g. "2822 BENVENUE AVE BERKELEY 94705" → "2822 BENVENUE%"
+            parts = clean.split()
+            if len(parts) >= 2:
+                street_prefix = f"{parts[0]} {parts[1]}%"
+                rows = self.conn.execute(
+                    """
+                    SELECT record_number, permit_type, status, address, zip_code,
+                           description, job_value, construction_type, filed_date, detail_url
+                    FROM building_permits
+                    WHERE UPPER(TRIM(address)) LIKE ?
+                    ORDER BY filed_date DESC
+                    LIMIT ?
+                    """,
+                    (street_prefix, limit),
+                ).fetchall()
+
+        cols = [
+            "record_number", "permit_type", "status", "address", "zip_code",
+            "description", "job_value", "construction_type", "filed_date", "detail_url",
+        ]
+        return [dict(zip(cols, row)) for row in rows]
+
     # ------------------------------------------------------------------
     # Properties (Berkeley Parcels)
     # ------------------------------------------------------------------
@@ -798,8 +1016,10 @@ class Database:
             INSERT INTO properties (
                 apn, address, street_number, street_name, zip_code,
                 latitude, longitude, lot_size_sqft, building_sqft,
-                use_code, use_description, neighborhood, zoning_class
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                use_code, use_description, neighborhood, zoning_class,
+                situs_unit, property_category, ownership_type, record_type,
+                lot_group_key, parcel_lot_size_sqft
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(apn) DO UPDATE SET
                 address = excluded.address,
                 street_number = excluded.street_number,
@@ -811,6 +1031,12 @@ class Database:
                 building_sqft = excluded.building_sqft,
                 use_code = excluded.use_code,
                 use_description = excluded.use_description,
+                situs_unit = excluded.situs_unit,
+                property_category = excluded.property_category,
+                ownership_type = excluded.ownership_type,
+                record_type = excluded.record_type,
+                lot_group_key = excluded.lot_group_key,
+                parcel_lot_size_sqft = excluded.parcel_lot_size_sqft,
                 updated_at = datetime('now')
         """
         with self.conn:
@@ -831,6 +1057,12 @@ class Database:
                         p.use_description,
                         p.neighborhood,
                         p.zoning_class,
+                        p.situs_unit,
+                        p.property_category,
+                        p.ownership_type,
+                        p.record_type,
+                        p.lot_group_key,
+                        p.parcel_lot_size_sqft,
                     ),
                 )
                 # rowcount=1 for both INSERT and UPDATE in SQLite
@@ -1032,6 +1264,122 @@ class Database:
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
+    # Pre-computed scenarios
+    # ------------------------------------------------------------------
+
+    def upsert_precomputed_scenario(
+        self,
+        property_id: int,
+        scenario_type: str,
+        prediction_json: str,
+        rental_json: str | None = None,
+        potential_json: str | None = None,
+        comparables_json: str | None = None,
+        model_version: str | None = None,
+    ) -> None:
+        """Insert or replace a pre-computed scenario for a property."""
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO precomputed_scenarios (
+                property_id, scenario_type, prediction_json,
+                rental_json, potential_json, comparables_json,
+                model_version, computed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """,
+            (
+                property_id, scenario_type, prediction_json,
+                rental_json, potential_json, comparables_json,
+                model_version,
+            ),
+        )
+        self.conn.commit()
+
+    def get_precomputed_scenario(
+        self,
+        property_id: int,
+        scenario_type: str = "buyer",
+    ) -> Optional[dict]:
+        """Look up a pre-computed scenario by property ID."""
+        row = self.conn.execute(
+            "SELECT * FROM precomputed_scenarios WHERE property_id = ? AND scenario_type = ?",
+            (property_id, scenario_type),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_precomputed_by_location(
+        self,
+        lat: float,
+        lon: float,
+        scenario_type: str = "buyer",
+        max_distance_m: float = 5.0,
+    ) -> Optional[dict]:
+        """Find the nearest pre-computed scenario within *max_distance_m*.
+
+        Joins ``precomputed_scenarios`` with ``properties`` to return both
+        the scenario JSON blobs and the underlying property row.
+
+        Returns:
+            Dict with keys from precomputed_scenarios plus a ``property``
+            sub-dict containing the properties row, or ``None``.
+        """
+        import math
+
+        delta = max_distance_m / 111_139.0
+        rows = self.conn.execute(
+            """
+            SELECT ps.*, p.*
+            FROM precomputed_scenarios ps
+            JOIN properties p ON p.id = ps.property_id
+            WHERE ps.scenario_type = ?
+              AND p.latitude BETWEEN ? AND ?
+              AND p.longitude BETWEEN ? AND ?
+            """,
+            (scenario_type, lat - delta, lat + delta, lon - delta, lon + delta),
+        ).fetchall()
+
+        if not rows:
+            return None
+
+        def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+            R = 6_371_000
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = (
+                math.sin(dlat / 2) ** 2
+                + math.cos(math.radians(lat1))
+                * math.cos(math.radians(lat2))
+                * math.sin(dlon / 2) ** 2
+            )
+            return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        best: Optional[dict] = None
+        best_dist = float("inf")
+        for row in rows:
+            d = dict(row)
+            dist = _haversine(lat, lon, d["latitude"], d["longitude"])
+            if dist < best_dist and dist <= max_distance_m:
+                best_dist = dist
+                # Separate scenario fields from property fields
+                scenario_keys = {
+                    "property_id", "scenario_type", "prediction_json",
+                    "rental_json", "potential_json", "comparables_json",
+                    "computed_at", "model_version",
+                }
+                scenario = {k: d[k] for k in scenario_keys if k in d}
+                # The property dict is everything else (minus the precomputed 'id')
+                prop = {}
+                for k, v in d.items():
+                    if k not in scenario_keys and k != "id":
+                        prop[k] = v
+                # Re-add the property id (it was the precomputed row's id that's duplicated)
+                if "id" not in prop:
+                    prop["id"] = d.get("property_id")
+                scenario["property"] = prop
+                best = scenario
+
+        return best
+
+    # ------------------------------------------------------------------
     # Property Search
     # ------------------------------------------------------------------
 
@@ -1066,6 +1414,209 @@ class Database:
             ).fetchall()
 
         return [dict(row) for row in rows]
+
+    def search_properties_advanced(
+        self,
+        *,
+        neighborhoods: list[str] | None = None,
+        zoning_classes: list[str] | None = None,
+        zoning_pattern: str | None = None,
+        property_type: str | None = None,
+        property_category: str | None = None,
+        record_type: str | None = None,
+        ownership_type: str | None = None,
+        min_price: int | None = None,
+        max_price: int | None = None,
+        min_beds: float | None = None,
+        max_beds: float | None = None,
+        min_baths: float | None = None,
+        max_baths: float | None = None,
+        min_lot_sqft: int | None = None,
+        max_lot_sqft: int | None = None,
+        min_sqft: int | None = None,
+        max_sqft: int | None = None,
+        min_year_built: int | None = None,
+        max_year_built: int | None = None,
+        limit: int = 25,
+    ) -> list[dict]:
+        """Search properties by multiple criteria with precomputed data.
+
+        Returns property dicts with ``prediction_json`` and ``potential_json``
+        from the precomputed scenarios table (LEFT JOIN).
+
+        All filters are optional; only those provided are applied.
+        """
+        clauses: list[str] = []
+        params: list = []
+
+        if neighborhoods:
+            placeholders = ",".join("?" for _ in neighborhoods)
+            clauses.append(f"p.neighborhood IN ({placeholders})")
+            params.extend(neighborhoods)
+        if zoning_classes:
+            placeholders = ",".join("?" for _ in zoning_classes)
+            clauses.append(f"p.zoning_class IN ({placeholders})")
+            params.extend(zoning_classes)
+        if zoning_pattern:
+            clauses.append("p.zoning_class LIKE ?")
+            params.append(zoning_pattern)
+        if property_type:
+            clauses.append("p.property_type = ?")
+            params.append(property_type)
+        if property_category:
+            clauses.append("p.property_category = ?")
+            params.append(property_category)
+        if record_type:
+            clauses.append("p.record_type = ?")
+            params.append(record_type)
+        if ownership_type:
+            clauses.append("p.ownership_type = ?")
+            params.append(ownership_type)
+        if min_price is not None:
+            clauses.append("p.last_sale_price >= ?")
+            params.append(min_price)
+        if max_price is not None:
+            clauses.append("p.last_sale_price <= ?")
+            params.append(max_price)
+        if min_beds is not None:
+            clauses.append("p.beds >= ?")
+            params.append(min_beds)
+        if max_beds is not None:
+            clauses.append("p.beds <= ?")
+            params.append(max_beds)
+        if min_baths is not None:
+            clauses.append("p.baths >= ?")
+            params.append(min_baths)
+        if max_baths is not None:
+            clauses.append("p.baths <= ?")
+            params.append(max_baths)
+        if min_lot_sqft is not None:
+            clauses.append("p.lot_size_sqft >= ?")
+            params.append(min_lot_sqft)
+        if max_lot_sqft is not None:
+            clauses.append("p.lot_size_sqft <= ?")
+            params.append(max_lot_sqft)
+        if min_sqft is not None:
+            clauses.append("p.sqft >= ?")
+            params.append(min_sqft)
+        if max_sqft is not None:
+            clauses.append("p.sqft <= ?")
+            params.append(max_sqft)
+        if min_year_built is not None:
+            clauses.append("p.year_built >= ?")
+            params.append(min_year_built)
+        if max_year_built is not None:
+            clauses.append("p.year_built <= ?")
+            params.append(max_year_built)
+
+        where = (" AND ".join(clauses)) if clauses else "1=1"
+        params.append(min(limit, 100))
+
+        sql = f"""
+            SELECT p.*,
+                   ps.prediction_json,
+                   ps.potential_json
+            FROM properties p
+            LEFT JOIN precomputed_scenarios ps
+                ON ps.property_id = p.id AND ps.scenario_type = 'buyer'
+            WHERE {where}
+            ORDER BY p.last_sale_price DESC NULLS LAST
+            LIMIT ?
+        """
+        rows = self.conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def count_properties_advanced(
+        self,
+        *,
+        neighborhoods: list[str] | None = None,
+        zoning_classes: list[str] | None = None,
+        zoning_pattern: str | None = None,
+        property_type: str | None = None,
+        property_category: str | None = None,
+        record_type: str | None = None,
+        ownership_type: str | None = None,
+        min_price: int | None = None,
+        max_price: int | None = None,
+        min_beds: float | None = None,
+        max_beds: float | None = None,
+        min_baths: float | None = None,
+        max_baths: float | None = None,
+        min_lot_sqft: int | None = None,
+        max_lot_sqft: int | None = None,
+        min_sqft: int | None = None,
+        max_sqft: int | None = None,
+        min_year_built: int | None = None,
+        max_year_built: int | None = None,
+    ) -> int:
+        """Count properties matching criteria (same filters as search_properties_advanced)."""
+        clauses: list[str] = []
+        params: list = []
+
+        if neighborhoods:
+            placeholders = ",".join("?" for _ in neighborhoods)
+            clauses.append(f"p.neighborhood IN ({placeholders})")
+            params.extend(neighborhoods)
+        if zoning_classes:
+            placeholders = ",".join("?" for _ in zoning_classes)
+            clauses.append(f"p.zoning_class IN ({placeholders})")
+            params.extend(zoning_classes)
+        if zoning_pattern:
+            clauses.append("p.zoning_class LIKE ?")
+            params.append(zoning_pattern)
+        if property_type:
+            clauses.append("p.property_type = ?")
+            params.append(property_type)
+        if property_category:
+            clauses.append("p.property_category = ?")
+            params.append(property_category)
+        if record_type:
+            clauses.append("p.record_type = ?")
+            params.append(record_type)
+        if ownership_type:
+            clauses.append("p.ownership_type = ?")
+            params.append(ownership_type)
+        if min_price is not None:
+            clauses.append("p.last_sale_price >= ?")
+            params.append(min_price)
+        if max_price is not None:
+            clauses.append("p.last_sale_price <= ?")
+            params.append(max_price)
+        if min_beds is not None:
+            clauses.append("p.beds >= ?")
+            params.append(min_beds)
+        if max_beds is not None:
+            clauses.append("p.beds <= ?")
+            params.append(max_beds)
+        if min_baths is not None:
+            clauses.append("p.baths >= ?")
+            params.append(min_baths)
+        if max_baths is not None:
+            clauses.append("p.baths <= ?")
+            params.append(max_baths)
+        if min_lot_sqft is not None:
+            clauses.append("p.lot_size_sqft >= ?")
+            params.append(min_lot_sqft)
+        if max_lot_sqft is not None:
+            clauses.append("p.lot_size_sqft <= ?")
+            params.append(max_lot_sqft)
+        if min_sqft is not None:
+            clauses.append("p.sqft >= ?")
+            params.append(min_sqft)
+        if max_sqft is not None:
+            clauses.append("p.sqft <= ?")
+            params.append(max_sqft)
+        if min_year_built is not None:
+            clauses.append("p.year_built >= ?")
+            params.append(min_year_built)
+        if max_year_built is not None:
+            clauses.append("p.year_built <= ?")
+            params.append(max_year_built)
+
+        where = (" AND ".join(clauses)) if clauses else "1=1"
+        sql = f"SELECT COUNT(*) FROM properties p WHERE {where}"
+        row = self.conn.execute(sql, params).fetchone()
+        return row[0] if row else 0
 
     def get_property_by_id(self, property_id: int) -> dict | None:
         """Get a single property by its database ID.

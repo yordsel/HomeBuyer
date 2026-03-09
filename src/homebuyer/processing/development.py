@@ -213,6 +213,19 @@ class ImprovementROI:
 
 
 @dataclass
+class LotAggregate:
+    """Aggregated data for a physical lot (combines all units on the lot)."""
+
+    lot_group_key: str
+    total_units: int
+    total_building_sqft: int
+    lot_size_sqft: int  # From the first record with non-zero lot_size
+    total_assessed_value: int  # Sum of last_sale_price across units
+    addresses: list[str] = field(default_factory=list)
+    building_to_lot_ratio: Optional[float] = None
+
+
+@dataclass
 class DevelopmentPotential:
     """Complete development potential assessment for a property."""
 
@@ -223,6 +236,8 @@ class DevelopmentPotential:
     sb9: Optional[SB9Eligibility] = None
     beso: list[dict] = field(default_factory=list)
     improvements: list[ImprovementROI] = field(default_factory=list)
+    lot_aggregate: Optional[LotAggregate] = None  # Set when analyzing a condo unit's lot
+    is_unit_not_lot: bool = False  # True if the analyzed property is a unit within a larger lot
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +255,7 @@ class DevelopmentPotentialCalculator:
     ) -> None:
         self.classifier = classifier
         self.db = db
+        self._improvement_roi_cache: Optional[list] = None
 
     def compute(
         self,
@@ -248,6 +264,8 @@ class DevelopmentPotentialCalculator:
         lot_size_sqft: Optional[int] = None,
         sqft: Optional[int] = None,
         address: Optional[str] = None,
+        record_type: Optional[str] = None,
+        lot_group_key: Optional[str] = None,
     ) -> DevelopmentPotential:
         """Compute development potential for a location.
 
@@ -257,11 +275,30 @@ class DevelopmentPotentialCalculator:
             lot_size_sqft: Lot size in sqft (used for unit calculations).
             sqft: Existing building sqft (used for ADU coverage calc).
             address: Street address (used for BESO lookup).
+            record_type: 'lot' or 'unit' — if 'unit', aggregates the
+                entire lot for development analysis.
+            lot_group_key: Grouping key for aggregating condo units on a lot.
 
         Returns:
             A DevelopmentPotential with all computed results.
         """
         result = DevelopmentPotential()
+
+        # If this is a condo/co-op unit, aggregate to the lot level first
+        if record_type == "unit" and lot_group_key:
+            result.is_unit_not_lot = True
+            lot_agg = self._aggregate_lot(lot_group_key)
+            result.lot_aggregate = lot_agg
+            if lot_agg:
+                # Use the lot-level data for development analysis
+                lot_size_sqft = lot_agg.lot_size_sqft
+                sqft = lot_agg.total_building_sqft
+                logger.info(
+                    "Unit %s → lot %s: %d units, %s sqft lot, %s sqft building",
+                    address or "?", lot_group_key,
+                    lot_agg.total_units, f"{lot_agg.lot_size_sqft:,}",
+                    f"{lot_agg.total_building_sqft:,}",
+                )
 
         # 1. Get zoning info
         zoning_info = self.classifier.classify_point_full(lat, lon)
@@ -415,12 +452,67 @@ class DevelopmentPotentialCalculator:
             notes=notes,
         )
 
+    def _aggregate_lot(self, lot_group_key: str) -> Optional[LotAggregate]:
+        """Aggregate all properties sharing the same lot_group_key.
+
+        Combines condo/co-op units into a single lot-level view for
+        development potential analysis.
+        """
+        try:
+            rows = self.db.conn.execute(
+                """
+                SELECT address, lot_size_sqft, building_sqft,
+                       last_sale_price, record_type
+                FROM properties
+                WHERE lot_group_key = ?
+                ORDER BY situs_unit
+                """,
+                (lot_group_key,),
+            ).fetchall()
+
+            if not rows:
+                return None
+
+            addresses = [r["address"] for r in rows]
+            total_units = len(rows)
+            total_building_sqft = sum(
+                r["building_sqft"] or 0 for r in rows
+            )
+            total_assessed = sum(
+                r["last_sale_price"] or 0 for r in rows
+            )
+            # Lot size: take the max non-zero value (shared across units)
+            lot_sizes = [r["lot_size_sqft"] for r in rows if r["lot_size_sqft"] and r["lot_size_sqft"] > 0]
+            lot_size = max(lot_sizes) if lot_sizes else 0
+
+            b2l = None
+            if lot_size > 0 and total_building_sqft > 0:
+                b2l = round(total_building_sqft / lot_size, 3)
+
+            return LotAggregate(
+                lot_group_key=lot_group_key,
+                total_units=total_units,
+                total_building_sqft=total_building_sqft,
+                lot_size_sqft=lot_size,
+                total_assessed_value=total_assessed,
+                addresses=addresses,
+                building_to_lot_ratio=b2l,
+            )
+        except Exception as e:
+            logger.warning("Could not aggregate lot %s: %s", lot_group_key, e)
+            return None
+
     def _compute_improvement_roi(self) -> list[ImprovementROI]:
         """Compute improvement ROI estimates from permit category analysis.
 
         Compares average $/sqft for properties with specific permit categories
         vs. properties without, to estimate the value premium per category.
+
+        Results are cached in ``_improvement_roi_cache`` after the first call
+        since this query is global (not per-property) and takes ~10 seconds.
         """
+        if self._improvement_roi_cache is not None:
+            return self._improvement_roi_cache
         try:
             rows = self.db.conn.execute(
                 """
@@ -488,7 +580,7 @@ class DevelopmentPotentialCalculator:
                 """
             ).fetchall()
 
-            return [
+            result = [
                 ImprovementROI(
                     category=r[0],
                     avg_job_value=round(r[1], 0),
@@ -497,6 +589,8 @@ class DevelopmentPotentialCalculator:
                 )
                 for r in rows
             ]
+            self._improvement_roi_cache = result
+            return result
         except Exception as e:
             logger.warning("Could not compute improvement ROI: %s", e)
             return []

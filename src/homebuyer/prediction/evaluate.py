@@ -1,8 +1,8 @@
 """Evaluation metrics and reporting for price prediction models.
 
 Computes standard regression metrics (MAE, MAPE, R^2) and
-Berkeley-specific analyses like per-neighborhood accuracy
-and prediction interval calibration.
+Berkeley-specific analyses like per-neighborhood accuracy,
+per-property-type accuracy, and prediction interval calibration.
 """
 
 import logging
@@ -29,7 +29,7 @@ def evaluate_model(
         y_pred_upper: Upper bound predictions (95th percentile).
 
     Returns:
-        Dict of metric name → value.
+        Dict of metric name -> value.
     """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
@@ -125,24 +125,74 @@ def evaluate_by_neighborhood(
     return results
 
 
+def evaluate_by_property_type(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    property_types: np.ndarray,
+    min_samples: int = 3,
+) -> list[dict]:
+    """Compute per-property-type accuracy metrics.
+
+    Args:
+        y_true: Actual sale prices.
+        y_pred: Predicted sale prices.
+        property_types: Array of normalized property type strings.
+        min_samples: Minimum sales for a property type to include.
+
+    Returns:
+        List of dicts sorted by MAPE (best first), each with:
+        - name, n_samples, mae, mape, mdape, mean_error_pct
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    property_types = np.asarray(property_types)
+
+    results = []
+    for ptype in np.unique(property_types):
+        mask = property_types == ptype
+        n = mask.sum()
+        if n < min_samples:
+            continue
+
+        yt = y_true[mask]
+        yp = y_pred[mask]
+        abs_pct_errors = np.abs(yt - yp) / np.maximum(yt, 1)
+
+        results.append(
+            {
+                "name": str(ptype),
+                "n_samples": int(n),
+                "mae": float(np.mean(np.abs(yt - yp))),
+                "mape": float(np.mean(abs_pct_errors) * 100),
+                "mdape": float(np.median(abs_pct_errors) * 100),
+                "mean_error_pct": float(np.mean((yt - yp) / np.maximum(yt, 1)) * 100),
+            }
+        )
+
+    results.sort(key=lambda r: r["mape"])
+    return results
+
+
 def format_evaluation_report(
     metrics: dict,
     neighborhood_metrics: Optional[list[dict]] = None,
     feature_importances: Optional[dict[str, float]] = None,
+    property_type_metrics: Optional[list[dict]] = None,
 ) -> str:
     """Format evaluation results as a human-readable report.
 
     Args:
         metrics: Output from evaluate_model().
         neighborhood_metrics: Output from evaluate_by_neighborhood().
-        feature_importances: Dict of feature name → importance.
+        feature_importances: Dict of feature name -> importance.
+        property_type_metrics: Output from evaluate_by_property_type().
 
     Returns:
         Formatted string report.
     """
     lines = []
     lines.append("=" * 60)
-    lines.append("  PRICE PREDICTION MODEL — EVALUATION REPORT")
+    lines.append("  PRICE PREDICTION MODEL \u2014 EVALUATION REPORT")
     lines.append("=" * 60)
     lines.append("")
 
@@ -155,7 +205,7 @@ def format_evaluation_report(
     lines.append(f"  MAPE:                  {metrics.get('mape', 0):.1f}%")
     lines.append(f"  Median APE:            {metrics.get('mdape', 0):.1f}%")
     lines.append(f"  RMSE:                  ${metrics.get('rmse', 0):,.0f}")
-    lines.append(f"  R²:                    {metrics.get('r2', 0):.4f}")
+    lines.append(f"  R\u00b2:                    {metrics.get('r2', 0):.4f}")
     lines.append(f"  Mean Error (bias):     ${metrics.get('mean_error', 0):+,.0f}")
     lines.append("")
 
@@ -185,8 +235,24 @@ def format_evaluation_report(
             feature_importances.items(), key=lambda x: x[1], reverse=True
         )
         for name, imp in sorted_feats[:10]:
-            bar = "█" * int(imp * 100)
+            bar = "\u2588" * int(imp * 100)
             lines.append(f"  {name:<25s} {imp:.4f} {bar}")
+        lines.append("")
+
+    # Per-property-type metrics
+    if property_type_metrics:
+        lines.append("  PER-PROPERTY-TYPE ACCURACY")
+        lines.append("  " + "-" * 60)
+        lines.append(
+            f"  {'Property Type':<30s} {'Sales':>6s} {'MAPE':>7s} {'MdAPE':>7s} {'Bias':>8s}"
+        )
+        lines.append("  " + "-" * 60)
+        for pm in property_type_metrics:
+            lines.append(
+                f"  {pm['name']:<30s} {pm['n_samples']:>6d} "
+                f"{pm['mape']:>6.1f}% {pm['mdape']:>6.1f}% "
+                f"{pm['mean_error_pct']:>+7.1f}%"
+            )
         lines.append("")
 
     # Per-neighborhood metrics

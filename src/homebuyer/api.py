@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 import json
 
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from homebuyer.config import DB_PATH, GEO_DIR
 
@@ -212,6 +212,11 @@ class AppState:
 
         # In-memory TTL cache for frequently-accessed analytics
         self._ttl_cache: dict[str, tuple[float, object]] = {}
+
+        # Session-scoped property cache for Faketor conversations
+        from homebuyer.services.session_cache import SessionManager
+
+        self.sessions = SessionManager(ttl_seconds=1800)
 
     def get_analyzer(self):
         from homebuyer.analysis.market_analysis import MarketAnalyzer
@@ -512,6 +517,23 @@ def predict_map_click(req: MapClickRequest):
     # Step 3: Estimate zip code from nearby sales
     zip_code = _estimate_zip_from_coords(req.latitude, req.longitude)
 
+    # Step 3b: Check for pre-computed buyer scenario (instant response)
+    precomputed = _state.db.get_precomputed_by_location(
+        req.latitude, req.longitude, "buyer", max_distance_m=5,
+    )
+    if precomputed:
+        prop = precomputed["property"]
+        prop["neighborhood"] = neighborhood
+        prediction = json.loads(precomputed["prediction_json"])
+        comps = json.loads(precomputed.get("comparables_json") or "[]")
+        return {
+            "status": "prediction",
+            "precomputed": True,
+            "listing": _sale_to_listing(prop, neighborhood),
+            "prediction": prediction,
+            "comparables": comps,
+        }
+
     # Step 4: Try to find an existing property sale near the clicked point
     nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=5)
 
@@ -811,6 +833,13 @@ def property_potential(req: PropertyPotentialRequest):
             detail="Development potential calculator not available.",
         )
 
+    # Check for pre-computed development potential (instant response)
+    precomputed = _state.db.get_precomputed_by_location(
+        req.latitude, req.longitude, "buyer", max_distance_m=5,
+    )
+    if precomputed and precomputed.get("potential_json"):
+        return json.loads(precomputed["potential_json"])
+
     # Try to enrich from DB if address is provided but lot_size/sqft missing
     lot_size = req.lot_size_sqft
     sqft = req.sqft
@@ -1042,6 +1071,13 @@ def rental_analysis(req: RentalAnalysisRequest):
     if not _state:
         raise HTTPException(status_code=503, detail="Server not ready.")
 
+    # Check for pre-computed rental analysis (instant response)
+    precomputed = _state.db.get_precomputed_by_location(
+        req.latitude, req.longitude, "buyer", max_distance_m=5,
+    )
+    if precomputed and precomputed.get("rental_json"):
+        return json.loads(precomputed["rental_json"])
+
     # Resolve property details from DB (same pattern as improvement_simulation)
     neighborhood = req.neighborhood
     zip_code = req.zip_code or "94702"
@@ -1096,13 +1132,22 @@ def rental_analysis(req: RentalAnalysisRequest):
         "list_price": req.list_price,
     }
 
-    from homebuyer.analysis.rental_analysis import rental_analysis_to_dict
+    from homebuyer.analysis.rental_analysis import rental_analysis_to_dict, PropertyValueRequired
 
-    result = _state.rental_analyzer.analyze(
-        prop,
-        down_payment_pct=req.down_payment_pct,
-        self_managed=req.self_managed,
-    )
+    try:
+        result = _state.rental_analyzer.analyze(
+            prop,
+            down_payment_pct=req.down_payment_pct,
+            self_managed=req.self_managed,
+        )
+    except PropertyValueRequired:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Cannot determine property value. Provide list_price, or run "
+                "price prediction first to get a predicted_price."
+            ),
+        )
     return rental_analysis_to_dict(result)
 
 
@@ -1146,6 +1191,7 @@ class FaketorChatRequest(BaseModel):
     longitude: float
     message: str
     history: list[dict] = []
+    session_id: Optional[str] = None
     address: Optional[str] = None
     neighborhood: Optional[str] = None
     zip_code: Optional[str] = None
@@ -1157,6 +1203,215 @@ class FaketorChatRequest(BaseModel):
     property_type: Optional[str] = "Single Family Residential"
 
 
+# ---------------------------------------------------------------------------
+# Session-aware tool executor
+# ---------------------------------------------------------------------------
+
+
+def _make_session_tool_executor(working_set=None):
+    """Create a tool executor that is session-aware.
+
+    Wraps the base ``_faketor_tool_executor`` with:
+    - Working set temp table injection for ``query_database``
+    - ``undo_filter`` interception
+    - Post-execution working set updates for ``search_properties`` and ``query_database``
+    """
+    from homebuyer.services.session_cache import SessionWorkingSet
+
+    def executor(tool_name: str, tool_input: dict) -> str:
+        # Intercept undo_filter
+        if tool_name == "undo_filter" and working_set is not None:
+            return _handle_undo_filter(working_set)
+
+        # For query_database with an active working set, inject temp table
+        if (
+            tool_name == "query_database"
+            and working_set is not None
+            and working_set.count > 0
+        ):
+            result_str = _execute_query_with_working_set(tool_input, working_set)
+        else:
+            result_str = _faketor_tool_executor(tool_name, tool_input)
+
+        # Post-execution: update the working set if applicable
+        if working_set is not None:
+            _update_working_set(working_set, tool_name, tool_input, result_str)
+
+        return result_str
+
+    return executor
+
+
+def _handle_undo_filter(working_set) -> str:
+    """Handle the undo_filter tool call."""
+    layer = working_set.pop_filter()
+    if layer is None:
+        return json.dumps({
+            "message": "No filters to undo. The working set is at its base state.",
+            "working_set_count": working_set.count,
+        })
+    return json.dumps({
+        "message": f"Undid filter: '{layer.description}'. Working set restored.",
+        "removed_filter": layer.description,
+        "working_set_count": working_set.count,
+        "remaining_filters": len(working_set.filter_stack),
+    })
+
+
+def _execute_query_with_working_set(tool_input: dict, working_set) -> str:
+    """Execute query_database with a _working_set temp table available."""
+    if not _state or not _state.db:
+        return json.dumps({"error": "Database not available"})
+
+    sql = (tool_input.get("sql") or "").strip()
+    explanation = tool_input.get("explanation", "")
+    if not sql:
+        return json.dumps({"error": "No SQL query provided"})
+
+    # Safety: only allow SELECT statements
+    sql_upper = sql.upper().lstrip()
+    if not sql_upper.startswith("SELECT"):
+        return json.dumps({
+            "error": "Only SELECT queries are allowed. "
+            "INSERT, UPDATE, DELETE, DROP, and other modifying statements are blocked."
+        })
+
+    # Block dangerous keywords
+    _BLOCKED_KEYWORDS = (
+        "INSERT", "UPDATE", "DELETE", "DROP", "ALTER",
+        "ATTACH", "DETACH", "PRAGMA", "VACUUM", "REINDEX",
+    )
+    import re
+    sql_words = set(re.findall(r'\b[A-Z]+\b', sql_upper))
+    # CREATE is allowed here because we create temp tables internally
+    blocked_found = sql_words & set(_BLOCKED_KEYWORDS)
+    if blocked_found:
+        return json.dumps({
+            "error": f"Query contains blocked keywords: {', '.join(sorted(blocked_found))}. "
+            "Only read-only SELECT queries are allowed."
+        })
+
+    # Enforce LIMIT
+    if "LIMIT" not in sql_upper:
+        sql = sql.rstrip(";") + " LIMIT 100"
+
+    logger.info("query_database (session, %d props): %s", working_set.count, sql)
+
+    conn = _state.db.conn
+    try:
+        # Create temp table with working set IDs
+        conn.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS _working_set "
+            "(property_id INTEGER PRIMARY KEY)"
+        )
+        conn.execute("DELETE FROM _working_set")
+        property_ids = working_set.get_property_ids()
+        conn.executemany(
+            "INSERT OR IGNORE INTO _working_set (property_id) VALUES (?)",
+            [(pid,) for pid in property_ids],
+        )
+
+        cursor = conn.execute(sql)
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        rows = cursor.fetchmany(100)
+        results = [dict(zip(columns, row)) for row in rows]
+
+        return json.dumps({
+            "query": sql,
+            "columns": columns,
+            "rows": results,
+            "row_count": len(results),
+            "explanation": explanation,
+            "working_set_count": len(property_ids),
+        }, default=str)
+    except Exception as e:
+        error_msg = str(e)
+        logger.warning("query_database (session) failed: %s", e, exc_info=True)
+        return json.dumps({"error": f"SQL error: {error_msg}", "query": sql})
+    finally:
+        try:
+            conn.execute("DROP TABLE IF EXISTS _working_set")
+        except Exception:
+            pass
+
+
+def _update_working_set(working_set, tool_name: str, tool_input: dict, result_str: str) -> None:
+    """Update the session working set based on tool results."""
+    try:
+        data = json.loads(result_str)
+    except (json.JSONDecodeError, TypeError):
+        return
+
+    if isinstance(data, dict) and data.get("error"):
+        return
+
+    if tool_name == "search_properties":
+        results = data.get("results", [])
+        if not results:
+            return
+        filters = data.get("filters_applied", {})
+        desc = _describe_search_filters(filters)
+        if working_set.count == 0:
+            # Initial population
+            working_set.set_properties(results, desc, tool_name)
+        else:
+            # Narrowing: push filter
+            new_ids = {r["id"] for r in results if r.get("id")}
+            working_set.push_filter(new_ids, desc, tool_name)
+
+    elif tool_name == "query_database":
+        rows = data.get("rows", [])
+        if not rows:
+            return
+        # Only update if results contain property IDs (integer "id" column)
+        if not all(isinstance(r.get("id"), int) for r in rows if "id" in r):
+            return
+        ids_in_result = {r["id"] for r in rows if isinstance(r.get("id"), int)}
+        if not ids_in_result:
+            return
+        explanation = data.get("explanation", "database query")
+        if working_set.count == 0:
+            # Initial population — need to fetch full property records from DB
+            _populate_working_set_from_ids(working_set, ids_in_result, explanation, tool_name)
+        else:
+            working_set.push_filter(ids_in_result, explanation, tool_name)
+
+
+def _populate_working_set_from_ids(
+    working_set, property_ids: set[int], description: str, source_tool: str,
+) -> None:
+    """Populate the working set by fetching property records from the DB."""
+    if not _state or not _state.db:
+        return
+    placeholders = ",".join("?" * len(property_ids))
+    sql = (
+        f"SELECT id, address, neighborhood, beds, baths, sqft, building_sqft, "
+        f"lot_size_sqft, zoning_class, property_type, last_sale_price, year_built, "
+        f"latitude, longitude "
+        f"FROM properties WHERE id IN ({placeholders})"
+    )
+    try:
+        cursor = _state.db.conn.execute(sql, list(property_ids))
+        rows = [dict(row) for row in cursor.fetchall()]
+        working_set.set_properties(rows, description, source_tool)
+    except Exception as e:
+        logger.warning("Failed to populate working set from IDs: %s", e)
+
+
+def _describe_search_filters(filters: dict) -> str:
+    """Generate a human-readable description of search_properties filters."""
+    parts = []
+    for key, val in filters.items():
+        if val is None:
+            continue
+        label = key.replace("_", " ")
+        if isinstance(val, list):
+            parts.append(f"{label}: {', '.join(str(v) for v in val)}")
+        else:
+            parts.append(f"{label}: {val}")
+    return "; ".join(parts) if parts else "all properties"
+
+
 def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
     """Execute a Faketor tool and return JSON string result."""
 
@@ -1165,7 +1420,26 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             return json.dumps({"error": "Development calculator not available"})
         lat = tool_input["latitude"]
         lon = tool_input["longitude"]
+        property_id = tool_input.get("property_id")
+
+        # --- Direct property_id lookup (preferred — avoids lat/lon mismatch) ---
+        if property_id and _state.db:
+            _pc = _state.db.get_precomputed_scenario(property_id, "buyer")
+            if _pc and _pc.get("potential_json"):
+                logger.info(
+                    "Precomputed HIT for development potential via property_id=%s",
+                    property_id,
+                )
+                return _pc["potential_json"]
+
+        # --- Fallback: lat/lon proximity lookup ---
+        _pc = _state.db.get_precomputed_by_location(lat, lon, "buyer", max_distance_m=5)
+        if _pc and _pc.get("potential_json"):
+            logger.info("Precomputed HIT for development potential via lat/lon")
+            return _pc["potential_json"]
+
         lot_size, sqft, address = None, None, tool_input.get("address")
+        record_type, lot_group_key = None, None
         if _state.db:
             nearest = _state.db.find_nearest_sale(lat, lon, max_distance_m=50)
             if nearest:
@@ -1173,9 +1447,27 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 sqft = nearest.get("sqft")
                 if not address:
                     address = nearest.get("address")
-        result = _state.dev_calc.compute(lat=lat, lon=lon,
-                                          lot_size_sqft=lot_size, sqft=sqft,
-                                          address=address)
+            # Look up record_type and lot_group_key from properties table
+            prop_row = _state.db.conn.execute(
+                "SELECT record_type, lot_group_key, building_sqft "
+                "FROM properties "
+                "WHERE ABS(latitude - ?) < 0.0002 AND ABS(longitude - ?) < 0.0002 "
+                "LIMIT 1",
+                (lat, lon),
+            ).fetchone()
+            if prop_row:
+                record_type = prop_row["record_type"]
+                lot_group_key = prop_row["lot_group_key"]
+                # Use building_sqft from properties if we don't have sqft from sale
+                if sqft is None and prop_row["building_sqft"]:
+                    sqft = prop_row["building_sqft"]
+        result = _state.dev_calc.compute(
+            lat=lat, lon=lon,
+            lot_size_sqft=lot_size, sqft=sqft,
+            address=address,
+            record_type=record_type,
+            lot_group_key=lot_group_key,
+        )
         return json.dumps(_development_potential_to_dict(result), default=str)
 
     elif tool_name == "get_improvement_simulation":
@@ -1236,6 +1528,15 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         })
 
     elif tool_name == "get_comparable_sales":
+        # Check precomputed cache first
+        lat = tool_input.get("latitude")
+        lon = tool_input.get("longitude")
+        if lat and lon:
+            _pc = _state.db.get_precomputed_by_location(lat, lon, "buyer", max_distance_m=5)
+            if _pc and _pc.get("comparables_json"):
+                logger.info("Precomputed HIT for comparable sales")
+                return _pc["comparables_json"]
+
         analyzer = _state.get_analyzer()
         comps = analyzer.find_comparables(
             neighborhood=tool_input["neighborhood"],
@@ -1386,6 +1687,20 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         current_value_override = tool_input.get("current_value_override")
         mortgage_rate_override = tool_input.get("mortgage_rate")
 
+        # Check precomputed cache (buyer scenario, no owner overrides)
+        if not purchase_price and not current_value_override and not mortgage_rate_override:
+            _pc = _state.db.get_precomputed_by_location(
+                tool_input["latitude"], tool_input["longitude"], "buyer", max_distance_m=5,
+            )
+            if _pc and _pc.get("rental_json"):
+                logger.info("Precomputed HIT for rental income estimate")
+                full_rental = json.loads(_pc["rental_json"])
+                # Extract the as-is scenario from full rental analysis
+                scenarios = full_rental.get("scenarios", [])
+                as_is = next((s for s in scenarios if s.get("scenario_name") == "Rent As-Is"), None)
+                if as_is:
+                    return json.dumps(as_is, default=str)
+
         prop = {
             "latitude": tool_input["latitude"],
             "longitude": tool_input["longitude"],
@@ -1405,12 +1720,19 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         if current_value_override:
             prop["list_price"] = int(current_value_override)  # _resolve_property_value picks up list_price first
 
-        scenario = _state.rental_analyzer.build_scenario_as_is(
-            prop,
-            down_payment_pct=tool_input.get("down_payment_pct", 20.0),
-            rate_override=mortgage_rate_override,
-        )
-        from homebuyer.analysis.rental_analysis import _scenario_to_dict
+        from homebuyer.analysis.rental_analysis import _scenario_to_dict, PropertyValueRequired
+        try:
+            scenario = _state.rental_analyzer.build_scenario_as_is(
+                prop,
+                down_payment_pct=tool_input.get("down_payment_pct", 20.0),
+                rate_override=mortgage_rate_override,
+            )
+        except PropertyValueRequired:
+            return json.dumps({
+                "error": "Cannot estimate rental income without a property value. "
+                "Please run get_price_prediction first to get the predicted price, "
+                "then call this tool again with the predicted price as current_value_override."
+            })
         return json.dumps(_scenario_to_dict(scenario), default=str)
 
     elif tool_name == "analyze_investment_scenarios":
@@ -1419,6 +1741,15 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         current_value_override = tool_input.get("current_value_override")
         mortgage_rate_override = tool_input.get("mortgage_rate")
 
+        # Check precomputed cache (buyer scenario, no owner overrides)
+        if not purchase_price and not current_value_override and not mortgage_rate_override:
+            _pc = _state.db.get_precomputed_by_location(
+                tool_input["latitude"], tool_input["longitude"], "buyer", max_distance_m=5,
+            )
+            if _pc and _pc.get("rental_json"):
+                logger.info("Precomputed HIT for investment scenarios")
+                return _pc["rental_json"]
+
         prop = {
             "latitude": tool_input["latitude"],
             "longitude": tool_input["longitude"],
@@ -1438,13 +1769,20 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         if current_value_override:
             prop["list_price"] = int(current_value_override)  # _resolve_property_value picks up list_price first
 
-        from homebuyer.analysis.rental_analysis import rental_analysis_to_dict
-        result = _state.rental_analyzer.analyze(
-            prop,
-            down_payment_pct=tool_input.get("down_payment_pct", 20.0),
-            self_managed=tool_input.get("self_managed", True),
-            rate_override=mortgage_rate_override,
-        )
+        from homebuyer.analysis.rental_analysis import rental_analysis_to_dict, PropertyValueRequired
+        try:
+            result = _state.rental_analyzer.analyze(
+                prop,
+                down_payment_pct=tool_input.get("down_payment_pct", 20.0),
+                self_managed=tool_input.get("self_managed", True),
+                rate_override=mortgage_rate_override,
+            )
+        except PropertyValueRequired:
+            return json.dumps({
+                "error": "Cannot analyze investment scenarios without a property value. "
+                "Please run get_price_prediction first to get the predicted price, "
+                "then call this tool again with the predicted price as current_value_override."
+            })
         return json.dumps(rental_analysis_to_dict(result), default=str)
 
     elif tool_name == "lookup_property":
@@ -1521,21 +1859,263 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             "enriched": bool(best.get("attom_enriched")),
         }, default=str)
 
+    elif tool_name == "search_properties":
+        if not _state or not _state.db:
+            return json.dumps({"error": "Database not available"})
+
+        requested_limit = min(tool_input.get("limit", 10), 25)
+        adu_filter = tool_input.get("adu_eligible")
+        sb9_filter = tool_input.get("sb9_eligible")
+
+        # Shared filter kwargs for both count and search
+        _search_filters = dict(
+            neighborhoods=tool_input.get("neighborhoods"),
+            zoning_classes=tool_input.get("zoning_classes"),
+            zoning_pattern=tool_input.get("zoning_pattern"),
+            property_type=tool_input.get("property_type"),
+            property_category=tool_input.get("property_category"),
+            record_type=tool_input.get("record_type"),
+            ownership_type=tool_input.get("ownership_type"),
+            min_price=tool_input.get("min_price"),
+            max_price=tool_input.get("max_price"),
+            min_beds=tool_input.get("min_beds"),
+            max_beds=tool_input.get("max_beds"),
+            min_baths=tool_input.get("min_baths"),
+            max_baths=tool_input.get("max_baths"),
+            min_lot_sqft=tool_input.get("min_lot_sqft"),
+            max_lot_sqft=tool_input.get("max_lot_sqft"),
+            min_sqft=tool_input.get("min_sqft"),
+            max_sqft=tool_input.get("max_sqft"),
+            min_year_built=tool_input.get("min_year_built"),
+            max_year_built=tool_input.get("max_year_built"),
+        )
+
+        # Get true total count (before LIMIT)
+        total_matching = _state.db.count_properties_advanced(**_search_filters)
+
+        # Over-fetch when post-filtering on dev potential flags
+        sql_limit = requested_limit * 4 if (adu_filter or sb9_filter) else requested_limit
+
+        rows = _state.db.search_properties_advanced(
+            **_search_filters,
+            limit=sql_limit,
+        )
+
+        if not rows:
+            return json.dumps({
+                "results": [],
+                "total_found": 0,
+                "total_matching": total_matching,
+                "message": "No properties match your criteria. Try broadening your search.",
+            })
+
+        results = []
+        for row in rows:
+            # Parse development potential from precomputed JSON
+            dev_summary = None
+            potential_raw = row.get("potential_json")
+            if potential_raw:
+                try:
+                    pot = json.loads(potential_raw)
+                    adu = pot.get("adu") or {}
+                    sb9 = pot.get("sb9") or {}
+                    units = pot.get("units") or {}
+                    zoning = pot.get("zoning") or {}
+                    dev_summary = {
+                        "adu_eligible": adu.get("eligible", False),
+                        "adu_max_sqft": adu.get("max_adu_sqft"),
+                        "sb9_eligible": sb9.get("eligible", False),
+                        "sb9_can_split": sb9.get("can_split", False),
+                        "sb9_max_units": sb9.get("max_total_units"),
+                        "effective_max_units": units.get("effective_max_units"),
+                        "middle_housing_eligible": units.get("middle_housing_eligible", False),
+                        "zone_class": zoning.get("zone_class"),
+                        "zone_desc": zoning.get("zone_desc"),
+                    }
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Post-filter on ADU/SB9 eligibility
+            if adu_filter and (not dev_summary or not dev_summary.get("adu_eligible")):
+                continue
+            if sb9_filter and (not dev_summary or not dev_summary.get("sb9_eligible")):
+                continue
+
+            # Parse predicted price and confidence from precomputed JSON
+            predicted_price = None
+            prediction_confidence = None
+            pred_raw = row.get("prediction_json")
+            if pred_raw:
+                try:
+                    pred = json.loads(pred_raw)
+                    predicted_price = pred.get("predicted_price")
+                    prediction_confidence = pred.get("prediction_confidence")
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Compute data quality flag
+            r_sqft = row.get("sqft")
+            r_building_sqft = row.get("building_sqft")
+            r_lot_size_sqft = row.get("lot_size_sqft")
+
+            data_quality = "normal"
+            data_quality_note = None
+            if r_building_sqft and r_sqft and r_sqft > 0:
+                try:
+                    bld_ratio = float(r_building_sqft) / float(r_sqft)
+                    if bld_ratio > 3:
+                        data_quality = "per_unit_mismatch"
+                        data_quality_note = (
+                            f"Per-unit features likely: building sqft ({r_building_sqft:,}) "
+                            f"is {bld_ratio:.1f}x the listing sqft ({r_sqft:,}). "
+                            "Assessor data may reflect per-unit values."
+                        )
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+            if data_quality == "normal" and row.get("property_type") == "Multi-Family (5+ Unit)":
+                data_quality = "mf5_limited_data"
+                data_quality_note = "Multi-family 5+ unit — limited comparable data."
+
+            # Pre-compute building-to-lot ratio using correct building_sqft
+            building_to_lot_ratio = None
+            if r_building_sqft and r_lot_size_sqft and r_lot_size_sqft > 0:
+                try:
+                    building_to_lot_ratio = round(
+                        float(r_building_sqft) / float(r_lot_size_sqft), 3
+                    )
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+
+            # Condo shared-lot data quality flag
+            r_record_type = row.get("record_type")
+            if data_quality == "normal" and r_record_type == "unit" and (not r_lot_size_sqft or r_lot_size_sqft == 0):
+                data_quality = "shared_lot_no_size"
+                data_quality_note = "Condo unit with shared lot — lot size may be zero or shared across units."
+
+            results.append({
+                "id": row.get("id"),
+                "address": row.get("address"),
+                "neighborhood": row.get("neighborhood"),
+                "zip_code": row.get("zip_code"),
+                "zoning_class": row.get("zoning_class"),
+                "beds": row.get("beds"),
+                "baths": row.get("baths"),
+                "sqft": row.get("sqft"),
+                "building_sqft": r_building_sqft,
+                "lot_size_sqft": r_lot_size_sqft,
+                "building_to_lot_ratio": building_to_lot_ratio,
+                "year_built": row.get("year_built"),
+                "property_type": row.get("property_type"),
+                "property_category": row.get("property_category"),
+                "record_type": r_record_type,
+                "situs_unit": row.get("situs_unit"),
+                "lot_group_key": row.get("lot_group_key"),
+                "last_sale_price": row.get("last_sale_price"),
+                "last_sale_date": row.get("last_sale_date"),
+                "predicted_price": predicted_price,
+                "prediction_confidence": prediction_confidence,
+                "data_quality": data_quality,
+                "data_quality_note": data_quality_note,
+                "development": dev_summary,
+                "latitude": row.get("latitude"),
+                "longitude": row.get("longitude"),
+            })
+
+            if len(results) >= requested_limit:
+                break
+
+        return json.dumps({
+            "results": results,
+            "total_found": len(results),
+            "total_matching": total_matching,
+            "filters_applied": {
+                k: v for k, v in tool_input.items()
+                if v is not None and k != "limit"
+            },
+        }, default=str)
+
+    elif tool_name == "lookup_permits":
+        if not _state or not _state.db:
+            return json.dumps({"error": "Database not available"})
+        address = tool_input.get("address", "")
+        limit = min(tool_input.get("limit", 20), 50)
+        permits = _state.db.lookup_permits_by_address(address, limit=limit)
+        if not permits:
+            return json.dumps({
+                "permits": [],
+                "total": 0,
+                "address": address,
+                "note": "No building permits found for this address.",
+            })
+        return json.dumps({
+            "permits": permits,
+            "total": len(permits),
+            "address": address,
+        }, default=str)
+
+    elif tool_name == "query_database":
+        if not _state or not _state.db:
+            return json.dumps({"error": "Database not available"})
+        sql = (tool_input.get("sql") or "").strip()
+        explanation = tool_input.get("explanation", "")
+        if not sql:
+            return json.dumps({"error": "No SQL query provided"})
+
+        # Safety: only allow SELECT statements
+        sql_upper = sql.upper().lstrip()
+        if not sql_upper.startswith("SELECT"):
+            return json.dumps({
+                "error": "Only SELECT queries are allowed. "
+                "INSERT, UPDATE, DELETE, DROP, and other modifying statements are blocked."
+            })
+
+        # Block dangerous keywords that could appear in subqueries or CTEs
+        _BLOCKED_KEYWORDS = (
+            "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE",
+            "ATTACH", "DETACH", "PRAGMA", "VACUUM", "REINDEX",
+        )
+        # Tokenize on whitespace/punctuation to avoid false positives
+        # (e.g. "DELETE" in a column alias) — check word boundaries
+        import re
+        sql_words = set(re.findall(r'\b[A-Z]+\b', sql_upper))
+        blocked_found = sql_words & set(_BLOCKED_KEYWORDS)
+        if blocked_found:
+            return json.dumps({
+                "error": f"Query contains blocked keywords: {', '.join(sorted(blocked_found))}. "
+                "Only read-only SELECT queries are allowed."
+            })
+
+        # Enforce a LIMIT to prevent unbounded result sets
+        if "LIMIT" not in sql_upper:
+            sql = sql.rstrip(";") + " LIMIT 100"
+
+        logger.info("query_database: %s | explanation: %s", sql, explanation)
+
+        try:
+            conn = _state.db.conn
+            cursor = conn.execute(sql)
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            rows = cursor.fetchmany(100)  # Hard cap at 100 rows
+            results = [dict(zip(columns, row)) for row in rows]
+
+            return json.dumps({
+                "query": sql,
+                "columns": columns,
+                "rows": results,
+                "row_count": len(results),
+                "explanation": explanation,
+            }, default=str)
+        except Exception as e:
+            error_msg = str(e)
+            logger.warning("query_database failed: %s", e, exc_info=True)
+            return json.dumps({"error": f"SQL error: {error_msg}", "query": sql})
+
     else:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
 
-@app.post("/api/faketor/chat")
-def faketor_chat(req: FaketorChatRequest):
-    """Chat with Faketor, the AI real estate advisor.
-
-    Faketor uses Claude with tool-use to call development potential,
-    improvement simulation, comps, market, and sell-vs-hold analysis tools.
-    """
-    if not _state:
-        raise HTTPException(status_code=503, detail="Server not initialized")
-
-    # Resolve property context from DB if needed
+def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
+    """Resolve property context from request + DB for Faketor chat."""
     neighborhood = req.neighborhood
     sqft = req.sqft
     lot_size = req.lot_size_sqft
@@ -1572,7 +2152,7 @@ def faketor_chat(req: FaketorChatRequest):
     if not neighborhood:
         neighborhood = "Berkeley"
 
-    property_context = {
+    return {
         "latitude": req.latitude,
         "longitude": req.longitude,
         "address": address or req.address,
@@ -1586,14 +2166,66 @@ def faketor_chat(req: FaketorChatRequest):
         "property_type": req.property_type,
     }
 
+
+@app.post("/api/faketor/chat")
+def faketor_chat(req: FaketorChatRequest):
+    """Chat with Faketor, the AI real estate advisor."""
+    if not _state:
+        raise HTTPException(status_code=503, detail="Server not initialized")
+
+    # Resolve session working set
+    working_set = None
+    if req.session_id:
+        working_set = _state.sessions.get_or_create(req.session_id)
+
+    property_context = _resolve_faketor_context(req)
+    tool_executor = _make_session_tool_executor(working_set)
+
     result = _state.faketor.chat(
         message=req.message,
         history=req.history,
         property_context=property_context,
-        tool_executor=_faketor_tool_executor,
+        tool_executor=tool_executor,
+        working_set_descriptor=working_set.get_descriptor() if working_set else "",
     )
-
     return result
+
+
+@app.post("/api/faketor/chat/stream")
+def faketor_chat_stream(req: FaketorChatRequest):
+    """SSE streaming version of Faketor chat."""
+    if not _state:
+        raise HTTPException(status_code=503, detail="Server not initialized")
+
+    # Resolve session working set
+    working_set = None
+    if req.session_id:
+        working_set = _state.sessions.get_or_create(req.session_id)
+
+    property_context = _resolve_faketor_context(req)
+    tool_executor = _make_session_tool_executor(working_set)
+
+    def event_generator():
+        for event in _state.faketor.chat_stream(
+            message=req.message,
+            history=req.history,
+            property_context=property_context,
+            tool_executor=tool_executor,
+            working_set_descriptor=working_set.get_descriptor() if working_set else "",
+        ):
+            event_type = event["event"]
+            data = json.dumps(event["data"], default=str)
+            yield f"event: {event_type}\ndata: {data}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # --- Comparables ---
@@ -1665,7 +2297,16 @@ def _get_or_compute_prediction(tool_input: dict, source: str = "chat") -> dict:
     neighborhood = tool_input.get("neighborhood", "Berkeley")
     zip_code = tool_input.get("zip_code", "94702")
 
-    # 1) Check cache
+    # 0) Check precomputed scenarios first (fastest path)
+    precomputed = _state.db.get_precomputed_by_location(lat, lon, "buyer", max_distance_m=5)
+    if precomputed:
+        logger.info(
+            "Precomputed HIT for prediction at (%s, %s) — returning stored result",
+            lat, lon,
+        )
+        return json.loads(precomputed["prediction_json"])
+
+    # 1) Check predictions cache
     cached = _state.db.get_cached_prediction(
         latitude=lat,
         longitude=lon,
@@ -1816,6 +2457,22 @@ def _development_potential_to_dict(result) -> dict:
         }
         for imp in result.improvements
     ]
+
+    # Lot aggregate info (for condo units)
+    resp["is_unit_not_lot"] = result.is_unit_not_lot
+    if result.lot_aggregate:
+        agg = result.lot_aggregate
+        resp["lot_aggregate"] = {
+            "lot_group_key": agg.lot_group_key,
+            "total_units": agg.total_units,
+            "total_building_sqft": agg.total_building_sqft,
+            "lot_size_sqft": agg.lot_size_sqft,
+            "total_assessed_value": agg.total_assessed_value,
+            "building_to_lot_ratio": agg.building_to_lot_ratio,
+            "addresses": agg.addresses,
+        }
+    else:
+        resp["lot_aggregate"] = None
 
     return resp
 

@@ -134,12 +134,35 @@ class BESORecord:
 
 
 @dataclass
+class UseCode:
+    """Alameda County Assessor use code reference data.
+
+    Maps use codes to property categories, ownership types, and semantic
+    metadata about what lot_size and building_ar mean for each type.
+    """
+
+    use_code: str
+    description: str
+    property_category: str  # sfr, duplex, triplex, fourplex, apartment, condo, townhouse, pud, land, mixed_use, other
+    ownership_type: str  # fee_simple, common_interest, cooperative
+    record_type: str  # 'lot' (physical lot) or 'unit' (sellable unit within a lot)
+    estimated_units: Optional[int] = None
+    is_residential: bool = True
+    lot_size_meaning: Optional[str] = None  # 'parcel' or 'shared'
+    building_ar_meaning: Optional[str] = None  # 'building_footprint' or 'unit_area'
+
+
+@dataclass
 class BerkeleyParcel:
     """A property parcel from the City of Berkeley Open Data / Alameda County Assessor.
 
     Represents a physical parcel of land with its county-assessed characteristics.
     API-enriched fields (beds, baths, year_built, etc.) are populated later
     via batch enrichment (RentCast) and are nullable until then.
+
+    Parcels may represent physical lots (SFR, apartments) or individual
+    sellable units (condos). The record_type and lot_group_key fields
+    distinguish these cases for development analysis and ML features.
     """
 
     apn: str  # Assessor Parcel Number (primary key)
@@ -149,12 +172,19 @@ class BerkeleyParcel:
     zip_code: str
     latitude: float
     longitude: float
-    lot_size_sqft: int  # From county data
-    building_sqft: Optional[int] = None  # From county data
+    lot_size_sqft: int  # From county data (for condo units, may be shared parcel size or 0)
+    building_sqft: Optional[int] = None  # From county data (building_ar field)
     use_code: str = ""  # County land use code (e.g., "1100")
     use_description: Optional[str] = None  # Human-readable (e.g., "Single Family Residential")
     neighborhood: Optional[str] = None  # From spatial join
     zoning_class: Optional[str] = None  # From spatial join
+    # New fields from use_code reference
+    situs_unit: Optional[str] = None  # Unit identifier (A, B, C, etc.) from Berkeley data
+    property_category: Optional[str] = None  # From use_codes table (sfr, condo, etc.)
+    ownership_type: Optional[str] = None  # fee_simple, common_interest, cooperative
+    record_type: Optional[str] = None  # 'lot' or 'unit'
+    lot_group_key: Optional[str] = None  # Grouping key for condo/unit aggregation
+    parcel_lot_size_sqft: Optional[int] = None  # Raw lot_size from Berkeley data
     # API-enriched fields (nullable until enriched via RentCast)
     beds: Optional[float] = None
     baths: Optional[float] = None

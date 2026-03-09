@@ -5,7 +5,11 @@ from datetime import date
 import numpy as np
 import pytest
 
-from homebuyer.prediction.evaluate import evaluate_model, evaluate_by_neighborhood
+from homebuyer.prediction.evaluate import (
+    evaluate_model,
+    evaluate_by_neighborhood,
+    evaluate_by_property_type,
+)
 from homebuyer.prediction.features import FeatureBuilder
 from homebuyer.prediction.model import ModelArtifact, PredictionResult
 from homebuyer.storage.database import Database
@@ -285,3 +289,106 @@ def test_model_format_info(tmp_db: Database, tmp_path):
     assert "BERKELEY PRICE PREDICTION MODEL" in info
     assert "MAE" in info
     assert "MAPE" in info
+
+
+# ---------------------------------------------------------------------------
+# New tests for log-transform, property type eval, and data warnings
+# ---------------------------------------------------------------------------
+
+
+def test_log_transform_round_trip(tmp_db: Database, tmp_path):
+    """Model trained with log_target produces reasonable dollar-space prices."""
+    _seed_model_data(tmp_db, n_train=50, n_test=20)
+
+    from homebuyer.prediction.train import train_model
+
+    artifact = train_model(
+        tmp_db, grid_search=False, split_date="2025-01-01",
+        save_path=tmp_path / "test_log_model.joblib",
+    )
+
+    # Verify log_target is set on the artifact
+    assert artifact.log_target is True
+
+    # Make a prediction — the result should be in dollar space, not log space
+    result = artifact.predict_single(
+        tmp_db,
+        {
+            "neighborhood": "North Berkeley",
+            "zip_code": "94702",
+            "beds": 3.0,
+            "baths": 2.0,
+            "sqft": 1700,
+            "year_built": 1925,
+            "property_type": "Single Family Residential",
+        },
+    )
+
+    # Log-space predictions would be ~14 (ln(1.5M) ≈ 14.2). Dollar-space
+    # should be in the hundreds of thousands to millions range.
+    assert result.predicted_price > 100_000
+    assert result.predicted_price < 50_000_000  # sanity upper bound
+    assert result.price_lower > 0
+    assert result.price_upper >= result.predicted_price
+
+
+def test_evaluate_by_property_type():
+    """Per-property-type evaluation returns correct structure."""
+    y_true = np.array([100, 200, 300, 400, 500, 600, 700, 800])
+    y_pred = np.array([110, 190, 310, 380, 520, 580, 710, 790])
+    property_types = np.array(["SFR", "SFR", "SFR", "SFR",
+                               "Condo", "Condo", "Condo", "Condo"])
+
+    results = evaluate_by_property_type(y_true, y_pred, property_types, min_samples=3)
+
+    assert len(results) == 2
+    assert results[0]["name"] in ["SFR", "Condo"]
+    assert "mape" in results[0]
+    assert "mae" in results[0]
+    assert "mean_error_pct" in results[0]
+    # Results should be sorted by MAPE (best first)
+    assert results[0]["mape"] <= results[1]["mape"]
+
+
+def test_prediction_result_data_warnings():
+    """PredictionResult correctly stores data_warnings."""
+    result = PredictionResult(
+        predicted_price=1_500_000,
+        price_lower=1_200_000,
+        price_upper=1_800_000,
+        data_warnings=["Test warning: per-unit features detected"],
+    )
+
+    assert result.data_warnings is not None
+    assert len(result.data_warnings) == 1
+    assert "per-unit" in result.data_warnings[0]
+
+    # Also verify default is None
+    result_no_warnings = PredictionResult(
+        predicted_price=1_500_000,
+        price_lower=1_200_000,
+        price_upper=1_800_000,
+    )
+    assert result_no_warnings.data_warnings is None
+
+
+def test_model_property_type_metrics(tmp_db: Database, tmp_path):
+    """Trained model includes property_type_metrics in the artifact."""
+    _seed_model_data(tmp_db, n_train=50, n_test=20)
+
+    from homebuyer.prediction.train import train_model
+
+    artifact = train_model(
+        tmp_db, grid_search=False, split_date="2025-01-01",
+        save_path=tmp_path / "test_model.joblib",
+    )
+
+    # property_type_metrics should be populated (even if just one type)
+    assert hasattr(artifact, "property_type_metrics")
+    assert isinstance(artifact.property_type_metrics, list)
+    # The test data is all SFR, so we should have at least 1 entry
+    if len(artifact.property_type_metrics) > 0:
+        pt = artifact.property_type_metrics[0]
+        assert "name" in pt
+        assert "mape" in pt
+        assert "n_samples" in pt

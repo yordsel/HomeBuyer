@@ -30,6 +30,58 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
+# Minimum sale price for training data (filters non-market transactions)
+MIN_TRAINING_SALE_PRICE = 100_000
+
+# Maximum price per sqft for training data (filters per-unit/whole-building mismatches)
+# Berkeley's highest legitimate $/sqft is ~$1,500 for premium SFR.
+MAX_TRAINING_PRICE_PER_SQFT = 2_000
+
+# Thresholds for detecting "Apartment" records with per-unit features
+# but whole-building sale prices (data source mismatch).
+_APARTMENT_PER_UNIT_MAX_BEDS = 2
+_APARTMENT_PER_UNIT_MAX_SQFT = 1_000
+
+# Canonical property type normalization.
+# The property_sales table has "Single Family" (7,512 rows) and
+# "Single Family Residential" (2,563 rows) as separate categories.
+# The properties table uses "Single Family Residential". Normalize
+# so training and inference see the same categories.
+PROPERTY_TYPE_MAP: dict[str, str] = {
+    "Single Family": "Single Family Residential",
+    "Single Family Residential": "Single Family Residential",
+    "Multi-Family": "Multi-Family (2-4 Unit)",
+    "Apartment": "Multi-Family (5+ Unit)",
+    "Multi-Family (2-4 Unit)": "Multi-Family (2-4 Unit)",
+    "Multi-Family (5+ Unit)": "Multi-Family (5+ Unit)",
+    "Condo/Co-op": "Condo/Co-op",
+    "Condo": "Condo/Co-op",
+    "Townhouse": "Townhouse",
+    "Vacant Land": "Land",
+    "Land": "Land",
+    "Mobile/Manufactured Home": "Manufactured",
+    "Manufactured": "Manufactured",
+    "Other": "Other",
+}
+
+# Use code → unit count mapping (from Alameda County Assessor codes)
+# Corrected per propinfo.acgov.org: 2500 = "2 units, lesser quality"
+USE_CODE_UNIT_COUNT: dict[str, int] = {
+    "1000": 0,                                          # Vacant land
+    "1100": 1, "1200": 1, "1400": 1, "1500": 1,        # SFH variants
+    "1505": 1, "1600": 1, "1800": 1,                   # Townhouse condo / detached site condo / other SFR
+    "2100": 2, "2200": 2,                               # Duplex (better quality)
+    "2300": 3,                                          # Triplex
+    "2400": 4,                                          # Fourplex
+    "2500": 2,                                          # 2 units, lesser quality (NOT 5+)
+    "2501": 5, "2502": 5,                               # 5+ apartments (garden / high-rise)
+    "2600": 5,                                          # Mixed use
+    "2700": 5,                                          # Other multi
+    "7100": 1, "7200": 1, "7300": 1, "7301": 1,        # Condo individual unit
+    "7400": 1,                                          # Cooperative unit
+    "7700": 5,                                          # Multi-condo (5+)
+}
+
 # Features derived directly from property_sales columns
 _PROPERTY_FEATURES = [
     "beds",
@@ -50,6 +102,17 @@ _DERIVED_FEATURES = [
     "bed_bath_ratio",
     "sqft_per_bed",
     "lot_to_living_ratio",
+    "effective_sqft",                  # building_sqft for MF 5+, else sqft
+    "building_to_listing_sqft_ratio",  # building_sqft / sqft (signals per-unit mismatch)
+    "is_condo_unit",                   # 1 if record_type='unit', else 0
+    "effective_lot_size",              # lot_size / units_on_lot for condos, lot_size_sqft for lots
+    "units_on_lot",                    # count of properties sharing same lot_group_key
+]
+
+# Structural features derived from assessor data (properties table)
+_STRUCTURE_FEATURES = [
+    "unit_count",       # Number of units (1 for SFH, 2-4 for multi, 5 floor for 5+)
+    "building_sqft",    # Total building square footage (vs sqft which is per-unit for multi)
 ]
 
 # Label-encoded categorical features
@@ -142,6 +205,7 @@ _MAINTENANCE_CATEGORIES = {"roof", "hvac", "plumbing", "termite", "exterior"}
 ALL_FEATURE_NAMES = (
     _PROPERTY_FEATURES
     + _DERIVED_FEATURES
+    + _STRUCTURE_FEATURES
     + _CATEGORICAL_FEATURES
     + _MARKET_FEATURES
     + _RATE_FEATURES
@@ -149,6 +213,45 @@ ALL_FEATURE_NAMES = (
     + _INCOME_FEATURES
     + _PERMIT_FEATURES
 )
+
+
+# ---------------------------------------------------------------------------
+# Training data quality helpers
+# ---------------------------------------------------------------------------
+
+
+def flag_training_outliers(df: pd.DataFrame) -> pd.Series:
+    """Flag records with price_per_sqft > 3 std devs from their property_type median.
+
+    Args:
+        df: DataFrame with ``sale_price``, ``sqft``, and ``property_type`` columns.
+
+    Returns:
+        Boolean Series where ``True`` marks an outlier.
+    """
+    is_outlier = pd.Series(False, index=df.index)
+
+    valid_sqft = (df["sqft"].notna()) & (pd.to_numeric(df["sqft"], errors="coerce") > 0)
+    ppsf = pd.Series(np.nan, index=df.index)
+    ppsf[valid_sqft] = (
+        pd.to_numeric(df.loc[valid_sqft, "sale_price"], errors="coerce")
+        / pd.to_numeric(df.loc[valid_sqft, "sqft"], errors="coerce")
+    )
+
+    for ptype in df["property_type"].dropna().unique():
+        mask = df["property_type"] == ptype
+        group_ppsf = ppsf.loc[mask].dropna()
+        if len(group_ppsf) < 5:
+            continue  # too few to compute meaningful stats
+        median = group_ppsf.median()
+        std = group_ppsf.std()
+        if std == 0:
+            continue
+        z_scores = (group_ppsf - median).abs() / std
+        outlier_idx = z_scores[z_scores > 3].index
+        is_outlier.loc[outlier_idx] = True
+
+    return is_outlier
 
 
 class FeatureBuilder:
@@ -188,7 +291,7 @@ class FeatureBuilder:
 
     def build_training_data(
         self,
-        min_sale_price: int = 50_000,
+        min_sale_price: int = MIN_TRAINING_SALE_PRICE,
     ) -> tuple[pd.DataFrame, pd.Series]:
         """Build the full feature matrix and target vector from the database.
 
@@ -200,19 +303,29 @@ class FeatureBuilder:
         """
         logger.info("Building training data from database...")
 
-        # Load all property sales
+        # Load property sales, enriched with assessor data (use_code,
+        # building_sqft, record_type, lot_group_key) via LEFT JOIN
+        # to the properties table.
         rows = self.db.conn.execute(
             """
             SELECT
-                sale_date, sale_price, beds, baths, sqft, lot_size_sqft,
-                year_built, hoa_per_month, latitude, longitude,
-                property_type, neighborhood, zip_code, zoning_class,
-                address
-            FROM property_sales
-            WHERE sale_price IS NOT NULL
-              AND sale_price >= ?
-              AND neighborhood IS NOT NULL
-            ORDER BY sale_date
+                ps.sale_date, ps.sale_price, ps.beds, ps.baths, ps.sqft,
+                ps.lot_size_sqft, ps.year_built, ps.hoa_per_month,
+                ps.latitude, ps.longitude, ps.property_type,
+                ps.neighborhood, ps.zip_code, ps.zoning_class, ps.address,
+                p.use_code,
+                p.building_sqft,
+                p.record_type,
+                p.property_category,
+                p.lot_group_key
+            FROM property_sales ps
+            LEFT JOIN properties p
+                ON UPPER(TRIM(ps.address))
+                 = UPPER(TRIM(p.street_number || ' ' || p.street_name))
+            WHERE ps.sale_price IS NOT NULL
+              AND ps.sale_price >= ?
+              AND ps.neighborhood IS NOT NULL
+            ORDER BY ps.sale_date
             """,
             (min_sale_price,),
         ).fetchall()
@@ -222,6 +335,72 @@ class FeatureBuilder:
 
         df = pd.DataFrame([dict(r) for r in rows])
         logger.info("Loaded %d sales from database.", len(df))
+
+        # Normalize property_type before fitting encoder
+        df["property_type"] = df["property_type"].map(
+            lambda x: PROPERTY_TYPE_MAP.get(x, x) if pd.notna(x) else x
+        )
+
+        # ----- Training data quality filters -----
+        # Must run AFTER property_type normalization but BEFORE encoder fitting
+        # so that encoders are only fitted on clean data.
+        n_before = len(df)
+
+        # 1) Filter "Apartment" records with per-unit features but whole-building
+        #    prices. These have beds <= 2, sqft <= 1000 but $M+ sale prices.
+        beds_numeric = pd.to_numeric(df["beds"], errors="coerce")
+        sqft_numeric = pd.to_numeric(df["sqft"], errors="coerce")
+        apartment_per_unit_mask = (
+            (df["property_type"] == "Multi-Family (5+ Unit)")
+            & (beds_numeric.notna()) & (beds_numeric <= _APARTMENT_PER_UNIT_MAX_BEDS)
+            & (sqft_numeric.notna()) & (sqft_numeric <= _APARTMENT_PER_UNIT_MAX_SQFT)
+        )
+        n_apartment_filtered = int(apartment_per_unit_mask.sum())
+        if n_apartment_filtered > 0:
+            logger.warning(
+                "Removing %d 'Apartment' records with per-unit features "
+                "(beds <= %d, sqft <= %d) but whole-building prices.",
+                n_apartment_filtered,
+                _APARTMENT_PER_UNIT_MAX_BEDS,
+                _APARTMENT_PER_UNIT_MAX_SQFT,
+            )
+            df = df[~apartment_per_unit_mask].reset_index(drop=True)
+
+        # 2) Filter records with extreme price-per-sqft (data mismatch signal).
+        sqft_col = pd.to_numeric(df["sqft"], errors="coerce")
+        price_col = pd.to_numeric(df["sale_price"], errors="coerce")
+        valid_sqft_mask = (sqft_col.notna()) & (sqft_col > 0)
+        ppsf = pd.Series(np.nan, index=df.index)
+        ppsf[valid_sqft_mask] = price_col[valid_sqft_mask] / sqft_col[valid_sqft_mask]
+        extreme_ppsf_mask = ppsf > MAX_TRAINING_PRICE_PER_SQFT
+        n_extreme = int(extreme_ppsf_mask.sum())
+        if n_extreme > 0:
+            logger.warning(
+                "Removing %d records with price_per_sqft > $%s/sqft.",
+                n_extreme,
+                f"{MAX_TRAINING_PRICE_PER_SQFT:,}",
+            )
+            df = df[~extreme_ppsf_mask.fillna(False)].reset_index(drop=True)
+
+        # 3) Flag statistical outliers by property type (>3 std devs from median $/sqft).
+        outlier_mask = flag_training_outliers(df)
+        n_outliers = int(outlier_mask.sum())
+        if n_outliers > 0:
+            logger.warning(
+                "Removing %d records flagged as price_per_sqft outliers "
+                "(>3 std devs from property_type median).",
+                n_outliers,
+            )
+            df = df[~outlier_mask].reset_index(drop=True)
+
+        n_removed = n_before - len(df)
+        if n_removed > 0:
+            logger.info(
+                "Training data filters: %d -> %d rows (%d removed: "
+                "%d apartment per-unit, %d extreme ppsf, %d statistical outliers).",
+                n_before, len(df), n_removed,
+                n_apartment_filtered, n_extreme, n_outliers,
+            )
 
         # Load contextual data caches
         self._load_market_cache()
@@ -240,7 +419,7 @@ class FeatureBuilder:
         else:
             logger.warning("No zoning_class values found — zoning feature will be NaN.")
             self.zoning_encoder.fit(["UNKNOWN"])
-        # Fit property type encoder on non-null values
+        # Fit property type encoder on normalized values
         ptype_vals = df["property_type"].dropna().values
         if len(ptype_vals) > 0:
             self.property_type_encoder.fit(ptype_vals)
@@ -397,11 +576,101 @@ class FeatureBuilder:
             np.nan,
         )
 
+        # is_condo_unit: binary flag for condo/unit records
+        if "record_type" in df.columns:
+            features["is_condo_unit"] = (df["record_type"] == "unit").astype(float)
+        else:
+            features["is_condo_unit"] = 0.0
+
+        # units_on_lot: count of properties sharing the same lot_group_key.
+        # Computed via DB query for training, defaults to 1 for prediction.
+        if "lot_group_key" in df.columns:
+            lgk = df["lot_group_key"]
+            unique_keys = lgk.dropna().unique().tolist()
+            if unique_keys and self.db is not None:
+                placeholders = ",".join("?" * len(unique_keys))
+                rows = self.db.conn.execute(
+                    f"SELECT lot_group_key, COUNT(*) FROM properties "
+                    f"WHERE lot_group_key IN ({placeholders}) "
+                    f"GROUP BY lot_group_key",
+                    unique_keys,
+                ).fetchall()
+                lgk_counts = {r[0]: r[1] for r in rows}
+                features["units_on_lot"] = lgk.map(lgk_counts).astype(float)
+            else:
+                features["units_on_lot"] = np.nan
+        else:
+            features["units_on_lot"] = np.nan
+
+        # effective_lot_size: for condo units, divide lot_size by units on lot
+        # to get per-unit share. For fee_simple lots, use raw lot_size_sqft.
+        units_on_lot_safe = features["units_on_lot"].fillna(1).clip(lower=1)
+        features["effective_lot_size"] = np.where(
+            features["is_condo_unit"] > 0,
+            features["lot_size_sqft"] / units_on_lot_safe,
+            features["lot_size_sqft"],
+        )
+        # Set NaN for condos where lot_size is 0 (shared lot with no size data)
+        features.loc[
+            (features["is_condo_unit"] > 0) & (features["lot_size_sqft"].fillna(0) == 0),
+            "effective_lot_size",
+        ] = np.nan
+
+        # lot_to_living_ratio: use effective_lot_size for property-type-aware ratio
         features["lot_to_living_ratio"] = np.where(
-            (features["sqft"].notna()) & (features["sqft"] > 0),
-            features["lot_size_sqft"] / features["sqft"],
+            (features["sqft"].notna()) & (features["sqft"] > 0)
+            & (features["effective_lot_size"].notna()),
+            features["effective_lot_size"] / features["sqft"],
             np.nan,
         )
+
+        # effective_sqft: use building_sqft for MF 5+ where available,
+        # otherwise fall back to listing sqft.
+        if "building_sqft" in df.columns and "use_code" in df.columns:
+            unit_count_raw = df["use_code"].map(
+                lambda x: USE_CODE_UNIT_COUNT.get(str(x).strip(), np.nan)
+                if pd.notna(x) else np.nan
+            )
+            bldg_sqft = pd.to_numeric(df["building_sqft"], errors="coerce")
+            is_mf5plus = unit_count_raw >= 5
+            has_bldg = bldg_sqft.notna() & (bldg_sqft > 0)
+
+            features["effective_sqft"] = np.where(
+                is_mf5plus & has_bldg,
+                bldg_sqft,
+                features["sqft"],
+            )
+        else:
+            features["effective_sqft"] = features["sqft"].copy()
+
+        # building_to_listing_sqft_ratio: signals per-unit vs whole-building
+        # mismatch.  ~1.0 for SFR, 3-10x for MF with per-unit MLS data.
+        if "building_sqft" in df.columns:
+            bldg_sqft = pd.to_numeric(df["building_sqft"], errors="coerce")
+            features["building_to_listing_sqft_ratio"] = np.where(
+                (features["sqft"].notna()) & (features["sqft"] > 0)
+                & (bldg_sqft.notna()) & (bldg_sqft > 0),
+                bldg_sqft / features["sqft"],
+                np.nan,
+            )
+        else:
+            features["building_to_listing_sqft_ratio"] = np.nan
+
+        # --- Structure features (from assessor data) ---
+        if "use_code" in df.columns:
+            features["unit_count"] = df["use_code"].map(
+                lambda x: USE_CODE_UNIT_COUNT.get(str(x).strip(), np.nan)
+                if pd.notna(x) else np.nan
+            ).astype(float)
+        else:
+            features["unit_count"] = np.nan
+
+        if "building_sqft" in df.columns:
+            features["building_sqft"] = pd.to_numeric(
+                df["building_sqft"], errors="coerce"
+            )
+        else:
+            features["building_sqft"] = np.nan
 
         # --- Categorical features (label encoded) ---
         if "neighborhood" in df.columns:
@@ -426,10 +695,13 @@ class FeatureBuilder:
         else:
             features["zoning_encoded"] = np.nan
 
-        # Property type (full categorical, not just binary is_sfr)
+        # Property type (full categorical — normalize before encoding)
         if "property_type" in df.columns:
+            normalized_ptypes = df["property_type"].map(
+                lambda x: PROPERTY_TYPE_MAP.get(x, x) if pd.notna(x) else x
+            )
             features["property_type_encoded"] = self._safe_label_encode(
-                df["property_type"].values, self.property_type_encoder
+                normalized_ptypes.values, self.property_type_encoder
             )
         else:
             features["property_type_encoded"] = np.nan

@@ -4,6 +4,10 @@ Downloads residential parcel records from the Socrata API and stores them
 in the ``properties`` table. The dataset contains ~29,000 total parcels
 with APN, address, lat/lon, lot size, building sqft, and use code.
 
+Use code reference data is maintained in the ``use_codes`` table (seeded
+by database.py). This collector looks up use codes from the DB rather than
+using a hardcoded map, so new codes are handled automatically.
+
 Socrata endpoint: https://data.cityofberkeley.info/resource/rax9-nuvx.json
 """
 
@@ -16,45 +20,9 @@ import requests
 
 from homebuyer.config import BERKELEY_OPENDATA_PARCELS_URL
 from homebuyer.storage.database import Database
-from homebuyer.storage.models import BerkeleyParcel, CollectionResult
+from homebuyer.storage.models import BerkeleyParcel, CollectionResult, UseCode
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Alameda County residential use codes → human-readable descriptions
-# Source: Alameda County Assessor's Office
-# ---------------------------------------------------------------------------
-
-USE_CODE_MAP: dict[str, str] = {
-    # Single family
-    "1000": "Vacant Residential Land",
-    "1100": "Single Family Residential",
-    "1200": "Single Family Residential (misc. improvements)",
-    "1400": "Single Family Residential (rural)",
-    "1500": "Single Family Residential (rural, misc.)",
-    "1505": "Single Family Residential (secondary)",
-    "1600": "Single Family Residential (manufactured/mobile)",
-    "1800": "Single Family Residential (other)",
-    # Multi-family
-    "2100": "Duplex (2 units)",
-    "2200": "Duplex (2 units, misc.)",
-    "2300": "Triplex (3 units)",
-    "2400": "Fourplex (4 units)",
-    "2500": "Multi-Family (5+ units, apartments)",
-    "2501": "Multi-Family (5+ units, garden)",
-    "2502": "Multi-Family (5+ units, high-rise)",
-    "2600": "Multi-Family (mixed residential/commercial)",
-    "2700": "Multi-Family (other)",
-    # Condos / co-ops / townhouses
-    "7100": "Condominium",
-    "7200": "Planned Unit Development (PUD)",
-    "7300": "Condominium (common area)",
-    "7301": "Condominium (parking)",
-    "7700": "Multi-Residential (5+ condos/co-ops)",
-}
-
-# Set of all residential use codes for filtering
-RESIDENTIAL_USE_CODES = set(USE_CODE_MAP.keys())
 
 # Socrata pagination limit
 SOCRATA_BATCH_SIZE = 2000
@@ -67,19 +35,21 @@ class ParcelCollector:
         self.db = db
         self.session = requests.Session()
         self.session.headers.update({"Accept": "application/json"})
+        # Load use code reference from DB
+        self._use_codes: dict[str, UseCode] = {}
 
     def collect(
         self,
-        min_lot_sqft: int = 4000,
+        min_lot_sqft: int = 0,
         residential_only: bool = True,
     ) -> CollectionResult:
         """Fetch parcels from Socrata API with pagination.
 
         Args:
             min_lot_sqft: Minimum lot size in square feet. Parcels below
-                this threshold are excluded. Set to 0 to include all.
+                this threshold are excluded server-side. Default 0 (all).
             residential_only: If True, only include parcels with residential
-                use codes.
+                use codes (from use_codes reference table).
 
         Returns:
             A CollectionResult summarizing what was collected.
@@ -88,10 +58,15 @@ class ParcelCollector:
         run_id = self.db.start_collection_run("parcels")
 
         try:
+            # Load use codes from DB for filtering and metadata
+            self._use_codes = self.db.get_use_codes()
+            residential_codes = self.db.get_residential_use_codes()
+
             raw_records = self._fetch_all(min_lot_sqft=min_lot_sqft)
             parcels = self._parse_records(
                 raw_records,
                 residential_only=residential_only,
+                residential_codes=residential_codes,
             )
             result.records_fetched = len(parcels)
 
@@ -115,14 +90,12 @@ class ParcelCollector:
         self.db.complete_collection_run(run_id, result)
         return result
 
-    def _fetch_all(self, min_lot_sqft: int = 4000) -> list[dict]:
+    def _fetch_all(self, min_lot_sqft: int = 0) -> list[dict]:
         """Fetch all matching parcels from the Socrata API with pagination.
-
-        Uses server-side filtering on lot_size to reduce data transfer,
-        then client-side filtering on use codes.
 
         Args:
             min_lot_sqft: Minimum lot size filter (applied server-side).
+                Default 0 fetches all parcels.
 
         Returns:
             List of raw Socrata JSON records.
@@ -185,14 +158,18 @@ class ParcelCollector:
         self,
         raw_records: list[dict],
         residential_only: bool = True,
+        residential_codes: Optional[set[str]] = None,
     ) -> list[BerkeleyParcel]:
         """Parse Socrata JSON into BerkeleyParcel objects.
 
         Applies use-code filtering and extracts lat/lon from the dataset.
+        Enriches each record with property_category, ownership_type,
+        record_type, and lot_group_key from the use_codes reference table.
 
         Args:
             raw_records: Raw JSON records from the Socrata API.
             residential_only: If True, only include residential use codes.
+            residential_codes: Set of residential use codes from DB.
 
         Returns:
             List of BerkeleyParcel objects ready for DB insertion.
@@ -208,7 +185,7 @@ class ParcelCollector:
 
             # Use code filtering
             use_code = str(row.get("use_code", "") or "").strip()
-            if residential_only and use_code not in RESIDENTIAL_USE_CODES:
+            if residential_only and residential_codes and use_code not in residential_codes:
                 skipped_use_code += 1
                 continue
 
@@ -239,7 +216,7 @@ class ParcelCollector:
                 continue
 
             # Parse address components
-            # Socrata field names: situs_addre, situs_stree, situs_str_1, situs_zip
+            # Socrata field names: situs_addre, situs_stree, situs_str_1, situs_unit, situs_zip
             address_raw = (
                 row.get("situs_addre")
                 or row.get("primary_address")
@@ -257,6 +234,7 @@ class ParcelCollector:
                 or row.get("street_name")
                 or ""
             )
+            situs_unit = str(row.get("situs_unit") or "").strip() or None
 
             # Build full address if not directly available
             if not address_raw and street_number and street_name:
@@ -282,8 +260,18 @@ class ParcelCollector:
                 or row.get("bldg_sqft")
             )
 
-            # Use code description
-            use_description = USE_CODE_MAP.get(use_code)
+            # Look up use code reference data
+            uc = self._use_codes.get(use_code)
+            use_description = uc.description if uc else None
+            property_category = uc.property_category if uc else None
+            ownership_type = uc.ownership_type if uc else None
+            record_type = uc.record_type if uc else None
+
+            # Compute lot_group_key for unit aggregation
+            # Normalized: "{street_number}_{street_name}_{zip_code}" (upper, no unit)
+            sn = str(street_number).strip().upper()
+            sname = str(street_name).strip().upper()
+            lot_group_key = f"{sn}_{sname}_{zip_code}" if sn and sname else None
 
             parcels.append(
                 BerkeleyParcel(
@@ -298,6 +286,12 @@ class ParcelCollector:
                     building_sqft=building_sqft,
                     use_code=use_code,
                     use_description=use_description,
+                    situs_unit=situs_unit,
+                    property_category=property_category,
+                    ownership_type=ownership_type,
+                    record_type=record_type,
+                    lot_group_key=lot_group_key,
+                    parcel_lot_size_sqft=lot_size,
                 )
             )
 

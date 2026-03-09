@@ -42,6 +42,7 @@ class PredictionResult:
     neighborhood: Optional[str] = None
     list_price: Optional[int] = None
     predicted_premium_pct: Optional[float] = None  # vs list price
+    data_warnings: Optional[list[str]] = None  # data quality warnings
 
 
 @dataclass
@@ -77,6 +78,8 @@ class ModelArtifact:
     test_size: int = 0
     neighborhood_metrics: list[dict] = field(default_factory=list)
     hyperparameters: dict = field(default_factory=dict)
+    log_target: bool = False  # Whether the model was trained on log1p(y)
+    property_type_metrics: list[dict] = field(default_factory=list)
 
     def save(self, path: Optional[Path] = None) -> Path:
         """Save the model artifact to disk.
@@ -135,6 +138,12 @@ class ModelArtifact:
         y_pred = self.model.predict(X)
         y_lower = self.model_lower.predict(X)
         y_upper = self.model_upper.predict(X)
+
+        # Inverse log transform if model was trained on log1p(y)
+        if getattr(self, "log_target", False):
+            y_pred = np.expm1(y_pred)
+            y_lower = np.expm1(y_lower)
+            y_upper = np.expm1(y_upper)
 
         # Ensure bounds are sensible
         y_lower = np.minimum(y_lower, y_pred)
@@ -204,6 +213,140 @@ class ModelArtifact:
             predicted_premium_pct=premium_pct,
         )
 
+    def predict_batch_single(
+        self,
+        property_dict: dict,
+        builder: FeatureBuilder,
+        explainer: Optional[shap.TreeExplainer] = None,
+    ) -> PredictionResult:
+        """Predict for a single property using shared builder & explainer.
+
+        Unlike ``predict_single()``, this does NOT create a new
+        FeatureBuilder, ZoningClassifier, or TreeExplainer per call.
+        The caller pre-creates them once and passes them in for
+        efficient batch processing across thousands of properties.
+
+        Args:
+            property_dict: Property attributes (same format as predict_single).
+            builder: Pre-initialised FeatureBuilder with encoders set.
+            explainer: Pre-created shap.TreeExplainer (optional; skips SHAP
+                       if ``None``).
+
+        Returns:
+            PredictionResult with predicted price, interval, and optionally
+            SHAP contributions.
+        """
+        X = builder.build_single_prediction(property_dict)
+        y_pred, y_lower, y_upper = self.predict(X)
+
+        predicted_price = max(int(round(y_pred[0], -3)), 0)
+        price_lower = max(int(round(y_lower[0], -3)), 0)
+        price_upper = int(round(y_upper[0], -3))
+
+        list_price = property_dict.get("list_price")
+        premium_pct = None
+        if list_price and list_price > 0:
+            premium_pct = round((predicted_price - list_price) / list_price * 100, 1)
+
+        base_value, contributions = None, None
+        if explainer is not None:
+            base_value, contributions = self._compute_shap_contributions_with_explainer(
+                X, property_dict, builder, predicted_price, explainer,
+            )
+
+        return PredictionResult(
+            predicted_price=predicted_price,
+            price_lower=price_lower,
+            price_upper=price_upper,
+            feature_contributions=contributions,
+            base_value=base_value,
+            neighborhood=property_dict.get("neighborhood"),
+            list_price=list_price,
+            predicted_premium_pct=premium_pct,
+        )
+
+    def _compute_shap_contributions_with_explainer(
+        self,
+        X: pd.DataFrame,
+        property_dict: dict,
+        builder: FeatureBuilder,
+        predicted_price: int,
+        explainer: shap.TreeExplainer,
+    ) -> tuple[Optional[int], Optional[list[dict]]]:
+        """Compute SHAP contributions using a pre-created TreeExplainer.
+
+        Identical logic to ``_compute_shap_contributions`` but avoids
+        creating a new ``shap.TreeExplainer`` each time.
+        """
+        try:
+            shap_values = explainer.shap_values(X[self.feature_names])
+
+            ev = explainer.expected_value
+            if hasattr(ev, '__len__'):
+                base = float(np.asarray(ev).flat[0])
+            else:
+                base = float(ev)
+        except Exception:
+            logger.warning("SHAP computation failed; skipping contributions.", exc_info=True)
+            return None, None
+
+        sv = np.asarray(shap_values)
+        sv = sv[0] if sv.ndim == 2 else sv
+
+        # If model was trained on log1p(y), convert SHAP values from
+        # log-space to approximate dollar-space using the marginal impact
+        # formula: dollar_impact_i ≈ expm1(base + sv[i]) - expm1(base)
+        is_log = getattr(self, "log_target", False)
+        if is_log:
+            base_dollar = float(np.expm1(base))
+            sv_dollar = np.array([
+                float(np.expm1(base + sv[i]) - np.expm1(base))
+                for i in range(len(sv))
+            ])
+            base = base_dollar
+        else:
+            sv_dollar = sv.astype(float)
+
+        base_value = int(round(base, -3))
+
+        raw_contributions: list[dict] = []
+        for i, feat_name in enumerate(self.feature_names):
+            dollar_value = float(sv_dollar[i])
+            if abs(dollar_value) < 1.0:
+                continue
+
+            label = self._feature_label(
+                feat_name, X.iloc[0], property_dict, builder,
+            )
+            raw_contributions.append({
+                "name": label,
+                "value": int(round(dollar_value, -2)),
+                "raw_feature": feat_name,
+            })
+
+        raw_contributions.sort(key=lambda c: abs(c["value"]), reverse=True)
+
+        max_show = 12
+        if len(raw_contributions) > max_show:
+            top = raw_contributions[:max_show]
+            rest_count = len(raw_contributions) - max_show
+            top_sum = sum(c["value"] for c in top)
+            rest_value = predicted_price - base_value - top_sum
+            if abs(rest_value) > 0:
+                top.append({
+                    "name": f"{rest_count} other factors",
+                    "value": rest_value,
+                    "raw_feature": "_other",
+                })
+            raw_contributions = top
+        else:
+            contrib_sum = sum(c["value"] for c in raw_contributions)
+            residual = predicted_price - base_value - contrib_sum
+            if abs(residual) > 0 and raw_contributions:
+                raw_contributions[-1]["value"] += residual
+
+        return base_value, raw_contributions
+
     def _compute_shap_contributions(
         self,
         X: pd.DataFrame,
@@ -247,12 +390,30 @@ class ModelArtifact:
         sv = np.asarray(shap_values)
         sv = sv[0] if sv.ndim == 2 else sv
 
+        # If model was trained on log1p(y), convert SHAP values from
+        # log-space to approximate dollar-space.  Each SHAP value represents
+        # the additive contribution in log1p(price) space.  To get the
+        # dollar impact we compute the marginal effect:
+        #   dollar_impact_i ≈ expm1(base + sv[i]) - expm1(base)
+        # This converts the small log-space numbers (0.01-0.5) into
+        # meaningful dollar amounts (thousands to hundreds of thousands).
+        is_log = getattr(self, "log_target", False)
+        if is_log:
+            base_dollar = float(np.expm1(base))
+            sv_dollar = np.array([
+                float(np.expm1(base + sv[i]) - np.expm1(base))
+                for i in range(len(sv))
+            ])
+            base = base_dollar
+        else:
+            sv_dollar = sv.astype(float)
+
         base_value = int(round(base, -3))
 
         # Build human-readable contribution dicts
         raw_contributions: list[dict] = []
         for i, feat_name in enumerate(self.feature_names):
-            dollar_value = float(sv[i])
+            dollar_value = float(sv_dollar[i])
             if abs(dollar_value) < 1.0:
                 continue  # skip negligible contributions
 
@@ -330,6 +491,10 @@ class ModelArtifact:
             "beds": ("Bedrooms", "{:.0f}"),
             "baths": ("Bathrooms", "{:.0f}"),
             "lot_size_sqft": ("Lot size", "{:,.0f} sqft"),
+            "unit_count": ("Unit count", "{:.0f}"),
+            "building_sqft": ("Building sqft", "{:,.0f} sqft"),
+            "effective_sqft": ("Effective sqft", "{:,.0f} sqft"),
+            "building_to_listing_sqft_ratio": ("Bldg/listing sqft ratio", "{:.1f}x"),
             "year_built": ("Year built", "{:.0f}"),
             "hoa_per_month": ("HOA", "${:,.0f}/mo"),
             "property_age": ("Property age", "{:.0f} years"),
@@ -596,6 +761,17 @@ class ModelArtifact:
             for name, imp in sorted_feats[:10]:
                 bar = "█" * int(imp * 50)
                 lines.append(f"  {name:<22s} {imp:.4f} {bar}")
+            lines.append("")
+
+        # Per-property-type accuracy
+        pt_metrics = getattr(self, "property_type_metrics", [])
+        if pt_metrics:
+            lines.append("  PER-PROPERTY-TYPE ACCURACY")
+            lines.append("  " + "-" * 35)
+            for pm in pt_metrics:
+                lines.append(
+                    f"  {pm['name']:<25s} MAPE: {pm['mape']:.1f}%"
+                )
             lines.append("")
 
         lines.append("=" * 55)
