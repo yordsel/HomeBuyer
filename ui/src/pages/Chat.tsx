@@ -55,6 +55,7 @@ export function ChatPage() {
     trackedProperties,
     addBlocksToProperty,
     clearTrackedProperties,
+    pruneTrackedProperties,
     setSendChatMessage,
     setWorkingSetMeta,
   } = usePropertyContext();
@@ -188,6 +189,10 @@ export function ChatPage() {
           // Propagate backend working set metadata to context
           if (resp.working_set) {
             setWorkingSetMeta(resp.working_set);
+            // Prune sidebar when backend working set shrinks (e.g., after a filter)
+            if (resp.working_set.addresses && resp.working_set.addresses.length > 0) {
+              pruneTrackedProperties(new Set(resp.working_set.addresses));
+            }
           }
 
           const toolNames = resp.tool_calls?.map((t) => t.name) ?? [];
@@ -281,7 +286,7 @@ export function ChatPage() {
         setThinking(false);
       }
     },
-    [input, thinking, messages, activeProperty, setActiveProperty, trackProperty, trackProperties, addBlocksToProperty],
+    [input, thinking, messages, activeProperty, setActiveProperty, trackProperty, trackProperties, addBlocksToProperty, pruneTrackedProperties],
   );
 
   // ---- Handle address search selection ----

@@ -10,7 +10,7 @@
     {
       "name": "ui",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "--prefix", "/Users/srinivasjagannathan/projects/HomeBuyer/.claude/worktrees/zealous-mahavira/ui", "dev"],
+      "runtimeArgs": ["run", "--prefix", "/Users/srinivasjagannathan/projects/HomeBuyer/ui", "dev"],
       "port": 1420,
       "url": "http://localhost:1420"
     }

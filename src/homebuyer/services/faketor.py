@@ -323,9 +323,13 @@ FAKETOR_TOOLS = [
             "Generate a comprehensive investment prospectus for one or more Berkeley "
             "properties. Aggregates valuation, market context, development potential, "
             "rental/investment scenarios, comparable sales, and risk factors into a "
-            "single professional document. Supports single-property or multi-property "
-            "(portfolio) mode. The result includes a recommended strategy, capital "
-            "requirements, projected returns, and downloadable PDF capability.\n\n"
+            "single professional document with charts, narratives, and detailed analysis.\n\n"
+            "Supports three multi-property modes:\n"
+            "- 'curated': 1-10 diverse properties as a portfolio with allocation charts\n"
+            "- 'similar': 2-10 similar properties for side-by-side comparison\n"
+            "- 'thesis': 10+ properties with an investment thesis, stats, and examples\n\n"
+            "Mode is auto-detected if not specified. Can also use the session working "
+            "set as the property source (set from_working_set=true).\n\n"
             "Use this when the user asks for a prospectus, investment summary, "
             "professional property report, or wants a comprehensive overview of "
             "a property's investment potential. Also use when the user wants to "
@@ -340,7 +344,8 @@ FAKETOR_TOOLS = [
                     "description": (
                         "List of property addresses to generate prospectus for. "
                         "For a single property, provide a one-element array. "
-                        "For portfolio analysis, provide multiple addresses."
+                        "For portfolio analysis, provide multiple addresses. "
+                        "Not required if from_working_set is true."
                     ),
                 },
                 "down_payment_pct": {
@@ -351,8 +356,27 @@ FAKETOR_TOOLS = [
                     "type": "integer",
                     "description": "Investment horizon in years (default 5)",
                 },
+                "mode": {
+                    "type": "string",
+                    "enum": ["curated", "similar", "thesis"],
+                    "description": (
+                        "Multi-property prospectus mode. Auto-detected if omitted:\n"
+                        "- 'curated': diverse portfolio overview with allocation charts\n"
+                        "- 'similar': side-by-side comparison highlighting shared traits and differences\n"
+                        "- 'thesis': investment thesis with statistics and representative examples\n"
+                        "If you're unsure which mode the user wants, ask them."
+                    ),
+                },
+                "from_working_set": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, use properties from the current session working set "
+                        "instead of the addresses list. Useful for generating a prospectus "
+                        "from search results or filtered sets the user is discussing."
+                    ),
+                },
             },
-            "required": ["addresses"],
+            "required": [],
         },
     },
     {
@@ -577,12 +601,23 @@ FAKETOR_TOOLS = [
             "  homes_sold, new_listings, inventory, months_of_supply, median_dom, avg_sale_to_list\n\n"
             "COMMON property_type VALUES: 'Single Family Residential', 'Multi-Family (2-4 Unit)', "
             "'Condo/Co-op', 'Townhouse', 'Multi-Family (5+ Unit)', 'Land', 'Manufactured'\n\n"
+            "COMPUTED FIELDS — NOT database columns (do NOT use in SQL):\n"
+            "  adu_eligible, sb9_eligible, effective_max_units, middle_housing_eligible\n"
+            "  These are computed at runtime by the development calculator using zoning rules, "
+            "lot coverage, and property category. They are stored as JSON inside "
+            "precomputed_scenarios.potential_json but are NOT queryable as columns.\n"
+            "  → To filter by ADU/SB9 eligibility, use search_properties with adu_eligible=true "
+            "or sb9_eligible=true instead of query_database.\n"
+            "  → To count ADU-eligible properties in the working set, use search_properties with "
+            "adu_eligible=true and the relevant criteria, then check _facts.total_matching.\n\n"
             "RULES:\n"
             "- Only SELECT statements are allowed (no INSERT, UPDATE, DELETE, DROP, etc.)\n"
             "- Use LIMIT to cap results (max 100 rows returned)\n"
             "- For counting/aggregation queries, always use COUNT, SUM, AVG, MIN, MAX, GROUP BY\n"
             "- Column values are case-sensitive — use exact values from the list above\n"
-            "- Use IS NOT NULL to filter out missing data when needed\n\n"
+            "- Use IS NOT NULL to filter out missing data when needed\n"
+            "- NEVER reference adu_eligible, sb9_eligible, or other computed development fields "
+            "in SQL queries — they are not database columns and will cause errors\n\n"
             "WORKING SET:\n"
             "When a session working set is active, a temporary table _working_set is available with column:\n"
             "  property_id INTEGER\n"
@@ -698,11 +733,22 @@ then use those details when calling other tools
 - When the user asks for an "investment prospectus", "property report", or "comprehensive \
   investment summary", use generate_investment_prospectus. This tool aggregates valuation, \
   market data, development potential, rental scenarios, comps, and risk factors into a single \
-  professional report with a recommended strategy. It also supports multi-property portfolio \
-  analysis when the user provides multiple addresses
+  professional report with charts, narratives, and a recommended strategy
+- generate_investment_prospectus supports three multi-property modes:
+  - "curated" (1-10 diverse properties): portfolio overview with allocation charts and per-property analysis
+  - "similar" (2-10 alike properties): side-by-side comparison highlighting shared traits and differences
+  - "thesis" (10+ properties): investment thesis with statistics and representative example properties
+- The mode is auto-detected based on property count and similarity, but you can override it \
+  with the mode parameter. If the user's intent is ambiguous (e.g. "make a prospectus for \
+  these 5 properties"), ask whether they want a portfolio overview (curated) or a comparison \
+  (similar) — offer option buttons
+- Use from_working_set=true when the user wants a prospectus for "these properties", "the \
+  current results", or "my working set". This pulls properties directly from the session \
+  working set populated by previous search_properties or query_database calls
 - generate_investment_prospectus is a heavyweight tool — it calls multiple analysis modules \
   internally. Only use it when the user specifically wants a comprehensive report, not for \
-  quick questions about a single metric
+  quick questions about a single metric. For thesis mode with 10+ properties, only 3-5 \
+  example properties get full analysis; the rest contribute to aggregate statistics
 
 DATA MODEL:
 The properties table distinguishes between physical lots and sellable units:
@@ -717,6 +763,16 @@ The properties table distinguishes between physical lots and sellable units:
   within a larger lot and analyze the lot as a whole (the system does this automatically).
 - For development opportunity searches, filter to record_type='lot' to exclude individual \
   condo units that can't be independently developed.
+
+COMPUTED vs STORED FIELDS:
+- Development eligibility (adu_eligible, sb9_eligible, effective_max_units, \
+  middle_housing_eligible) are COMPUTED at runtime by the development calculator. \
+  They are NOT columns in the properties table.
+- To filter or count by development eligibility, use search_properties with \
+  adu_eligible=true or sb9_eligible=true — NEVER use query_database with these fields.
+- When the user asks "which of these are ADU-eligible?" about the working set, use \
+  search_properties with adu_eligible=true and any other active filters to get the subset.
+- search_properties results include a development.adu_eligible field in each result.
 
 DATA ACCURACY RULES:
 - Every tool result includes a "_facts" section with pre-computed, verified statistics. \
@@ -739,8 +795,13 @@ current set of properties the user is discussing. Follow these rules:
 - When the user asks to narrow or filter the working set (e.g. "which of those are in North \
   Berkeley?"), use query_database with a JOIN against the _working_set temp table: \
   SELECT ... FROM properties p JOIN _working_set ws ON p.id = ws.property_id WHERE ...
+- IMPORTANT: When using query_database to filter/narrow the working set, ALWAYS include \
+  p.id in the SELECT list. This allows the system to automatically update the working set \
+  to only the matching properties. Without p.id, the working set won't be narrowed. \
+  Example: SELECT p.id, p.address, p.beds ... FROM properties p JOIN _working_set ws ON ...
 - When the user asks aggregate questions about the current set (e.g. "what's the average lot \
-  size of these?"), use query_database with the _working_set JOIN
+  size of these?"), use query_database with the _working_set JOIN. For pure aggregates \
+  (COUNT, AVG, etc.), you don't need p.id since those don't narrow the set
 - When the user says "go back", "undo that", "remove the last filter", or wants to restore \
   the previous set, use undo_filter
 - The working set is automatically populated when you use search_properties or query_database \

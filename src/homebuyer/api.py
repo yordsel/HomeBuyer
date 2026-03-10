@@ -1224,6 +1224,20 @@ def _make_session_tool_executor(working_set=None):
         if tool_name == "undo_filter" and working_set is not None:
             return _handle_undo_filter(working_set)
 
+        # Intercept generate_investment_prospectus with from_working_set
+        if (
+            tool_name == "generate_investment_prospectus"
+            and tool_input.get("from_working_set")
+            and working_set is not None
+            and working_set.count > 0
+        ):
+            # Inject working set property IDs as addresses for the prospectus
+            ws_props = [prop.to_dict() for prop in working_set.properties.values()]
+            addresses = [p.get("address", "") for p in ws_props if p.get("address")]
+            if addresses:
+                tool_input = {**tool_input, "addresses": addresses}
+                del tool_input["from_working_set"]
+
         # For query_database with an active working set, inject temp table
         if (
             tool_name == "query_database"
@@ -1354,8 +1368,16 @@ def _update_working_set(working_set, tool_name: str, tool_input: dict, result_st
         total_matching = data.get("total_matching", len(results))
         desc = _describe_search_filters(filters)
 
+        # ADU/SB9 are post-filters (not SQL columns), so the lightweight
+        # search can't reproduce them.  When either is active, use only
+        # the already-filtered results for the working set.
+        has_dev_filter = bool(
+            tool_input.get("adu_eligible") or tool_input.get("sb9_eligible")
+        )
+
         # If there are more matches than returned, fetch ALL for the working set
-        if total_matching > len(results) and _state and _state.db:
+        # (but only when there are no dev-potential post-filters)
+        if total_matching > len(results) and _state and _state.db and not has_dev_filter:
             try:
                 all_rows = _state.db.search_properties_lightweight(**filters)
             except Exception as e:
@@ -1368,7 +1390,8 @@ def _update_working_set(working_set, tool_name: str, tool_input: dict, result_st
                 new_ids = {r["id"] for r in all_rows if r.get("id")}
                 working_set.push_filter(new_ids, desc, tool_name)
         else:
-            # Results already contain everything
+            # Results already contain everything (or dev-filter is active
+            # and results are the authoritative post-filtered set)
             if working_set.count == 0:
                 working_set.set_properties(results, desc, tool_name)
             else:
@@ -1838,6 +1861,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
 
         down_pct = tool_input.get("down_payment_pct", 20.0)
         horizon = tool_input.get("investment_horizon_years", 5)
+        mode = tool_input.get("mode")  # None = auto-detect
 
         # Resolve each address to a property dict from the database
         properties = []
@@ -1865,6 +1889,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 properties=properties,
                 down_payment_pct=down_pct,
                 investment_horizon_years=horizon,
+                mode=mode,
             )
             return json.dumps(prospectus_to_dict(result), default=str)
         except Exception as e:
@@ -2110,14 +2135,18 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             if len(results) >= requested_limit:
                 break
 
+        # Build filters_applied — include dev filters so the working set
+        # descriptor mentions them, but exclude 'limit' (pagination detail)
+        filters_applied = {
+            k: v for k, v in tool_input.items()
+            if v is not None and k != "limit"
+        }
+
         return json.dumps({
             "results": results,
             "total_found": len(results),
             "total_matching": total_matching,
-            "filters_applied": {
-                k: v for k, v in tool_input.items()
-                if v is not None and k not in ("limit", "adu_eligible", "sb9_eligible")
-            },
+            "filters_applied": filters_applied,
         }, default=str)
 
     elif tool_name == "lookup_permits":
@@ -2301,6 +2330,10 @@ def faketor_chat(req: FaketorChatRequest):
             "count": working_set.count,
             "descriptor": working_set.get_descriptor(),
             "session_id": req.session_id,
+            "addresses": [
+                prop.address for prop in working_set.properties.values()
+                if prop.address
+            ],
         }
 
     return result
@@ -2338,6 +2371,10 @@ def faketor_chat_stream(req: FaketorChatRequest):
                 "count": working_set.count,
                 "descriptor": working_set.get_descriptor(),
                 "session_id": req.session_id,
+                "addresses": [
+                    prop.address for prop in working_set.properties.values()
+                    if prop.address
+                ],
             }, default=str)
             yield f"event: working_set\ndata: {ws_data}\n\n"
 

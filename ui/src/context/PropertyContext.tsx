@@ -75,6 +75,8 @@ interface PropertyContextValue {
   clearPropertyBlocks: (address: string) => void;
   /** Clear all tracked properties (e.g., new conversation). */
   clearTrackedProperties: () => void;
+  /** Prune tracked properties to only those whose address is in the given set. */
+  pruneTrackedProperties: (keepAddresses: Set<string>) => void;
   /** Send a message to the chat (registered by Chat.tsx). */
   sendChatMessage: ((message: string) => void) | null;
   setSendChatMessage: (fn: ((message: string) => void) | null) => void;
@@ -94,6 +96,7 @@ const PropertyContext = createContext<PropertyContextValue>({
   addBlocksToProperty: () => {},
   clearPropertyBlocks: () => {},
   clearTrackedProperties: () => {},
+  pruneTrackedProperties: () => {},
   sendChatMessage: null,
   setSendChatMessage: () => {},
   workingSetMeta: null,
@@ -232,6 +235,17 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
     setTrackedProperties([]);
   }, []);
 
+  const pruneTrackedProperties = useCallback(
+    (keepAddresses: Set<string>) => {
+      setTrackedProperties((prev) => {
+        const pruned = prev.filter((t) => keepAddresses.has(t.property.address));
+        // Only update if something actually changed
+        return pruned.length === prev.length ? prev : pruned;
+      });
+    },
+    [],
+  );
+
   return (
     <PropertyContext.Provider
       value={{
@@ -245,6 +259,7 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
         addBlocksToProperty,
         clearPropertyBlocks,
         clearTrackedProperties,
+        pruneTrackedProperties,
         sendChatMessage,
         setSendChatMessage,
         workingSetMeta,

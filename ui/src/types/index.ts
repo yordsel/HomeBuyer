@@ -514,12 +514,54 @@ export interface ProspectusScenario {
   additional_investment?: number;
   total_investment?: number;
   total_monthly_rent?: number;
+  total_annual_rent?: number;
   cap_rate_pct?: number;
   cash_on_cash_pct?: number;
   monthly_cash_flow?: number;
   gross_rent_multiplier?: number;
   development_feasible?: boolean;
   development_notes?: string;
+  units?: Array<{
+    unit_type: string;
+    beds: number;
+    baths: number;
+    sqft: number | null;
+    monthly_rent: number;
+  }>;
+  expenses?: {
+    property_tax: number;
+    insurance: number;
+    maintenance: number;
+    vacancy_reserve: number;
+    management_fee: number;
+    hoa: number;
+    utilities: number;
+    total_annual: number;
+    expense_ratio_pct: number;
+  };
+  mortgage?: {
+    down_payment_amount: number;
+    loan_amount: number;
+    rate_30yr: number;
+    monthly_piti: number;
+  };
+  projections?: Array<{
+    year: number;
+    gross_rent: number;
+    operating_expenses: number;
+    noi: number;
+    mortgage_payment: number;
+    cash_flow: number;
+    equity_buildup: number;
+    property_value: number;
+    cumulative_equity: number;
+    total_return: number;
+  }>;
+  tax_benefits?: {
+    depreciation_annual: number;
+    mortgage_interest_deduction: number;
+    estimated_tax_savings: number;
+  };
 }
 
 export interface PropertyProspectus {
@@ -583,10 +625,42 @@ export interface PropertyProspectus {
   gross_rent_multiplier: number;
   price_to_rent_ratio: number;
 
+  // Narrative commentaries
+  valuation_commentary?: string;
+  market_position_commentary?: string;
+  scenario_recommendation_narrative?: string;
+  comps_analysis_narrative?: string;
+  risk_mitigation_narrative?: string;
+
+  // Best scenario detail for charts
+  best_scenario_detail?: ProspectusScenario | null;
+
   // Metadata
   generated_at: string;
   data_sources: string[];
   disclaimers: string[];
+}
+
+export interface PortfolioComparisonMetric {
+  address: string;
+  estimated_value: number;
+  cap_rate_pct: number;
+  cash_on_cash_pct: number;
+  monthly_cash_flow: number;
+  strategy: string;
+}
+
+export interface GroupStatistics {
+  count: number;
+  avg_price: number;
+  median_price: number;
+  min_price: number;
+  max_price: number;
+  avg_cap_rate: number;
+  avg_coc: number;
+  price_distribution: Array<{ bracket: string; count: number }>;
+  common_neighborhoods: string[];
+  common_zoning: string[];
 }
 
 export interface PortfolioSummary {
@@ -596,6 +670,23 @@ export interface PortfolioSummary {
   weighted_avg_coc: number;
   property_count: number;
   diversification_notes: string;
+
+  // Multi-property mode
+  mode?: string;
+  investment_thesis?: string;
+
+  // Similar mode
+  shared_traits?: string[];
+  individual_differences?: string[];
+
+  // Thesis mode
+  group_statistics?: GroupStatistics | null;
+  example_property_indices?: number[];
+
+  // Chart data
+  comparison_metrics?: PortfolioComparisonMetric[];
+  neighborhood_allocation?: Record<string, number>;
+  strategy_allocation?: Record<string, number>;
 }
 
 export interface InvestmentProspectusResponse {
@@ -709,6 +800,8 @@ export interface WorkingSetMeta {
   count: number;
   descriptor: string;
   session_id: string;
+  /** Addresses currently in the working set — used to prune the sidebar after filters. */
+  addresses?: string[];
 }
 
 export interface WorkingSetProperty {
