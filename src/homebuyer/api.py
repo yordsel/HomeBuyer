@@ -1825,6 +1825,52 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             })
         return json.dumps(rental_analysis_to_dict(result), default=str)
 
+    elif tool_name == "generate_investment_prospectus":
+        if not _state or not _state.db:
+            return json.dumps({"error": "Database not available"})
+
+        addresses_input = tool_input.get("addresses", [])
+        # Support single address string as well as list
+        if isinstance(addresses_input, str):
+            addresses_input = [addresses_input]
+        if not addresses_input:
+            return json.dumps({"error": "No addresses provided for prospectus generation"})
+
+        down_pct = tool_input.get("down_payment_pct", 20.0)
+        horizon = tool_input.get("investment_horizon_years", 5)
+
+        # Resolve each address to a property dict from the database
+        properties = []
+        for addr in addresses_input:
+            results = _state.db.search_properties(addr, limit=1)
+            if not results:
+                return json.dumps({"error": f"Property not found: '{addr}'"})
+            prop = dict(results[0])
+            properties.append(prop)
+
+        # Build the ProspectusGenerator with the required dependencies
+        from homebuyer.analysis.prospectus import ProspectusGenerator, prospectus_to_dict
+
+        market_analyzer = _state.get_analyzer()
+        prospectus_gen = ProspectusGenerator(
+            db=_state.db,
+            dev_calc=_state.dev_calc,
+            rental_analyzer=_state.rental_analyzer,
+            market_analyzer=market_analyzer,
+            predict_fn=lambda prop_dict, source: _get_or_compute_prediction(prop_dict, source),
+        )
+
+        try:
+            result = prospectus_gen.generate(
+                properties=properties,
+                down_payment_pct=down_pct,
+                investment_horizon_years=horizon,
+            )
+            return json.dumps(prospectus_to_dict(result), default=str)
+        except Exception as e:
+            logger.error("Prospectus generation failed: %s", e, exc_info=True)
+            return json.dumps({"error": f"Prospectus generation failed: {str(e)}"})
+
     elif tool_name == "lookup_property":
         if not _state or not _state.db:
             return json.dumps({"error": "Database not available"})

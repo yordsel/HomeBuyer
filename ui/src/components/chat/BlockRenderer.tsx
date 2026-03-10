@@ -15,6 +15,7 @@ import { ChatInvestmentScenarios } from './ChatInvestmentScenarios';
 import { ChatRentalIncome } from './ChatRentalIncome';
 import { ChatSearchResults } from './ChatSearchResults';
 import { ChatQueryResult } from './ChatQueryResult';
+import { ChatInvestmentProspectus } from './ChatInvestmentProspectus';
 
 interface BlockRendererProps {
   block: ResponseBlock;
@@ -48,6 +49,8 @@ export function BlockRenderer({ block, onAddressClick }: BlockRendererProps) {
       return <ChatSearchResults data={block.data} onAddressClick={onAddressClick} />;
     case 'query_result':
       return <ChatQueryResult data={block.data} />;
+    case 'investment_prospectus':
+      return <ChatInvestmentProspectus data={block.data} />;
     default:
       return null;
   }

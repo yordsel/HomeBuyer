@@ -38,6 +38,7 @@ function getPropertyPrompts(category?: string): string[] {
         'What improvements add the most value?',
         'Run an investment analysis',
         'Estimate rental income',
+        'Generate an investment prospectus',
       ];
 
     case 'condo':
@@ -59,6 +60,7 @@ function getPropertyPrompts(category?: string): string[] {
         'What improvements add the most value?',
         'Run an investment analysis',
         'Estimate rental income',
+        'Generate an investment prospectus',
       ];
 
     case 'apartment':
@@ -89,6 +91,7 @@ function getPropertyPrompts(category?: string): string[] {
         'What can I build on this lot?',
         'What improvements add the most value?',
         'Run an investment analysis',
+        'Generate an investment prospectus',
       ];
   }
 }
@@ -147,6 +150,13 @@ const POST_SEARCH_PROMPTS = [
   'What are the average prices by neighborhood?',
 ];
 
+const POST_INVESTMENT_PROMPTS = [
+  'Generate an investment prospectus',
+  'What are the risks?',
+  'Show comparable sales',
+  'What does the market look like?',
+];
+
 export function SuggestionChips({
   hasProperty,
   toolsUsed,
@@ -186,6 +196,13 @@ function getPrompts(
     return POST_SEARCH_PROMPTS.slice(0, 4);
   }
 
+  // After investment scenario analysis, suggest prospectus and follow-ups
+  if (tools.has('analyze_investment_scenarios')) {
+    return POST_INVESTMENT_PROMPTS
+      .filter((p) => !tools.has(promptToTool(p)))
+      .slice(0, 4);
+  }
+
   // After development potential, suggest related follow-ups
   if (tools.has('get_development_potential')) {
     return getPostDevelopmentPrompts(propertyCategory)
@@ -222,6 +239,8 @@ function promptToTool(prompt: string): string {
     return 'estimate_sell_vs_hold';
   if (lower.includes('improvement') || lower.includes('roi') || lower.includes('renovation'))
     return 'get_improvement_simulation';
+  if (lower.includes('prospectus'))
+    return 'generate_investment_prospectus';
   if (lower.includes('investment') || lower.includes('scenario'))
     return 'analyze_investment_scenarios';
   if (lower.includes('rental') || lower.includes('rent'))

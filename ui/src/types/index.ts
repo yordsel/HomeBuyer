@@ -494,6 +494,117 @@ export interface RentalAnalysisResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Investment Prospectus
+// ---------------------------------------------------------------------------
+
+export interface ProspectusComparable {
+  address: string;
+  sale_price: number;
+  sale_date: string;
+  beds?: number | null;
+  baths?: number | null;
+  sqft?: number | null;
+  price_per_sqft?: number | null;
+}
+
+export interface ProspectusScenario {
+  scenario_name?: string;
+  scenario_type?: string;
+  property_value?: number;
+  additional_investment?: number;
+  total_investment?: number;
+  total_monthly_rent?: number;
+  cap_rate_pct?: number;
+  cash_on_cash_pct?: number;
+  monthly_cash_flow?: number;
+  gross_rent_multiplier?: number;
+  development_feasible?: boolean;
+  development_notes?: string;
+}
+
+export interface PropertyProspectus {
+  // Property Overview
+  address?: string | null;
+  neighborhood: string;
+  property_type: string;
+  beds?: number | null;
+  baths?: number | null;
+  sqft?: number | null;
+  year_built?: number | null;
+  lot_size_sqft?: number | null;
+  zoning_class?: string | null;
+
+  // Valuation
+  estimated_value: number;
+  value_range_low: number;
+  value_range_high: number;
+  value_per_sqft?: number | null;
+
+  // Market Context
+  neighborhood_median_price?: number | null;
+  neighborhood_yoy_change_pct?: number | null;
+  neighborhood_avg_ppsf?: number | null;
+  city_median_price?: number | null;
+  mortgage_rate_30yr?: number | null;
+  median_dom?: number | null;
+  comparable_sales: ProspectusComparable[];
+
+  // Development Potential
+  adu_eligible: boolean;
+  adu_max_sqft?: number | null;
+  sb9_eligible: boolean;
+  sb9_can_split: boolean;
+  middle_housing_eligible: boolean;
+  middle_housing_max_units?: number | null;
+  effective_max_units: number;
+  development_notes: string;
+
+  // Investment Scenarios
+  scenarios: ProspectusScenario[];
+  best_scenario_name: string;
+  recommendation_notes: string;
+
+  // Recommended Strategy
+  recommended_approach: string;
+  recommended_approach_label: string;
+  strategy_rationale: string;
+  capital_required: number;
+  time_horizon_years: number;
+  projected_total_return: number;
+  projected_annual_return_pct: number;
+  monthly_cash_flow: number;
+
+  // Risk Factors
+  risk_factors: string[];
+
+  // Key Metrics
+  cap_rate_pct: number;
+  cash_on_cash_pct: number;
+  gross_rent_multiplier: number;
+  price_to_rent_ratio: number;
+
+  // Metadata
+  generated_at: string;
+  data_sources: string[];
+  disclaimers: string[];
+}
+
+export interface PortfolioSummary {
+  total_capital_required: number;
+  total_monthly_cash_flow: number;
+  weighted_avg_cap_rate: number;
+  weighted_avg_coc: number;
+  property_count: number;
+  diversification_notes: string;
+}
+
+export interface InvestmentProspectusResponse {
+  properties: PropertyProspectus[];
+  portfolio_summary?: PortfolioSummary | null;
+  is_multi_property: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Faketor Chat
 // ---------------------------------------------------------------------------
 
@@ -511,6 +622,7 @@ export type ResponseBlockType =
   | 'sell_vs_hold'
   | 'rental_income'
   | 'investment_scenarios'
+  | 'investment_prospectus'
   | 'market_summary'
   | 'property_detail'
   | 'property_search_results'

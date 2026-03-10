@@ -318,6 +318,44 @@ FAKETOR_TOOLS = [
         },
     },
     {
+        "name": "generate_investment_prospectus",
+        "description": (
+            "Generate a comprehensive investment prospectus for one or more Berkeley "
+            "properties. Aggregates valuation, market context, development potential, "
+            "rental/investment scenarios, comparable sales, and risk factors into a "
+            "single professional document. Supports single-property or multi-property "
+            "(portfolio) mode. The result includes a recommended strategy, capital "
+            "requirements, projected returns, and downloadable PDF capability.\n\n"
+            "Use this when the user asks for a prospectus, investment summary, "
+            "professional property report, or wants a comprehensive overview of "
+            "a property's investment potential. Also use when the user wants to "
+            "compare multiple properties side-by-side as investment opportunities."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "addresses": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "List of property addresses to generate prospectus for. "
+                        "For a single property, provide a one-element array. "
+                        "For portfolio analysis, provide multiple addresses."
+                    ),
+                },
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": "Down payment percentage (default 20)",
+                },
+                "investment_horizon_years": {
+                    "type": "integer",
+                    "description": "Investment horizon in years (default 5)",
+                },
+            },
+            "required": ["addresses"],
+        },
+    },
+    {
         "name": "search_properties",
         "description": (
             "Search Berkeley properties by criteria to find development opportunities. "
@@ -588,6 +626,7 @@ TOOL_TO_BLOCK_TYPE: dict[str, str] = {
     "estimate_sell_vs_hold": "sell_vs_hold",
     "estimate_rental_income": "rental_income",
     "analyze_investment_scenarios": "investment_scenarios",
+    "generate_investment_prospectus": "investment_prospectus",
     "get_market_summary": "market_summary",
     "search_properties": "property_search_results",
     "query_database": "query_result",
@@ -656,6 +695,14 @@ then use those details when calling other tools
   and current market conditions
 - For investment scenarios, compare the as-is scenario with the best development option \
   and highlight the trade-offs (capital required, timeline, risk)
+- When the user asks for an "investment prospectus", "property report", or "comprehensive \
+  investment summary", use generate_investment_prospectus. This tool aggregates valuation, \
+  market data, development potential, rental scenarios, comps, and risk factors into a single \
+  professional report with a recommended strategy. It also supports multi-property portfolio \
+  analysis when the user provides multiple addresses
+- generate_investment_prospectus is a heavyweight tool — it calls multiple analysis modules \
+  internally. Only use it when the user specifically wants a comprehensive report, not for \
+  quick questions about a single metric
 
 DATA MODEL:
 The properties table distinguishes between physical lots and sellable units:

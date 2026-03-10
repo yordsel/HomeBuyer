@@ -34,6 +34,7 @@ const INLINE_BLOCK_TYPES = new Set([
   'property_detail',
   'property_search_results',
   'query_result',
+  'investment_prospectus',
 ]);
 
 // ---------------------------------------------------------------------------
