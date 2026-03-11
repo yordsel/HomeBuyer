@@ -2,17 +2,23 @@
  * Full-page conversational chat interface — the primary UX for HomeBuyer.
  *
  * Features:
- * - Full-height chat layout with scrollable messages
- * - Rich inline cards rendered from structured response blocks
+ * - SSE streaming for real-time text display
+ * - Compact tool execution chips (not full inline cards)
  * - Address search bar for property lookup
  * - Context-aware suggestion chips
  * - Enhanced markdown rendering
  */
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Send, Loader2, Bot, User, MessageCircle, Search } from 'lucide-react';
+import {
+  Send, Loader2, Bot, User, MessageCircle, Search,
+  Home, BarChart3, GitCompare, MapPin, Building2,
+  TrendingUp, DollarSign, Wrench, FileText, Database,
+  Undo2, CheckCircle2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
-import * as api from '../lib/tauri';
+import * as api from '../lib/api';
+import { formatToolName } from '../lib/utils';
 import { usePropertyContext } from '../context/PropertyContext';
 import type { PropertyContextData, TrackedProperty } from '../context/PropertyContext';
 import { MarkdownLite } from '../components/chat/MarkdownLite';
@@ -23,19 +29,28 @@ import { PropertyDetailModal } from '../components/context/PropertyDetailModal';
 import type {
   ChatMessage,
   FaketorMessage,
-  PropertySearchResultsData,
-  SearchResultProperty,
+  ToolEvent,
+  ResponseBlock,
 } from '../types';
 
-// Block types to show inline in chat. Analysis blocks (prediction_card,
-// comps_table, neighborhood_stats, etc.) are available in the sidebar and
-// property detail modal, so we hide them from chat to reduce clutter.
-const INLINE_BLOCK_TYPES = new Set([
-  'property_detail',
-  'property_search_results',
-  'query_result',
-  'investment_prospectus',
-]);
+// Icons for tool chips — gives each tool a recognizable visual
+const TOOL_ICONS: Record<string, typeof Home> = {
+  lookup_property: Home,
+  get_price_prediction: BarChart3,
+  get_comparable_sales: GitCompare,
+  get_neighborhood_stats: MapPin,
+  get_development_potential: Building2,
+  get_market_summary: TrendingUp,
+  estimate_rental_income: DollarSign,
+  analyze_investment_scenarios: TrendingUp,
+  estimate_sell_vs_hold: BarChart3,
+  get_improvement_simulation: Wrench,
+  search_properties: Search,
+  lookup_permits: FileText,
+  query_database: Database,
+  undo_filter: Undo2,
+  generate_investment_prospectus: FileText,
+};
 
 // ---------------------------------------------------------------------------
 // ChatPage
@@ -44,66 +59,74 @@ const INLINE_BLOCK_TYPES = new Set([
 export function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
-  const [thinking, setThinking] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+
+  // Live streaming state — updated via SSE callbacks, rendered as a
+  // partial assistant message at the bottom of the chat
+  const [streamText, setStreamText] = useState('');
+  const [streamToolEvents, setStreamToolEvents] = useState<ToolEvent[]>([]);
+  const [activeToolLabel, setActiveToolLabel] = useState<string | null>(null);
   const [allToolsUsed, setAllToolsUsed] = useState<string[]>([]);
+
+  const abortRef = useRef<AbortController | null>(null);
+  // Deferred blocks: processBlocks must run AFTER onWorkingSet so that
+  // setTrackedFromServer doesn't overwrite the property we just tracked.
+  const deferredBlocksRef = useRef<ResponseBlock[] | null>(null);
 
   const {
     activeProperty,
     setActiveProperty,
     trackProperty,
-    trackProperties,
     trackedProperties,
     addBlocksToProperty,
     clearTrackedProperties,
-    pruneTrackedProperties,
+    setTrackedFromServer,
     setSendChatMessage,
     setWorkingSetMeta,
   } = usePropertyContext();
 
-  // Stable session ID for this conversation — ties frontend to backend working set
+  // Stable session ID for this conversation
   const [sessionId] = useState(() => crypto.randomUUID());
 
-  // Property detail modal state — opened when clicking an address chip/card in chat
+  // Property detail modal state
   const [detailAddress, setDetailAddress] = useState<string | null>(null);
   const detailTracked: TrackedProperty | null = useMemo(() => {
     if (!detailAddress) return null;
     const lower = detailAddress.toLowerCase();
-    // First try: find in tracked properties (case-insensitive)
     const tracked = trackedProperties.find(
       (t) => t.property.address.toLowerCase() === lower,
     );
     if (tracked) return tracked;
-    // Fallback: build a minimal TrackedProperty from chat message blocks
-    // so the modal can still open for properties shown in chat but not yet
-    // in the tracked list (e.g. from search results or comps table)
     for (const msg of messages) {
       if (!msg.blocks) continue;
       const propBlock = msg.blocks.find(
         (b) =>
           b.type === 'property_detail' &&
-          (b.data as Record<string, unknown>)?.address &&
-          String((b.data as Record<string, unknown>).address).toLowerCase() === lower,
+          b.data.address &&
+          b.data.address.toLowerCase() === lower,
       );
-      if (propBlock) {
-        const pd = propBlock.data as Record<string, unknown>;
+      if (propBlock && propBlock.type === 'property_detail') {
+        const pd = propBlock.data;
+        const addr = pd.address;
+        if (!addr) continue;
         return {
           property: {
-            latitude: (pd.latitude as number) ?? 0,
-            longitude: (pd.longitude as number) ?? 0,
-            address: String(pd.address),
-            neighborhood: pd.neighborhood as string | undefined,
-            zip_code: pd.zip_code as string | undefined,
-            beds: pd.beds as number | undefined,
-            baths: pd.baths as number | undefined,
-            sqft: pd.sqft as number | undefined,
-            lot_size_sqft: pd.lot_size_sqft as number | undefined,
-            year_built: pd.year_built as number | undefined,
-            property_type: pd.property_type as string | undefined,
-            zoning_class: pd.zoning_class as string | undefined,
-            last_sale_price: pd.last_sale_price as number | undefined,
-            last_sale_date: pd.last_sale_date as string | undefined,
-            property_category: pd.property_category as string | undefined,
-            record_type: pd.record_type as string | undefined,
+            latitude: pd.latitude ?? 0,
+            longitude: pd.longitude ?? 0,
+            address: addr,
+            neighborhood: pd.neighborhood,
+            zip_code: pd.zip_code,
+            beds: pd.beds,
+            baths: pd.baths,
+            sqft: pd.sqft,
+            lot_size_sqft: pd.lot_size_sqft,
+            year_built: pd.year_built,
+            property_type: pd.property_type,
+            zoning_class: pd.zoning_class,
+            last_sale_price: pd.last_sale_price,
+            last_sale_date: pd.last_sale_date,
+            property_category: pd.property_category,
+            record_type: pd.record_type,
           },
           blocks: msg.blocks,
           addedAt: Date.now(),
@@ -114,7 +137,6 @@ export function ChatPage() {
     return null;
   }, [detailAddress, trackedProperties, messages]);
 
-  // Collect known addresses for inline chip rendering in chat text
   const knownAddresses = useMemo(
     () => trackedProperties.map((t) => t.property.address),
     [trackedProperties],
@@ -123,15 +145,14 @@ export function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages or streaming updates
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, thinking]);
+  }, [messages, streaming, streamText, streamToolEvents]);
 
-  // Clear stale context on mount — each ChatPage instance is a fresh conversation
-  // (sessionId is unique per mount), so sidebar shouldn't show leftovers from prior sessions
+  // Clear stale context on mount
   useEffect(() => {
     clearTrackedProperties();
     setActiveProperty(null);
@@ -144,27 +165,78 @@ export function ChatPage() {
     inputRef.current?.focus();
   }, []);
 
-  // ---- Send message ----
+  // Cleanup abort on unmount
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
+
+  // ---- Process completed response blocks (track properties, etc.) ----
+  const processBlocks = useCallback(
+    (blocks: ResponseBlock[]) => {
+      const propBlock = blocks.find((b) => b.type === 'property_detail');
+
+      if (propBlock && propBlock.type === 'property_detail' && propBlock.data) {
+        const pd = propBlock.data;
+        if (pd.latitude && pd.longitude && pd.address) {
+          const propData: PropertyContextData = {
+            latitude: pd.latitude,
+            longitude: pd.longitude,
+            address: pd.address,
+            neighborhood: pd.neighborhood,
+            zip_code: pd.zip_code,
+            beds: pd.beds,
+            baths: pd.baths,
+            sqft: pd.sqft,
+            lot_size_sqft: pd.lot_size_sqft,
+            year_built: pd.year_built,
+            property_type: pd.property_type,
+            zoning_class: pd.zoning_class,
+            last_sale_price: pd.last_sale_price,
+            last_sale_date: pd.last_sale_date,
+            property_category: pd.property_category,
+            record_type: pd.record_type,
+          };
+          setActiveProperty(propData);
+          trackProperty(propData, blocks);
+        }
+      } else if (activeProperty) {
+        const analysisBlocks = blocks.filter(
+          (b) =>
+            b.type !== 'property_detail' &&
+            b.type !== 'property_search_results' &&
+            b.type !== 'query_result',
+        );
+        if (analysisBlocks.length > 0) {
+          addBlocksToProperty(activeProperty.address, analysisBlocks);
+        }
+      }
+    },
+    [activeProperty, setActiveProperty, trackProperty, addBlocksToProperty],
+  );
+
+  // ---- Send message (streaming) ----
   const handleSend = useCallback(
-    async (text?: string) => {
+    (text?: string) => {
       const msg = text || input.trim();
-      if (!msg || thinking) return;
+      if (!msg || streaming) return;
 
       setInput('');
-      setThinking(true);
+      setStreaming(true);
+      setStreamText('');
+      setStreamToolEvents([]);
+      setActiveToolLabel(null);
 
       const userMsg: ChatMessage = { role: 'user', content: msg };
-      const updatedMessages = [...messages, userMsg];
-      setMessages(updatedMessages);
+      setMessages((prev) => [...prev, userMsg]);
 
-      // Build history from previous messages (without blocks, for API compatibility)
+      // Build history from previous messages
       const history: FaketorMessage[] = messages.map((m) => ({
         role: m.role,
         content: m.content,
       }));
 
-      try {
-        const resp = await api.sendFaketorMessage({
+      const controller = api.streamFaketorMessage(
+        {
           latitude: activeProperty?.latitude ?? 37.8716,
           longitude: activeProperty?.longitude ?? -122.2727,
           message: msg,
@@ -180,113 +252,102 @@ export function ChatPage() {
           year_built: activeProperty?.year_built,
           property_type: activeProperty?.property_type,
           property_category: activeProperty?.property_category,
-        });
-
-        if (resp.error) {
-          toast.error(resp.error);
-          setMessages(messages); // revert
-        } else {
-          // Propagate backend working set metadata to context
-          if (resp.working_set) {
-            setWorkingSetMeta(resp.working_set);
-            // Prune sidebar when backend working set shrinks (e.g., after a filter)
-            if (resp.working_set.addresses && resp.working_set.addresses.length > 0) {
-              pruneTrackedProperties(new Set(resp.working_set.addresses));
-            }
-          }
-
-          const toolNames = resp.tool_calls?.map((t) => t.name) ?? [];
-          const assistantMsg: ChatMessage = {
-            role: 'assistant',
-            content: resp.reply,
-            blocks: resp.blocks,
-            toolsUsed: toolNames,
-          };
-          setMessages([...updatedMessages, assistantMsg]);
-          setAllToolsUsed((prev) => [...prev, ...toolNames]);
-
-          // Auto-set active property from lookup_property results and
-          // track properties + analysis blocks in the context sidebar
-          if (resp.blocks) {
-            const propBlock = resp.blocks.find(
-              (b) => b.type === 'property_detail',
+        },
+        {
+          onTextDelta: (text) => {
+            setStreamText((prev) => prev + text);
+            // Clear active tool label once text starts flowing again
+            setActiveToolLabel(null);
+          },
+          onToolStart: (name, label) => {
+            setActiveToolLabel(label);
+            setStreamToolEvents((prev) => [
+              ...prev,
+              { name, label, done: false },
+            ]);
+          },
+          onToolResult: (name, block) => {
+            setActiveToolLabel(null);
+            setStreamToolEvents((prev) =>
+              prev.map((e) =>
+                e.name === name && !e.done
+                  ? { ...e, done: true, block: block ?? undefined }
+                  : e,
+              ),
             );
-            const searchBlock = resp.blocks.find(
-              (b) => b.type === 'property_search_results',
-            );
-
-            if (propBlock?.data) {
-              // Single property lookup — set active and track with all blocks
-              const pd = propBlock.data as Record<string, unknown>;
-              if (pd.latitude && pd.longitude && pd.address) {
-                const propData: PropertyContextData = {
-                  latitude: pd.latitude as number,
-                  longitude: pd.longitude as number,
-                  address: pd.address as string,
-                  neighborhood: pd.neighborhood as string | undefined,
-                  zip_code: pd.zip_code as string | undefined,
-                  beds: pd.beds as number | undefined,
-                  baths: pd.baths as number | undefined,
-                  sqft: pd.sqft as number | undefined,
-                  lot_size_sqft: pd.lot_size_sqft as number | undefined,
-                  year_built: pd.year_built as number | undefined,
-                  property_type: pd.property_type as string | undefined,
-                  zoning_class: pd.zoning_class as string | undefined,
-                  last_sale_price: pd.last_sale_price as number | undefined,
-                  last_sale_date: pd.last_sale_date as string | undefined,
-                  property_category: pd.property_category as string | undefined,
-                  record_type: pd.record_type as string | undefined,
-                };
-                setActiveProperty(propData);
-                // Track in sidebar with all response blocks
-                trackProperty(propData, resp.blocks);
-              }
-            } else if (searchBlock?.data) {
-              // Search results — batch-track all returned properties
-              const searchData =
-                searchBlock.data as unknown as PropertySearchResultsData;
-              const results = searchData.results ?? [];
-              const propsToTrack: PropertyContextData[] = [];
-
-              for (const r of results) {
-                if (r.latitude && r.longitude && r.address) {
-                  propsToTrack.push(
-                    searchResultToContextData(r),
-                  );
-                }
-              }
-
-              if (propsToTrack.length > 0) {
-                trackProperties(propsToTrack);
-                // Don't change activeProperty — user asked a broad question
-              }
-            } else if (activeProperty) {
-              // No new property block, but we have analysis blocks for the
-              // currently active property — append them
-              const analysisBlocks = resp.blocks.filter(
-                (b) =>
-                  b.type !== 'property_detail' &&
-                  b.type !== 'property_search_results' &&
-                  b.type !== 'query_result',
+          },
+          onDone: (reply, toolCalls, blocks) => {
+            const toolNames = toolCalls.map((t) => t.name);
+            // Collect final tool events with blocks from the done payload
+            const finalToolEvents: ToolEvent[] = toolCalls.map((tc) => {
+              const block = blocks.find(
+                (b) => b.tool_name === tc.name,
               );
-              if (analysisBlocks.length > 0) {
-                addBlocksToProperty(
-                  activeProperty.address,
-                  analysisBlocks,
-                );
-              }
+              return {
+                name: tc.name,
+                label: formatToolName(tc.name),
+                done: true,
+                block: block ?? undefined,
+              };
+            });
+
+            const assistantMsg: ChatMessage = {
+              role: 'assistant',
+              content: reply,
+              blocks,
+              toolsUsed: toolNames,
+              toolEvents: finalToolEvents.length > 0 ? finalToolEvents : undefined,
+            };
+
+            setMessages((prev) => [...prev, assistantMsg]);
+            setAllToolsUsed((prev) => [...prev, ...toolNames]);
+            setStreaming(false);
+            setStreamText('');
+            setStreamToolEvents([]);
+            setActiveToolLabel(null);
+
+            // Defer block processing — onWorkingSet fires AFTER onDone
+            // and setTrackedFromServer would overwrite what processBlocks sets.
+            // Store blocks and process them after onWorkingSet arrives.
+            if (blocks.length > 0) {
+              deferredBlocksRef.current = blocks;
+              // Fallback: if no working_set event arrives within 2s, process anyway
+              setTimeout(() => {
+                const pending = deferredBlocksRef.current;
+                if (pending) {
+                  deferredBlocksRef.current = null;
+                  processBlocks(pending);
+                }
+              }, 2000);
             }
-          }
-        }
-      } catch (err) {
-        toast.error('Faketor is having trouble connecting. Try again.');
-        console.error(err);
-        setMessages(messages); // revert
-      } finally {
-        setThinking(false);
-      }
+          },
+          onWorkingSet: (meta) => {
+            setWorkingSetMeta(meta);
+            setTrackedFromServer(meta.sample ?? [], meta.discussed ?? []);
+
+            // Now process deferred blocks so trackProperty runs AFTER
+            // setTrackedFromServer has rebuilt the sidebar list.
+            const pending = deferredBlocksRef.current;
+            if (pending) {
+              deferredBlocksRef.current = null;
+              // Use setTimeout(0) so the setTrackedFromServer state update
+              // is enqueued first, then processBlocks runs on top of it.
+              setTimeout(() => processBlocks(pending), 0);
+            }
+          },
+          onError: (message) => {
+            toast.error(message);
+            setStreaming(false);
+            setStreamText('');
+            setStreamToolEvents([]);
+            setActiveToolLabel(null);
+          },
+        },
+      );
+
+      abortRef.current = controller;
     },
-    [input, thinking, messages, activeProperty, setActiveProperty, trackProperty, trackProperties, addBlocksToProperty, pruneTrackedProperties],
+    [input, streaming, messages, activeProperty, sessionId, processBlocks, setWorkingSetMeta, setTrackedFromServer],
   );
 
   // ---- Handle address search selection ----
@@ -295,13 +356,12 @@ export function ChatPage() {
       const propData = { latitude: lat, longitude: lng, address };
       setActiveProperty(propData);
       trackProperty(propData);
-      // Auto-send a lookup message
       handleSend(`Tell me about ${address}`);
     },
     [setActiveProperty, trackProperty, handleSend],
   );
 
-  // Register handleSend in context so sidebar components can trigger messages
+  // Register handleSend in context
   useEffect(() => {
     setSendChatMessage(handleSend);
     return () => setSendChatMessage(null);
@@ -341,7 +401,7 @@ export function ChatPage() {
         className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-gray-50"
       >
         {/* Welcome state */}
-        {messages.length === 0 && !thinking && (
+        {messages.length === 0 && !streaming && (
           <WelcomeScreen
             onSelect={handleSend}
             hasProperty={!!activeProperty}
@@ -358,16 +418,36 @@ export function ChatPage() {
           />
         ))}
 
-        {/* Thinking indicator */}
-        {thinking && (
+        {/* Streaming assistant message — shows live text + tool chips */}
+        {streaming && (
           <div className="flex items-start gap-2.5">
             <div className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-100 text-indigo-600 shrink-0 mt-0.5">
               <Bot size={14} />
             </div>
-            <div className="bg-white rounded-xl rounded-tl-none px-4 py-3 shadow-sm border border-gray-100 max-w-[85%]">
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Loader2 size={14} className="animate-spin" />
-                <span>Analyzing property data...</span>
+            <div className="max-w-[85%]">
+              {/* Tool execution chips */}
+              {streamToolEvents.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {streamToolEvents.map((evt, i) => (
+                    <ToolChip key={`${evt.name}-${i}`} event={evt} />
+                  ))}
+                </div>
+              )}
+
+              {/* Streamed text or thinking indicator */}
+              <div className="bg-white rounded-xl rounded-tl-none px-4 py-2.5 shadow-sm border border-gray-100">
+                {streamText ? (
+                  <MarkdownLite
+                    text={streamText}
+                    knownAddresses={knownAddresses}
+                    onAddressClick={setDetailAddress}
+                  />
+                ) : (
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>{activeToolLabel ?? 'Thinking...'}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -377,7 +457,7 @@ export function ChatPage() {
       {/* Input area */}
       <div className="px-4 py-3 border-t border-gray-200 bg-white rounded-b-xl">
         {/* Suggestion chips */}
-        {messages.length > 0 && !thinking && (
+        {messages.length > 0 && !streaming && (
           <SuggestionChips
             hasProperty={!!activeProperty}
             toolsUsed={allToolsUsed}
@@ -400,12 +480,12 @@ export function ChatPage() {
                 ? `Ask about ${activeProperty.address}...`
                 : 'Ask about any Berkeley property or the market...'
             }
-            disabled={thinking}
+            disabled={streaming}
             className="flex-1 text-sm bg-transparent outline-none placeholder-gray-400 disabled:opacity-50"
           />
           <button
             onClick={() => handleSend()}
-            disabled={!input.trim() || thinking}
+            disabled={!input.trim() || streaming}
             className="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-500 text-white
                        hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400
                        disabled:cursor-not-allowed transition-colors shrink-0"
@@ -415,7 +495,7 @@ export function ChatPage() {
         </div>
       </div>
 
-      {/* Property detail modal — opens when clicking an address chip in chat blocks */}
+      {/* Property detail modal */}
       <PropertyDetailModal
         open={!!detailAddress}
         onClose={() => setDetailAddress(null)}
@@ -478,6 +558,93 @@ function WelcomeScreen({
   );
 }
 
+// ---------------------------------------------------------------------------
+// ToolChip — compact pill showing tool execution status
+// ---------------------------------------------------------------------------
+
+function ToolChip({ event }: { event: ToolEvent }) {
+  const Icon = TOOL_ICONS[event.name] ?? Wrench;
+  const label = formatToolName(event.name);
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium
+        transition-all duration-300
+        ${event.done
+          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+          : 'bg-indigo-50 text-indigo-600 border border-indigo-200 animate-pulse'
+        }`}
+    >
+      {event.done ? (
+        <CheckCircle2 size={10} className="text-emerald-500" />
+      ) : (
+        <Loader2 size={10} className="animate-spin" />
+      )}
+      <Icon size={10} />
+      {label}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Block types that render inline in the chat (not just in the sidebar)
+// ---------------------------------------------------------------------------
+
+/** Block types that should be rendered inline below the text bubble. */
+const INLINE_BLOCK_TYPES = new Set([
+  'investment_prospectus',  // has download button, doesn't fit sidebar
+  'market_summary',         // standalone data, no per-property sidebar slot
+  'neighborhood_stats',     // standalone data, no per-property sidebar slot
+]);
+
+function InlineBlocks({
+  blocks,
+  onAddressClick,
+}: {
+  blocks: ResponseBlock[];
+  onAddressClick?: (address: string) => void;
+}) {
+  const inline = blocks.filter((b) => INLINE_BLOCK_TYPES.has(b.type));
+  if (inline.length === 0) return null;
+
+  return (
+    <div className="mt-2 space-y-2">
+      {inline.map((block, i) => (
+        <BlockRenderer key={`${block.type}-${i}`} block={block} onAddressClick={onAddressClick} />
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ToolFooter — small text below the chat bubble showing which tools ran
+// ---------------------------------------------------------------------------
+
+function ToolFooter({ events }: { events: ToolEvent[] }) {
+  if (events.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mt-1 ml-1">
+      {events.map((evt, i) => {
+        const Icon = TOOL_ICONS[evt.name] ?? Wrench;
+        return (
+          <span
+            key={`${evt.name}-${i}`}
+            className="inline-flex items-center gap-0.5 text-[10px] text-gray-400"
+          >
+            <Icon size={9} />
+            {formatToolName(evt.name)}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MessageBubble
+// ---------------------------------------------------------------------------
+
 function MessageBubble({
   message,
   onAddressClick,
@@ -485,16 +652,9 @@ function MessageBubble({
 }: {
   message: ChatMessage;
   onAddressClick?: (address: string) => void;
-  /** Known property addresses for inline chip rendering in text. */
   knownAddresses?: string[];
 }) {
   const isUser = message.role === 'user';
-
-  // Only show "summary" blocks inline in chat — analysis blocks live in the
-  // sidebar / modal and don't need to duplicate here.
-  const inlineBlocks = message.blocks?.filter((b) =>
-    INLINE_BLOCK_TYPES.has(b.type),
-  );
 
   return (
     <div className={`flex items-start gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}>
@@ -530,63 +690,16 @@ function MessageBubble({
           )}
         </div>
 
-        {/* Rich blocks (assistant only) — only summary / reference blocks */}
-        {!isUser && inlineBlocks && inlineBlocks.length > 0 && (
-          <div className="mt-2 space-y-2">
-            {inlineBlocks.map((block, i) => (
-              <BlockRenderer key={i} block={block} onAddressClick={onAddressClick} />
-            ))}
-          </div>
+        {/* Inline cards for block types that belong in chat (e.g. prospectus with download) */}
+        {!isUser && message.blocks && message.blocks.length > 0 && (
+          <InlineBlocks blocks={message.blocks} onAddressClick={onAddressClick} />
         )}
 
-        {/* Tools used indicator */}
-        {!isUser && message.toolsUsed && message.toolsUsed.length > 0 && (
-          <p className="mt-1 text-[10px] text-gray-400">
-            Used: {message.toolsUsed.map(formatToolName).join(', ')}
-          </p>
+        {/* Tool calls shown as small text below the bubble */}
+        {!isUser && message.toolEvents && message.toolEvents.length > 0 && (
+          <ToolFooter events={message.toolEvents} />
         )}
       </div>
     </div>
   );
-}
-
-function formatToolName(name: string): string {
-  return name
-    .replace(/^(get_|estimate_|analyze_|lookup_)/, '')
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/** Convert a search result property to PropertyContextData for tracking. */
-function searchResultToContextData(
-  r: SearchResultProperty,
-): PropertyContextData {
-  return {
-    latitude: r.latitude!,
-    longitude: r.longitude!,
-    address: r.address,
-    neighborhood: r.neighborhood,
-    zip_code: r.zip_code,
-    beds: r.beds,
-    baths: r.baths,
-    sqft: r.sqft,
-    lot_size_sqft: r.lot_size_sqft,
-    year_built: r.year_built,
-    property_type: r.property_type,
-    zoning_class: r.zoning_class ?? r.development?.zone_class,
-    last_sale_price: r.last_sale_price,
-    last_sale_date: r.last_sale_date,
-    predicted_price: r.predicted_price,
-    prediction_confidence: r.prediction_confidence,
-    property_category: r.property_category,
-    record_type: r.record_type,
-    development_summary: r.development
-      ? {
-          adu_eligible: r.development.adu_eligible,
-          sb9_eligible: r.development.sb9_eligible,
-          effective_max_units: r.development.effective_max_units,
-          middle_housing_eligible: r.development.middle_housing_eligible,
-        }
-      : undefined,
-  };
 }

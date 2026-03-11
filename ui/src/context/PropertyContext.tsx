@@ -5,7 +5,7 @@ import {
   useCallback,
   type ReactNode,
 } from 'react';
-import type { ResponseBlock, WorkingSetMeta } from '../types';
+import type { ResponseBlock, WorkingSetMeta, WorkingSetProperty } from '../types';
 
 export interface DevelopmentSummary {
   adu_eligible?: boolean;
@@ -50,13 +50,37 @@ export interface TrackedProperty {
   addedAt: number;
   /** Timestamp of last update */
   updatedAt: number;
+  /** Whether the user has drilled into this property with per-property tools. */
+  isDiscussed?: boolean;
+}
+
+/** Convert a WorkingSetProperty (from server) to PropertyContextData for the sidebar. */
+export function workingSetPropertyToContextData(
+  wsp: WorkingSetProperty,
+): PropertyContextData {
+  return {
+    latitude: wsp.latitude ?? 0,
+    longitude: wsp.longitude ?? 0,
+    address: wsp.address ?? '',
+    neighborhood: wsp.neighborhood ?? undefined,
+    beds: wsp.beds ?? undefined,
+    baths: wsp.baths ?? undefined,
+    sqft: wsp.sqft ?? undefined,
+    lot_size_sqft: wsp.lot_size_sqft ?? undefined,
+    year_built: wsp.year_built ?? undefined,
+    property_type: wsp.property_type ?? undefined,
+    zoning_class: wsp.zoning_class ?? undefined,
+    last_sale_price: wsp.last_sale_price ?? undefined,
+    property_category: wsp.property_category ?? undefined,
+    record_type: wsp.record_type ?? undefined,
+  };
 }
 
 interface PropertyContextValue {
   /** Full active property for the chat-first UX. */
   activeProperty: PropertyContextData | null;
   setActiveProperty: (data: PropertyContextData | null) => void;
-  /** Backward-compatible alias used by FaketorFAB and legacy pages. */
+  /** Property set by Predict page, consumed by Potential page for cross-page navigation. */
   lastProperty: PropertyContextData | null;
   setLastProperty: (data: PropertyContextData | null) => void;
 
@@ -67,16 +91,17 @@ interface PropertyContextValue {
     property: PropertyContextData,
     blocks?: ResponseBlock[],
   ) => void;
-  /** Add or update multiple properties in a single state update. */
-  trackProperties: (properties: PropertyContextData[]) => void;
+  /** Replace sidebar contents with server-provided sample + discussed lists. */
+  setTrackedFromServer: (
+    sample: WorkingSetProperty[],
+    discussed: WorkingSetProperty[],
+  ) => void;
   /** Append blocks to an already-tracked property (matched by address). */
   addBlocksToProperty: (address: string, blocks: ResponseBlock[]) => void;
   /** Clear all analysis blocks for a specific property (for refresh). */
   clearPropertyBlocks: (address: string) => void;
   /** Clear all tracked properties (e.g., new conversation). */
   clearTrackedProperties: () => void;
-  /** Prune tracked properties to only those whose address is in the given set. */
-  pruneTrackedProperties: (keepAddresses: Set<string>) => void;
   /** Send a message to the chat (registered by Chat.tsx). */
   sendChatMessage: ((message: string) => void) | null;
   setSendChatMessage: (fn: ((message: string) => void) | null) => void;
@@ -92,11 +117,10 @@ const PropertyContext = createContext<PropertyContextValue>({
   setLastProperty: () => {},
   trackedProperties: [],
   trackProperty: () => {},
-  trackProperties: () => {},
+  setTrackedFromServer: () => {},
   addBlocksToProperty: () => {},
   clearPropertyBlocks: () => {},
   clearTrackedProperties: () => {},
-  pruneTrackedProperties: () => {},
   sendChatMessage: null,
   setSendChatMessage: () => {},
   workingSetMeta: null,
@@ -165,39 +189,78 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  /** Batch-track multiple properties in a single state update (e.g., from search results). */
-  const trackProperties = useCallback(
-    (properties: PropertyContextData[]) => {
+  /** Replace sidebar contents with server-provided sample + discussed lists.
+   *  Preserves existing blocks for properties that are already tracked.
+   *  Skips entries with empty addresses (backend can emit address="" defaults).
+   *  Preserves locally-tracked properties (with blocks) not in server lists. */
+  const setTrackedFromServer = useCallback(
+    (sample: WorkingSetProperty[], discussed: WorkingSetProperty[]) => {
       setTrackedProperties((prev) => {
-        let next = [...prev];
-        const now = Date.now();
-        for (const property of properties) {
-          const idx = next.findIndex(
-            (t) =>
-              t.property.address === property.address ||
-              (t.property.latitude === property.latitude &&
-                t.property.longitude === property.longitude),
-          );
-          if (idx >= 0) {
-            // Update existing — merge property data, keep existing blocks
-            next[idx] = {
-              ...next[idx],
-              property: { ...next[idx].property, ...property },
-              updatedAt: now,
-            };
-          } else {
-            // Add new
-            next = [
-              ...next,
-              {
-                property,
-                blocks: [],
-                addedAt: now,
-                updatedAt: now,
-              },
-            ];
+        // Build a lookup of existing tracked properties by address for block preservation
+        const existingByAddress = new Map<string, TrackedProperty>();
+        for (const tp of prev) {
+          if (tp.property.address) {
+            existingByAddress.set(tp.property.address, tp);
           }
         }
+
+        const now = Date.now();
+        const seen = new Set<string>();
+        const next: TrackedProperty[] = [];
+
+        // 1. Discussed properties first (sticky, at top)
+        for (const wsp of discussed) {
+          const addr = wsp.address ?? '';
+          // Skip entries with empty or missing addresses
+          if (!addr) continue;
+          if (seen.has(addr)) continue;
+          seen.add(addr);
+
+          const existing = existingByAddress.get(addr);
+          next.push({
+            property: existing
+              ? { ...existing.property, ...workingSetPropertyToContextData(wsp) }
+              : workingSetPropertyToContextData(wsp),
+            blocks: existing?.blocks ?? [],
+            addedAt: existing?.addedAt ?? now,
+            updatedAt: now,
+            isDiscussed: true,
+          });
+        }
+
+        // 2. Sample properties fill the rest
+        for (const wsp of sample) {
+          const addr = wsp.address ?? '';
+          // Skip entries with empty or missing addresses
+          if (!addr) continue;
+          if (seen.has(addr)) continue;
+          seen.add(addr);
+
+          const existing = existingByAddress.get(addr);
+          next.push({
+            property: existing
+              ? { ...existing.property, ...workingSetPropertyToContextData(wsp) }
+              : workingSetPropertyToContextData(wsp),
+            blocks: existing?.blocks ?? [],
+            addedAt: existing?.addedAt ?? now,
+            updatedAt: now,
+            isDiscussed: false,
+          });
+        }
+
+        // 3. Preserve locally-tracked properties that have blocks but aren't
+        //    in the server lists yet (e.g., just tracked via processBlocks).
+        for (const tp of prev) {
+          if (tp.property.address && tp.blocks.length > 0 && !seen.has(tp.property.address)) {
+            seen.add(tp.property.address);
+            next.push({
+              ...tp,
+              updatedAt: now,
+              isDiscussed: true,
+            });
+          }
+        }
+
         return next;
       });
     },
@@ -235,17 +298,6 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
     setTrackedProperties([]);
   }, []);
 
-  const pruneTrackedProperties = useCallback(
-    (keepAddresses: Set<string>) => {
-      setTrackedProperties((prev) => {
-        const pruned = prev.filter((t) => keepAddresses.has(t.property.address));
-        // Only update if something actually changed
-        return pruned.length === prev.length ? prev : pruned;
-      });
-    },
-    [],
-  );
-
   return (
     <PropertyContext.Provider
       value={{
@@ -255,11 +307,10 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
         setLastProperty,
         trackedProperties,
         trackProperty,
-        trackProperties,
+        setTrackedFromServer,
         addBlocksToProperty,
         clearPropertyBlocks,
         clearTrackedProperties,
-        pruneTrackedProperties,
         sendChatMessage,
         setSendChatMessage,
         workingSetMeta,
