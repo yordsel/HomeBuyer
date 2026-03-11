@@ -30,9 +30,11 @@ data/homebuyer.db
 data/homebuyer.log
 data/berkeley_homebuyer.db-shm
 data/berkeley_homebuyer.db-wal
+data/berkeley_homebuyer.db
+data/berkeley_properties.db
+data/*.db
 
-# Keep deployed data (small, required for production)
-# data/berkeley_homebuyer.db  — ~4MB, committed for deploy
+# Keep deployed data (models and geo, required for production)
 # data/models/                — ~2MB, committed for deploy
 # data/geo/                   — ~3MB, committed for deploy
 
@@ -43,9 +45,6 @@ notebooks/.ipynb_checkpoints/
 # Node / Frontend
 ui/node_modules/
 # ui/dist/ is committed for Render deployment
-
-# Tauri build output
-ui/src-tauri/target/
 
 # OS
 .DS_Store

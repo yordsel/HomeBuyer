@@ -12,12 +12,12 @@ import type { PropertySearchResultsData, SearchResultProperty } from '../../type
 const MAX_INLINE = 10;
 
 interface ChatSearchResultsProps {
-  data: Record<string, unknown>;
+  data: PropertySearchResultsData;
   onAddressClick?: (address: string) => void;
 }
 
 export function ChatSearchResults({ data, onAddressClick }: ChatSearchResultsProps) {
-  const d = data as unknown as PropertySearchResultsData;
+  const d = data;
   const results = d.results ?? [];
   const display = results.slice(0, MAX_INLINE);
 

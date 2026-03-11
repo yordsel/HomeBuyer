@@ -13,8 +13,8 @@ const MAX_DISPLAY_ROWS = 50;
 /** Columns whose values should be formatted as currency. */
 const CURRENCY_PATTERNS = /price|cost|value|sale|income|rent|revenue/i;
 
-export function ChatQueryResult({ data }: { data: Record<string, unknown> }) {
-  const d = data as unknown as QueryResultData;
+export function ChatQueryResult({ data }: { data: QueryResultData }) {
+  const d = data;
   const [showQuery, setShowQuery] = useState(false);
 
   // Error state

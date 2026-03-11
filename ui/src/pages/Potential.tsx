@@ -16,9 +16,9 @@ import { ImprovementSimCard } from '../components/ImprovementSimCard';
 import { RentalIncomeCard } from '../components/RentalIncomeCard';
 import { InvestmentScenarioCard } from '../components/InvestmentScenarioCard';
 import { usePropertyContext } from '../context/PropertyContext';
-import * as api from '../lib/tauri';
+import * as api from '../lib/api';
 import { formatNumber } from '../lib/utils';
-import type { DevelopmentPotentialResponse } from '../types';
+import type { DevelopmentPotentialResponse, RentalAnalysisResponse } from '../types';
 
 // ---------------------------------------------------------------------------
 // Lookup helpers for contextual notes
@@ -59,6 +59,7 @@ export function PotentialPage() {
   const [result, setResult] = useState<DevelopmentPotentialResponse | null>(null);
   const [selectedAddress, setSelectedAddress] = useState('');
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [rentalData, setRentalData] = useState<RentalAnalysisResponse | null>(null);
   const { lastProperty } = usePropertyContext();
   const autoLoaded = useRef(false);
 
@@ -74,11 +75,35 @@ export function PotentialPage() {
     }
   }, [lastProperty]);
 
+  // Fetch rental analysis once when coordinates change, shared by both cards.
+  useEffect(() => {
+    if (!selectedCoords || !result) return;
+    let cancelled = false;
+    setRentalData(null);
+    api
+      .getRentalAnalysis({
+        latitude: selectedCoords.lat,
+        longitude: selectedCoords.lng,
+        address: selectedAddress || undefined,
+      })
+      .then((resp) => {
+        if (!cancelled) setRentalData(resp);
+      })
+      .catch((err) => {
+        // Cards will show their own error states via internal fallback.
+        console.error('Rental analysis pre-fetch failed', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCoords?.lat, selectedCoords?.lng, result]);
+
   async function handleAddressSelect(lat: number, lng: number, address: string) {
     setLoading(true);
     setSelectedAddress(address);
     setSelectedCoords({ lat, lng });
     setResult(null);
+    setRentalData(null);
     try {
       const data = await api.getPropertyPotential({
         latitude: lat,
@@ -155,6 +180,7 @@ export function PotentialPage() {
               latitude={selectedCoords.lat}
               longitude={selectedCoords.lng}
               address={selectedAddress}
+              rentalData={rentalData ?? undefined}
             />
           )}
 
@@ -164,6 +190,7 @@ export function PotentialPage() {
               latitude={selectedCoords.lat}
               longitude={selectedCoords.lng}
               address={selectedAddress}
+              rentalData={rentalData ?? undefined}
             />
           )}
 

@@ -7,6 +7,12 @@
  */
 import { View, Text, StyleSheet } from '@react-pdf/renderer';
 import type { ReactNode } from 'react';
+import {
+  formatCurrency,
+  formatPct,
+  formatDate,
+  formatNumber,
+} from './utils';
 
 // ---------------------------------------------------------------------------
 // Colors (shared with prospectus-pdf.tsx)
@@ -132,34 +138,16 @@ export const s = StyleSheet.create({
 });
 
 // ---------------------------------------------------------------------------
-// Format helpers
+// Format helpers — re-exported from the canonical utils module so that
+// consumers of prospectus-layouts can keep using the short fmtXxx aliases.
 // ---------------------------------------------------------------------------
 
-export function fmtCurrency(n: number | null | undefined): string {
-  if (n == null) return '\u2014';
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(n);
-}
-
-export function fmtPct(pct: number | null | undefined, showSign = false): string {
-  if (pct == null) return '\u2014';
-  const prefix = showSign && pct > 0 ? '+' : '';
-  return `${prefix}${pct.toFixed(1)}%`;
-}
-
-export function fmtDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return '\u2014';
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-export function fmtNumber(n: number | null | undefined): string {
-  if (n == null) return '\u2014';
-  return new Intl.NumberFormat('en-US').format(n);
-}
+export {
+  formatCurrency as fmtCurrency,
+  formatPct as fmtPct,
+  formatDate as fmtDate,
+  formatNumber as fmtNumber,
+};
 
 // ---------------------------------------------------------------------------
 // TwoColumn
@@ -238,8 +226,7 @@ export function NarrativeBlock({
         flexDirection: 'row',
         marginTop,
         backgroundColor: bgColor,
-        borderRadius: bgColor ? 3 : 0,
-        padding: bgColor ? 8 : 0,
+        ...(bgColor ? { borderRadius: 3, padding: 8 } : {}),
       }}
     >
       {/* Accent bar */}

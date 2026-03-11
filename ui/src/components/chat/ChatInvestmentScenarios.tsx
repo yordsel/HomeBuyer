@@ -4,29 +4,10 @@
  */
 import { PiggyBank, CheckCircle2 } from 'lucide-react';
 import { formatCurrency, formatPct } from '../../lib/utils';
+import type { InvestmentScenariosBlockData } from '../../types';
 
-interface ScenarioData {
-  scenario_name?: string;
-  scenario_type?: string;
-  total_investment?: number;
-  monthly_cash_flow?: number;
-  cap_rate_pct?: number;
-  cash_on_cash_pct?: number;
-  total_monthly_rent?: number;
-  development_feasible?: boolean;
-}
-
-interface InvestmentData {
-  property_address?: string;
-  property_value?: number;
-  neighborhood?: string;
-  scenarios?: ScenarioData[];
-  best_scenario?: string;
-  recommendation_notes?: string;
-}
-
-export function ChatInvestmentScenarios({ data }: { data: Record<string, unknown> }) {
-  const d = data as unknown as InvestmentData;
+export function ChatInvestmentScenarios({ data }: { data: InvestmentScenariosBlockData }) {
+  const d = data;
   const scenarios = d.scenarios ?? [];
 
   if (scenarios.length === 0) {

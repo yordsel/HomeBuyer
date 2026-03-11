@@ -6,6 +6,7 @@
  * react-pdf's rendering engine.
  */
 import { Svg, Rect, Line, Path, G, Text as SvgText, View, Text } from '@react-pdf/renderer';
+import { formatCompact, formatPct } from './utils';
 import type { ProspectusScenario } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -39,15 +40,9 @@ const C = {
 // Format helpers
 // ---------------------------------------------------------------------------
 
-function fmtCompact(n: number): string {
-  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
-  return `$${n.toFixed(0)}`;
-}
-
-function fmtPctShort(n: number): string {
-  return `${n.toFixed(1)}%`;
-}
+/** Narrow wrapper used as a BarChart valueFormatter (only receives non-null numbers). */
+const fmtCompact = (n: number) => formatCompact(n);
+const fmtPctShort = (n: number) => formatPct(n);
 
 // ---------------------------------------------------------------------------
 // BarChart

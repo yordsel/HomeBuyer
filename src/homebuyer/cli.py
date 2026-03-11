@@ -14,11 +14,13 @@ Usage:
     homebuyer collect all         Run all collectors
     homebuyer process zoning      Assign zoning districts to properties
     homebuyer process parcels     Enrich parcels with zoning + neighborhood
+    homebuyer process sales       Enrich property_sales with zoning + neighborhood
     homebuyer process all         Normalize, geocode, zoning, and deduplicate
     homebuyer enrich rentcast     Backfill RentCast property details for parcels
     homebuyer status              Show database statistics
     homebuyer export              Export data to CSV
     homebuyer train               Train ML price prediction model
+    homebuyer precompute          Precompute investment scenarios for all properties
     homebuyer predict manual      Predict price from property details
     homebuyer predict listing     Predict price for a Redfin listing URL
     homebuyer model info          Show model metadata and metrics
@@ -427,29 +429,42 @@ def process_parcels(ctx: click.Context) -> None:
     click.echo(f"Zoning assigned: {zoning_count}, Neighborhoods assigned: {neighborhood_count}")
 
 
+@process.command("sales")
+@click.pass_context
+def process_sales(ctx: click.Context) -> None:
+    """Enrich property_sales with zoning and neighborhoods via spatial join."""
+    from homebuyer.processing.parcels import enrich_sales_spatial
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        zoning_count, neighborhood_count = enrich_sales_spatial(db)
+
+    click.echo(f"Sales zoning assigned: {zoning_count}, Neighborhoods assigned: {neighborhood_count}")
+
+
 @process.command("all")
 @click.pass_context
 def process_all(ctx: click.Context) -> None:
     """Run normalize, geocode, zoning, and deduplicate in sequence."""
-    click.echo("Step 1/4: Normalizing neighborhood names...")
+    click.echo("Step 1/5: Normalizing neighborhood names...")
     ctx.invoke(process_normalize)
 
-    click.echo("\nStep 2/4: Geocoding missing neighborhoods...")
+    click.echo("\nStep 2/5: Geocoding missing neighborhoods...")
     try:
         ctx.invoke(process_geocode)
     except FileNotFoundError as e:
         click.echo(f"  Skipping geocode: {e}")
 
-    click.echo("\nStep 3/4: Classifying zoning districts...")
+    click.echo("\nStep 3/5: Classifying zoning districts...")
     try:
         ctx.invoke(process_zoning)
     except FileNotFoundError as e:
         click.echo(f"  Skipping zoning: {e}")
 
-    click.echo("\nStep 4/4: Deduplicating records...")
+    click.echo("\nStep 4/5: Deduplicating records...")
     ctx.invoke(process_deduplicate)
 
-    click.echo("\nStep 5/4: Validating data ranges...")
+    click.echo("\nStep 5/5: Validating data ranges...")
     ctx.invoke(process_validate)
 
     click.echo("\nAll processing complete.")
@@ -1015,6 +1030,298 @@ def train(ctx: click.Context, force: bool, no_grid_search: bool) -> None:
     click.echo(f"MAE: ${artifact.training_metrics.get('mae', 0):,.0f}, "
                f"MAPE: {artifact.training_metrics.get('mape', 0):.1f}%, "
                f"R²: {artifact.training_metrics.get('r2', 0):.4f}")
+
+
+# ---------------------------------------------------------------------------
+# precompute
+# ---------------------------------------------------------------------------
+
+@main.command()
+@click.option("--limit", type=int, default=None,
+              help="Max properties to precompute (default: all missing).")
+@click.option("--force", is_flag=True,
+              help="Recompute even if a precomputed scenario already exists.")
+@click.option("--batch-size", type=int, default=50,
+              help="Commit after this many properties (default: 50).")
+@click.pass_context
+def precompute(ctx: click.Context, limit: int | None, force: bool, batch_size: int) -> None:
+    """Precompute investment scenarios (prediction, rental, development, comps) for all properties."""
+    import json
+    import time
+
+    from homebuyer.prediction.model import ModelArtifact
+    from homebuyer.prediction.features import FeatureBuilder
+    from homebuyer.analysis.rental_analysis import RentalAnalyzer, rental_analysis_to_dict
+    from homebuyer.analysis.market_analysis import MarketAnalyzer
+    from homebuyer.processing.development import DevelopmentPotentialCalculator
+    from homebuyer.processing.zoning import ZoningClassifier
+
+    db_path = ctx.obj["db_path"]
+
+    # Load ML model
+    try:
+        model = ModelArtifact.load()
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}")
+        click.echo("Run 'homebuyer train' first.")
+        sys.exit(1)
+
+    model_version = model.trained_at.strftime("%Y%m%d_%H%M%S")
+
+    with Database(db_path) as db:
+        # Initialize analyzers (once for entire batch)
+        try:
+            classifier = ZoningClassifier()
+        except FileNotFoundError:
+            click.echo("Warning: Zoning data not found. Development potential will be limited.")
+            classifier = None
+
+        dev_calc = DevelopmentPotentialCalculator(classifier, db) if classifier else None
+        rental_analyzer = RentalAnalyzer(db, dev_calc=dev_calc)
+        market_analyzer = MarketAnalyzer(db)
+
+        # Pre-create shared FeatureBuilder for batch prediction (avoids re-loading
+        # permits, zoning classifier, etc. on every call)
+        builder = FeatureBuilder(db, zoning_classifier=classifier)
+        builder.set_encoders(model.label_encoders)
+
+        # Find properties needing precomputation
+        if force:
+            sql = (
+                "SELECT id FROM properties "
+                "WHERE latitude IS NOT NULL AND longitude IS NOT NULL "
+                "AND neighborhood IS NOT NULL"
+            )
+        else:
+            sql = (
+                "SELECT p.id FROM properties p "
+                "LEFT JOIN precomputed_scenarios ps ON p.id = ps.property_id "
+                "WHERE ps.id IS NULL "
+                "AND p.latitude IS NOT NULL AND p.longitude IS NOT NULL "
+                "AND p.neighborhood IS NOT NULL"
+            )
+        if limit:
+            sql += f" LIMIT {limit}"
+
+        rows = db.conn.execute(sql).fetchall()
+        total = len(rows)
+
+        if total == 0:
+            click.echo("All properties already have precomputed scenarios.")
+            return
+
+        click.echo(f"Precomputing scenarios for {total:,} properties...")
+        click.echo(f"  Model version: {model_version}")
+        click.echo(f"  Batch size: {batch_size}")
+        click.echo()
+
+        succeeded = 0
+        failed = 0
+        t0 = time.time()
+
+        for i, row in enumerate(rows, 1):
+            prop_id = row[0]
+            prop = db.get_property_by_id(prop_id)
+            if not prop:
+                failed += 1
+                continue
+
+            try:
+                # 1. ML price prediction (shared builder, skip SHAP for speed)
+                pred_result = model.predict_batch_single(prop, builder)
+                prediction_dict = {
+                    "predicted_price": pred_result.predicted_price,
+                    "price_lower": pred_result.price_lower,
+                    "price_upper": pred_result.price_upper,
+                    "neighborhood": pred_result.neighborhood,
+                    "list_price": pred_result.list_price,
+                    "predicted_premium_pct": pred_result.predicted_premium_pct,
+                    "base_value": pred_result.base_value,
+                    "feature_contributions": pred_result.feature_contributions,
+                }
+
+                # Inject predicted price into property dict for rental analysis
+                prop["predicted_price"] = pred_result.predicted_price
+
+                # 2. Rental / investment analysis
+                rental_dict = None
+                try:
+                    rental_result = rental_analyzer.analyze(
+                        prop, down_payment_pct=20.0, self_managed=True,
+                    )
+                    rental_dict = rental_analysis_to_dict(rental_result)
+                except Exception as e:
+                    logger.debug("Rental analysis failed for %s: %s", prop_id, e)
+
+                # 3. Development potential
+                potential_dict = None
+                if dev_calc and prop.get("latitude") and prop.get("longitude"):
+                    try:
+                        dev_result = dev_calc.compute(
+                            lat=prop["latitude"],
+                            lon=prop["longitude"],
+                            lot_size_sqft=prop.get("lot_size_sqft"),
+                            sqft=prop.get("sqft"),
+                            address=prop.get("address"),
+                        )
+                        potential_dict = _dev_potential_to_dict(dev_result)
+                    except Exception as e:
+                        logger.debug("Dev potential failed for %s: %s", prop_id, e)
+
+                # 4. Comparable sales
+                comps_list = None
+                try:
+                    comps = market_analyzer.find_comparables(
+                        neighborhood=prop.get("neighborhood", ""),
+                        beds=prop.get("beds"),
+                        baths=prop.get("baths"),
+                        sqft=prop.get("sqft"),
+                        year_built=prop.get("year_built"),
+                    )
+                    if comps:
+                        comps_list = [
+                            {
+                                "address": c.address,
+                                "sale_date": c.sale_date.isoformat(),
+                                "sale_price": c.sale_price,
+                                "beds": c.beds,
+                                "baths": c.baths,
+                                "sqft": c.sqft,
+                                "lot_size_sqft": c.lot_size_sqft,
+                                "year_built": c.year_built,
+                                "neighborhood": c.neighborhood,
+                                "price_per_sqft": c.price_per_sqft,
+                                "distance_score": c.distance_score,
+                                "latitude": c.latitude,
+                                "longitude": c.longitude,
+                            }
+                            for c in comps[:7]
+                        ]
+                except Exception as e:
+                    logger.debug("Comps failed for %s: %s", prop_id, e)
+
+                # Store in database
+                db.upsert_precomputed_scenario(
+                    property_id=prop_id,
+                    scenario_type="buyer",
+                    prediction_json=json.dumps(prediction_dict),
+                    rental_json=json.dumps(rental_dict) if rental_dict else None,
+                    potential_json=json.dumps(potential_dict) if potential_dict else None,
+                    comparables_json=json.dumps(comps_list) if comps_list else None,
+                    model_version=model_version,
+                )
+                succeeded += 1
+
+            except Exception as e:
+                failed += 1
+                logger.debug("Precompute failed for property %s: %s", prop_id, e)
+
+            # Progress output
+            if i % batch_size == 0 or i == total:
+                elapsed = time.time() - t0
+                rate = i / elapsed if elapsed > 0 else 0
+                eta = (total - i) / rate if rate > 0 else 0
+                click.echo(
+                    f"  [{i:>{len(str(total))}}/{total}] "
+                    f"ok={succeeded} fail={failed} "
+                    f"({rate:.1f}/s, ETA {eta:.0f}s)"
+                )
+
+        elapsed = time.time() - t0
+        click.echo()
+        click.echo(f"Done in {elapsed:.1f}s. Succeeded: {succeeded:,}, Failed: {failed:,}")
+
+
+def _dev_potential_to_dict(result) -> dict:
+    """Convert DevelopmentPotential to JSON-serializable dict (CLI version)."""
+    resp: dict = {}
+
+    if getattr(result, "not_applicable", False):
+        resp["not_applicable"] = True
+        resp["not_applicable_reason"] = getattr(result, "not_applicable_reason", "")
+        return resp
+
+    resp["not_applicable"] = False
+    resp["not_applicable_reason"] = ""
+
+    if result.zoning:
+        resp["zoning"] = {
+            "zone_class": result.zoning.zone_class,
+            "zone_desc": result.zoning.zone_desc,
+            "general_plan": result.zoning.general_plan,
+        }
+    else:
+        resp["zoning"] = None
+
+    if result.zone_rule:
+        resp["zone_rule"] = {
+            "max_lot_coverage_pct": result.zone_rule.max_lot_coverage_pct,
+            "max_height_ft": result.zone_rule.max_height_ft,
+            "is_hillside": result.zone_rule.is_hillside,
+            "residential": result.zone_rule.residential,
+        }
+    else:
+        resp["zone_rule"] = None
+
+    if result.units:
+        resp["units"] = {
+            "base_max_units": result.units.base_max_units,
+            "middle_housing_eligible": result.units.middle_housing_eligible,
+            "middle_housing_max_units": result.units.middle_housing_max_units,
+            "effective_max_units": result.units.effective_max_units,
+        }
+    else:
+        resp["units"] = None
+
+    if result.adu:
+        resp["adu"] = {
+            "eligible": result.adu.eligible,
+            "max_adu_sqft": result.adu.max_adu_sqft,
+            "remaining_lot_coverage_sqft": result.adu.remaining_lot_coverage_sqft,
+            "notes": result.adu.notes,
+        }
+    else:
+        resp["adu"] = None
+
+    if result.sb9:
+        resp["sb9"] = {
+            "eligible": result.sb9.eligible,
+            "can_split": result.sb9.can_split,
+            "resulting_lot_sizes": result.sb9.resulting_lot_sizes,
+            "max_total_units": result.sb9.max_total_units,
+            "notes": result.sb9.notes,
+        }
+    else:
+        resp["sb9"] = None
+
+    resp["beso"] = result.beso or []
+
+    resp["improvements"] = [
+        {
+            "category": imp.category,
+            "avg_job_value": imp.avg_job_value,
+            "avg_ppsf_premium_pct": imp.avg_ppsf_premium_pct,
+            "sample_count": imp.sample_count,
+        }
+        for imp in result.improvements
+    ]
+
+    resp["is_unit_not_lot"] = result.is_unit_not_lot
+    if result.lot_aggregate:
+        agg = result.lot_aggregate
+        resp["lot_aggregate"] = {
+            "lot_group_key": agg.lot_group_key,
+            "total_units": agg.total_units,
+            "total_building_sqft": agg.total_building_sqft,
+            "lot_size_sqft": agg.lot_size_sqft,
+            "total_assessed_value": agg.total_assessed_value,
+            "building_to_lot_ratio": agg.building_to_lot_ratio,
+            "addresses": agg.addresses,
+        }
+    else:
+        resp["lot_aggregate"] = None
+
+    return resp
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,8 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import * as api from '../lib/tauri';
+import * as api from '../lib/api';
+import { formatCurrency, formatCompact, formatNumber } from '../lib/utils';
 import type {
   RentalAnalysisResponse,
   InvestmentScenario,
@@ -30,21 +31,8 @@ interface InvestmentScenarioCardProps {
   lot_size_sqft?: number;
   year_built?: number;
   list_price?: number;
-}
-
-function fmt(n: number): string {
-  return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
-}
-
-function fmtCurrency(n: number): string {
-  if (n < 0) return `-$${fmt(Math.abs(n))}`;
-  return `$${fmt(n)}`;
-}
-
-function fmtCompact(n: number): string {
-  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
-  return fmtCurrency(n);
+  /** Pre-fetched rental analysis data. When provided, the card skips its own fetch. */
+  rentalData?: RentalAnalysisResponse;
 }
 
 const SCENARIO_ICONS: Record<string, React.ReactNode> = {
@@ -61,9 +49,14 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
   const [activeTab, setActiveTab] = useState(0);
   const [showProjections, setShowProjections] = useState(false);
 
+  // Use parent-provided data when available; fall back to internal fetch.
+  const effectiveData = props.rentalData ?? data;
+
   useEffect(() => {
+    // Skip fetch when the parent already provides the data.
+    if (props.rentalData) return;
     fetchAnalysis();
-  }, [props.latitude, props.longitude]);
+  }, [props.latitude, props.longitude, props.rentalData, props.address, props.neighborhood, props.beds, props.baths, props.sqft, props.lot_size_sqft, props.year_built, props.list_price]);
 
   async function fetchAnalysis() {
     setLoading(true);
@@ -90,9 +83,9 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
     }
   }
 
-  const scenarios = data?.scenarios ?? [];
+  const scenarios = effectiveData?.scenarios ?? [];
   const activeScenario = scenarios[activeTab] ?? null;
-  const bestName = data?.best_scenario;
+  const bestName = effectiveData?.best_scenario;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -107,7 +100,7 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
             </span>
           )}
         </div>
-        {data && (
+        {effectiveData && (
           <button
             onClick={fetchAnalysis}
             className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600"
@@ -141,7 +134,7 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
           </div>
         )}
 
-        {!loading && data && scenarios.length > 0 && (
+        {!loading && effectiveData && scenarios.length > 0 && (
           <>
             {/* Scenario Comparison Bar */}
             {scenarios.length > 1 && (
@@ -209,21 +202,21 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
                 <div className="grid grid-cols-3 gap-3">
                   <StatBox
                     label="Total Investment"
-                    value={fmtCompact(activeScenario.total_investment)}
+                    value={formatCompact(activeScenario.total_investment)}
                     sub={
                       activeScenario.additional_investment > 0
-                        ? `+${fmtCompact(activeScenario.additional_investment)} development`
+                        ? `+${formatCompact(activeScenario.additional_investment)} development`
                         : 'Property value'
                     }
                   />
                   <StatBox
                     label="Monthly Rent"
-                    value={fmtCurrency(activeScenario.total_monthly_rent)}
+                    value={formatCurrency(activeScenario.total_monthly_rent)}
                     sub={`${activeScenario.units.length} unit${activeScenario.units.length > 1 ? 's' : ''}`}
                   />
                   <StatBox
                     label="Monthly Cash Flow"
-                    value={fmtCurrency(activeScenario.monthly_cash_flow)}
+                    value={formatCurrency(activeScenario.monthly_cash_flow)}
                     sub={activeScenario.monthly_cash_flow >= 0 ? 'Positive' : 'Negative'}
                     valueColor={activeScenario.monthly_cash_flow >= 0 ? 'text-green-700' : 'text-red-600'}
                   />
@@ -236,7 +229,7 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
                   <Pill label="GRM" value={`${activeScenario.gross_rent_multiplier}x`} />
                   <Pill
                     label="Tax Savings"
-                    value={fmtCurrency(activeScenario.tax_benefits.estimated_tax_savings)}
+                    value={formatCurrency(activeScenario.tax_benefits.estimated_tax_savings)}
                   />
                 </div>
 
@@ -251,10 +244,10 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
                         <div key={i} className="flex justify-between text-sm">
                           <span className="text-gray-600">
                             {formatUnitType(u.unit_type)} — {u.beds}bd/{u.baths}ba
-                            {u.sqft ? `, ${fmt(u.sqft)}sf` : ''}
+                            {u.sqft ? `, ${formatNumber(u.sqft)}sf` : ''}
                           </span>
                           <span className="font-medium text-gray-900">
-                            {fmtCurrency(u.monthly_rent)}/mo
+                            {formatCurrency(u.monthly_rent)}/mo
                           </span>
                         </div>
                       ))}
@@ -292,9 +285,9 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
             )}
 
             {/* Recommendation */}
-            {data.recommendation_notes && (
+            {effectiveData.recommendation_notes && (
               <div className="px-6 py-3 bg-indigo-50 border-t border-indigo-100">
-                <p className="text-sm text-indigo-800">{data.recommendation_notes}</p>
+                <p className="text-sm text-indigo-800">{effectiveData.recommendation_notes}</p>
               </div>
             )}
           </>
@@ -385,14 +378,14 @@ function ProjectionTable({ projections }: { projections: AnnualCashFlow[] }) {
         {projections.map((p) => (
           <tr key={p.year} className="hover:bg-gray-50">
             <td className="px-3 py-2 font-medium text-gray-700">Yr {p.year}</td>
-            <td className="px-3 py-2 text-right text-gray-600">{fmtCompact(p.gross_rent)}</td>
-            <td className="px-3 py-2 text-right text-gray-600">{fmtCompact(p.noi)}</td>
+            <td className="px-3 py-2 text-right text-gray-600">{formatCompact(p.gross_rent)}</td>
+            <td className="px-3 py-2 text-right text-gray-600">{formatCompact(p.noi)}</td>
             <td className={`px-3 py-2 text-right font-medium ${p.cash_flow >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-              {fmtCompact(p.cash_flow)}
+              {formatCompact(p.cash_flow)}
             </td>
-            <td className="px-3 py-2 text-right text-gray-600">{fmtCompact(p.property_value)}</td>
+            <td className="px-3 py-2 text-right text-gray-600">{formatCompact(p.property_value)}</td>
             <td className="px-3 py-2 text-right font-medium text-indigo-700">
-              {fmtCompact(p.cumulative_equity)}
+              {formatCompact(p.cumulative_equity)}
             </td>
           </tr>
         ))}

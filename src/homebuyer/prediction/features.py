@@ -33,6 +33,18 @@ logger = logging.getLogger(__name__)
 # Minimum sale price for training data (filters non-market transactions)
 MIN_TRAINING_SALE_PRICE = 100_000
 
+# Maximum sale price for training data.  Excludes large commercial/apartment
+# building transactions ($10M+) that are in a fundamentally different market
+# segment from residential properties and distort the model.
+MAX_TRAINING_SALE_PRICE = 10_000_000
+
+# Earliest sale date to include in training data.  Historical sales from
+# the 1990s–2000s are in a completely different price regime and add noise.
+# Berkeley home prices roughly 3-5x'd from 2000 to 2024 — including old
+# sales forces the model to learn era-specific pricing rather than current
+# market drivers.
+MIN_TRAINING_SALE_DATE = "2015-01-01"
+
 # Maximum price per sqft for training data (filters per-unit/whole-building mismatches)
 # Berkeley's highest legitimate $/sqft is ~$1,500 for premium SFR.
 MAX_TRAINING_PRICE_PER_SQFT = 2_000
@@ -292,11 +304,15 @@ class FeatureBuilder:
     def build_training_data(
         self,
         min_sale_price: int = MIN_TRAINING_SALE_PRICE,
+        max_sale_price: int = MAX_TRAINING_SALE_PRICE,
+        min_sale_date: str = MIN_TRAINING_SALE_DATE,
     ) -> tuple[pd.DataFrame, pd.Series]:
         """Build the full feature matrix and target vector from the database.
 
         Args:
             min_sale_price: Exclude sales below this amount (likely errors).
+            max_sale_price: Exclude sales above this amount (commercial buildings).
+            min_sale_date: Exclude sales before this date (outdated price regime).
 
         Returns:
             (X, y) where X is a DataFrame of features and y is the sale_price.
@@ -324,10 +340,12 @@ class FeatureBuilder:
                  = UPPER(TRIM(p.street_number || ' ' || p.street_name))
             WHERE ps.sale_price IS NOT NULL
               AND ps.sale_price >= ?
+              AND ps.sale_price <= ?
+              AND ps.sale_date >= ?
               AND ps.neighborhood IS NOT NULL
             ORDER BY ps.sale_date
             """,
-            (min_sale_price,),
+            (min_sale_price, max_sale_price, min_sale_date),
         ).fetchall()
 
         if not rows:
@@ -821,23 +839,20 @@ class FeatureBuilder:
             "median_sale_price": "market_median_price",
             "avg_sale_to_list": "market_sale_to_list",
             "sold_above_list_pct": "market_sold_above_pct",
-            "median_dom": "market_median_dom",
         }
 
-        for i, month in enumerate(sale_months):
-            if month in self._market_cache.index:
-                row = self._market_cache.loc[month]
-                # If multiple rows for same month, take the first
-                if isinstance(row, pd.DataFrame):
-                    row = row.iloc[0]
-                for src_col, dst_col in col_mapping.items():
-                    if dst_col not in result.columns:
-                        result[dst_col] = np.nan
-                    result.loc[result.index[i], dst_col] = row.get(src_col, np.nan)
+        # De-duplicate the cache index so .loc always returns a Series
+        cache = self._market_cache
+        if cache.index.duplicated().any():
+            cache = cache[~cache.index.duplicated(keep="first")]
+
+        # Vectorised lookup via .map on a dict per column
+        for src_col, dst_col in col_mapping.items():
+            if src_col in cache.columns:
+                lookup = cache[src_col].to_dict()
+                result[dst_col] = sale_months.map(lookup)
             else:
-                for dst_col in col_mapping.values():
-                    if dst_col not in result.columns:
-                        result[dst_col] = np.nan
+                result[dst_col] = np.nan
 
         return result
 
@@ -877,17 +892,22 @@ class FeatureBuilder:
         if self._rate_cache is None or self._rate_cache.empty:
             return result
 
-        for i, date_str in enumerate(sale_dates):
-            try:
-                sale_dt = pd.Timestamp(date_str)
-            except (ValueError, TypeError):
-                continue
+        # Convert sale dates to Timestamps for merge_asof
+        sale_ts = pd.to_datetime(sale_dates, errors="coerce")
+        valid = sale_ts.notna()
+        if not valid.any():
+            return result
 
-            # Find closest rate on or before sale date
-            mask = self._rate_cache["observation_date"] <= sale_dt
-            if mask.any():
-                closest = self._rate_cache.loc[mask].iloc[-1]
-                result.iloc[i, result.columns.get_loc("rate_30yr")] = closest["rate_30yr"]
+        # Build a sorted frame of sale dates for merge_asof
+        lookup = pd.DataFrame({"sale_dt": sale_ts[valid]}).sort_values("sale_dt")
+        rates = self._rate_cache.sort_values("observation_date")
+
+        merged = pd.merge_asof(
+            lookup, rates,
+            left_on="sale_dt", right_on="observation_date",
+            direction="backward",
+        )
+        result.loc[merged.index, "rate_30yr"] = merged["rate_30yr"].values
 
         return result
 

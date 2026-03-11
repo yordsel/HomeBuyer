@@ -11,7 +11,7 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { toast } from 'sonner';
-import * as api from '../lib/tauri';
+import * as api from '../lib/api';
 import { StatCard } from '../components/StatCard';
 import { formatCurrency, formatPct } from '../lib/utils';
 import type { ModelInfo } from '../types';

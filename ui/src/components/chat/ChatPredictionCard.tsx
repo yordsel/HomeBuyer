@@ -4,22 +4,10 @@
  */
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { formatCurrency } from '../../lib/utils';
+import type { PredictionBlockData } from '../../types';
 
-interface PredictionData {
-  predicted_price: number;
-  price_lower: number;
-  price_upper: number;
-  neighborhood?: string;
-  base_value?: number;
-  feature_contributions?: {
-    name: string;
-    value: number;
-    raw_feature?: string;
-  }[];
-}
-
-export function ChatPredictionCard({ data }: { data: Record<string, unknown> }) {
-  const d = data as unknown as PredictionData;
+export function ChatPredictionCard({ data }: { data: PredictionBlockData }) {
+  const d = data;
   const contributions = d.feature_contributions?.slice(0, 5) ?? [];
 
   return (

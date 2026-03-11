@@ -8,7 +8,7 @@ import {
   Info,
   RefreshCw,
 } from 'lucide-react';
-import * as api from '../lib/tauri';
+import * as api from '../lib/api';
 import type {
   ListingData,
   PotentialSummaryResponse,

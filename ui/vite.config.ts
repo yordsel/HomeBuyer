@@ -8,13 +8,5 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 1420,
     strictPort: true,
-    watch: {
-      ignored: ['**/src-tauri/**'],
-    },
-  },
-  build: {
-    target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome105' : 'safari14',
-    minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
-    sourcemap: !!process.env.TAURI_ENV_DEBUG,
   },
 });

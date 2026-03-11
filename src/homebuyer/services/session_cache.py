@@ -99,10 +99,15 @@ class SessionWorkingSet:
     snapshot of the previous state so it can be restored on pop.
     """
 
+    _MAX_DISCUSSED = 10
+    _MAX_SAMPLE = 25
+
     def __init__(self) -> None:
         self.properties: dict[int, PropertyRecord] = {}
         # Stack of (FilterLayer, snapshot_of_previous_properties)
         self._filter_stack: list[tuple[FilterLayer, dict[int, PropertyRecord]]] = []
+        # Properties the user has drilled into (LIFO, capped at _MAX_DISCUSSED)
+        self._discussed: list[PropertyRecord] = []
 
     @property
     def count(self) -> int:
@@ -197,7 +202,91 @@ class SessionWorkingSet:
         )
         return layer
 
+    def expand_properties(
+        self,
+        rows: list[dict],
+        description: str,
+        source_tool: str,
+    ) -> int:
+        """Add new properties to the working set (expand operation).
+
+        Unlike ``augment_properties``, this pushes a filter layer so
+        ``pop_filter()`` can undo the expansion.
+
+        Returns the number of newly added properties.
+        """
+        snapshot = dict(self.properties)  # snapshot for undo
+        count_before = len(self.properties)
+
+        added = 0
+        for row in rows:
+            pid = row.get("id")
+            if pid is None or pid in self.properties:
+                continue
+            self.properties[pid] = PropertyRecord(
+                **{k: row.get(k) for k in WORKING_SET_FIELDS}
+            )
+            added += 1
+
+        if added:
+            layer = FilterLayer(
+                description=f"expand: {description}",
+                source_tool=source_tool,
+                property_ids_before=count_before,
+                property_ids_after=len(self.properties),
+            )
+            self._filter_stack.append((layer, snapshot))
+            logger.info(
+                "Working set expanded: +%d properties (%d → %d) '%s'",
+                added, count_before, len(self.properties), description,
+            )
+        return added
+
+    # -- Discussed properties ------------------------------------------------
+
+    @property
+    def discussed(self) -> list[PropertyRecord]:
+        """Properties the user has drilled into, LIFO order, capped."""
+        return list(self._discussed)
+
+    def add_discussed(self, property_id: int) -> None:
+        """Mark a property as discussed (called when per-property tools run).
+
+        If the property is already discussed, move it to the front.
+        The property must be in the current working set.
+        """
+        record = self.properties.get(property_id)
+        if record is None:
+            return  # Not in working set — caller should use add_discussed_record
+
+        # Remove if already present (will re-add at front)
+        self._discussed = [p for p in self._discussed if p.id != property_id]
+        self._discussed.insert(0, record)
+        if len(self._discussed) > self._MAX_DISCUSSED:
+            self._discussed = self._discussed[: self._MAX_DISCUSSED]
+
+    def add_discussed_record(self, record: PropertyRecord) -> None:
+        """Add a PropertyRecord directly to the discussed list.
+
+        Use this when the property is not in the current working set
+        (e.g. looked up by address independently).
+        """
+        self._discussed = [p for p in self._discussed if p.id != record.id]
+        self._discussed.insert(0, record)
+        if len(self._discussed) > self._MAX_DISCUSSED:
+            self._discussed = self._discussed[: self._MAX_DISCUSSED]
+
     # -- Query methods -------------------------------------------------------
+
+    def get_sample(self, limit: int | None = None) -> list[dict]:
+        """Return a sample of properties as dicts for the frontend sidebar.
+
+        Sorted by address for deterministic ordering, capped at *limit*
+        (defaults to ``_MAX_SAMPLE``).
+        """
+        cap = limit if limit is not None else self._MAX_SAMPLE
+        props = sorted(self.properties.values(), key=lambda p: p.address or "")
+        return [p.to_dict() for p in props[:cap]]
 
     def get_property_ids(self) -> list[int]:
         """Sorted list of property IDs in the working set."""
@@ -304,6 +393,7 @@ class SessionWorkingSet:
                 }
                 for layer, snapshot in self._filter_stack
             ],
+            "discussed": [p.to_dict() for p in self._discussed],
         }
 
 

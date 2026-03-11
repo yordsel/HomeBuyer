@@ -28,6 +28,8 @@ interface MultiPropertyViewProps {
   onViewAll: () => void;
   /** Total properties in the backend working set (may be larger than tracked). */
   totalWorkingSetCount?: number;
+  /** Number of active filters in the working set (for undo availability hint). */
+  filterDepth?: number;
 }
 
 /** Badge config for analysis types. */
@@ -50,10 +52,14 @@ export function MultiPropertyView({
   onSelectProperty,
   onViewAll,
   totalWorkingSetCount,
+  filterDepth,
 }: MultiPropertyViewProps) {
   const count = properties.length;
-  // Show most recent first, cap at 25
-  const visible = [...properties].reverse().slice(0, MAX_VISIBLE);
+
+  // Split into discussed (isDiscussed=true) and sample (the rest)
+  const discussedProperties = properties.filter((t) => t.isDiscussed);
+  const sampleProperties = properties.filter((t) => !t.isDiscussed);
+  const hasBothSections = discussedProperties.length > 0 && sampleProperties.length > 0;
 
   // "View Table" label hints at full working set when more exist on the server
   const hasMore = totalWorkingSetCount != null && totalWorkingSetCount > count;
@@ -68,6 +74,11 @@ export function MultiPropertyView({
       >
         <p className="text-[11px] font-medium text-gray-500">
           {count} {count === 1 ? 'property' : 'properties'}
+          {(filterDepth ?? 0) > 0 && (
+            <span className="ml-1 text-indigo-400">
+              · {filterDepth} {filterDepth === 1 ? 'filter' : 'filters'}
+            </span>
+          )}
         </p>
         <div className="flex items-center gap-1 text-[11px] text-indigo-500 group-hover:text-indigo-700 transition-colors shrink-0">
           <Table2 size={12} />
@@ -79,20 +90,50 @@ export function MultiPropertyView({
 
       {/* Property list */}
       <div className="flex-1 overflow-y-auto px-2.5 py-2.5 space-y-2">
-        {visible.map((tracked) => (
-          <PropertyListCard
-            key={tracked.property.address}
-            tracked={tracked}
-            isActive={activeAddress === tracked.property.address}
-            onClick={() => onSelectProperty(tracked)}
-          />
-        ))}
-        {count > MAX_VISIBLE && (
+        {/* Discussed properties section (sticky at top) */}
+        {discussedProperties.length > 0 && (
+          <>
+            {hasBothSections && (
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-500 px-1 pt-1">
+                Discussed
+              </p>
+            )}
+            {discussedProperties.map((tracked) => (
+              <PropertyListCard
+                key={tracked.property.address}
+                tracked={tracked}
+                isActive={activeAddress === tracked.property.address}
+                onClick={() => onSelectProperty(tracked)}
+              />
+            ))}
+          </>
+        )}
+
+        {/* Sample properties section */}
+        {sampleProperties.length > 0 && (
+          <>
+            {hasBothSections && (
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 px-1 pt-2">
+                Working Set
+              </p>
+            )}
+            {sampleProperties.slice(0, MAX_VISIBLE).map((tracked) => (
+              <PropertyListCard
+                key={tracked.property.address}
+                tracked={tracked}
+                isActive={activeAddress === tracked.property.address}
+                onClick={() => onSelectProperty(tracked)}
+              />
+            ))}
+          </>
+        )}
+
+        {sampleProperties.length > MAX_VISIBLE && (
           <button
             onClick={onViewAll}
             className="w-full text-center py-2 text-[11px] text-indigo-500 hover:text-indigo-700 transition-colors"
           >
-            +{(count - MAX_VISIBLE).toLocaleString()} more in sidebar — view all
+            +{(sampleProperties.length - MAX_VISIBLE).toLocaleString()} more — view all
           </button>
         )}
       </div>
@@ -117,8 +158,8 @@ function PropertyListCard({
   const blockTypes = new Set(blocks.map((b) => b.type));
 
   const predBlock = blocks.find((b) => b.type === 'prediction_card');
-  const predictedPrice = predBlock
-    ? (predBlock.data as Record<string, unknown>).predicted_price as number | undefined
+  const predictedPrice = predBlock && predBlock.type === 'prediction_card'
+    ? predBlock.data.predicted_price
     : property.predicted_price;
 
   return (

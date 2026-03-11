@@ -28,6 +28,7 @@ from homebuyer.storage.database import Database
 from homebuyer.storage.models import CollectionResult, PropertySale
 from homebuyer.utils.date_utils import parse_redfin_date
 from homebuyer.utils.http import create_session, rate_limited_get
+from homebuyer.utils.parse import safe_float, safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -227,18 +228,18 @@ class RedfinSalesCollector:
             sale_price=sale_price,
             sale_type=_safe_str(row.get("SALE TYPE")) or None,
             property_type=_safe_str(row.get("PROPERTY TYPE")) or None,
-            beds=_parse_float(row.get("BEDS")),
-            baths=_parse_float(row.get("BATHS")),
-            sqft=_parse_int(row.get("SQUARE FEET")),
-            lot_size_sqft=_parse_int(row.get("LOT SIZE")),
-            year_built=_parse_int(row.get("YEAR BUILT")),
-            price_per_sqft=_parse_float(row.get("$/SQUARE FEET")),
-            hoa_per_month=_parse_int(row.get("HOA/MONTH")),
+            beds=safe_float(row.get("BEDS")),
+            baths=safe_float(row.get("BATHS")),
+            sqft=safe_int(row.get("SQUARE FEET")),
+            lot_size_sqft=safe_int(row.get("LOT SIZE")),
+            year_built=safe_int(row.get("YEAR BUILT")),
+            price_per_sqft=safe_float(row.get("$/SQUARE FEET")),
+            hoa_per_month=safe_int(row.get("HOA/MONTH")),
             latitude=float(lat_str),
             longitude=float(lon_str),
             neighborhood_raw=_safe_str(row.get("LOCATION")) or None,
             redfin_url=url_value,
-            days_on_market=_parse_int(row.get("DAYS ON MARKET")),
+            days_on_market=safe_int(row.get("DAYS ON MARKET")),
             price_range_bucket=price_range_bucket,
             data_source="redfin",
         )
@@ -251,20 +252,3 @@ def _safe_str(value) -> str:
     return str(value).strip()
 
 
-def _parse_float(value: str | None) -> float | None:
-    """Parse a string to float, returning None on failure."""
-    if not value or not value.strip():
-        return None
-    try:
-        result = float(value.strip().replace(",", ""))
-        return result if result == result else None  # NaN check
-    except (ValueError, TypeError):
-        return None
-
-
-def _parse_int(value: str | None) -> int | None:
-    """Parse a string to int, returning None on failure."""
-    f = _parse_float(value)
-    if f is None:
-        return None
-    return int(f)

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,17 @@ from homebuyer.storage.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Return distance in metres between two points using the haversine formula."""
+    R = 6_371_000  # Earth radius in metres
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
 
 # ---------------------------------------------------------------------------
 # Schema DDL
@@ -443,8 +455,12 @@ class Database:
         """Populate the use_codes reference table with Alameda County Assessor codes.
 
         Uses INSERT OR REPLACE so descriptions can be corrected on re-run.
+        Skips if the table is already populated to avoid redundant writes.
         Source: Alameda County Assessor propinfo.acgov.org/UseCodeList
         """
+        count = self.conn.execute("SELECT COUNT(*) FROM use_codes").fetchone()[0]
+        if count > 0:
+            return
         # fmt: off
         codes: list[tuple] = [
             # (use_code, description, property_category, ownership_type, record_type, estimated_units, is_residential, lot_size_meaning, building_ar_meaning)
@@ -545,47 +561,8 @@ class Database:
 
     def upsert_sale(self, sale: PropertySale) -> bool:
         """Insert a property sale, skipping if duplicate. Returns True if inserted."""
-        sql = """
-            INSERT INTO property_sales (
-                mls_number, address, city, state, zip_code, sale_date, sale_price,
-                sale_type, property_type, beds, baths, sqft, lot_size_sqft,
-                year_built, price_per_sqft, hoa_per_month, latitude, longitude,
-                neighborhood_raw, neighborhood, redfin_url, days_on_market,
-                price_range_bucket, data_source
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-            )
-            ON CONFLICT DO NOTHING
-        """
-        params = (
-            sale.mls_number,
-            sale.address,
-            sale.city,
-            sale.state,
-            sale.zip_code,
-            sale.sale_date.isoformat() if sale.sale_date else None,
-            sale.sale_price,
-            sale.sale_type,
-            sale.property_type,
-            sale.beds,
-            sale.baths,
-            sale.sqft,
-            sale.lot_size_sqft,
-            sale.year_built,
-            sale.price_per_sqft,
-            sale.hoa_per_month,
-            sale.latitude,
-            sale.longitude,
-            sale.neighborhood_raw,
-            sale.neighborhood,
-            sale.redfin_url,
-            sale.days_on_market,
-            sale.price_range_bucket,
-            sale.data_source,
-        )
-        cursor = self.conn.execute(sql, params)
-        self.conn.commit()
-        return cursor.rowcount > 0
+        inserted, _ = self.upsert_sales_batch([sale])
+        return inserted > 0
 
     def upsert_sales_batch(self, sales: list[PropertySale]) -> tuple[int, int]:
         """Insert a batch of sales. Returns (inserted_count, duplicate_count)."""
@@ -644,52 +621,7 @@ class Database:
 
     def upsert_market_metric(self, metric: MarketMetric) -> bool:
         """Insert or update a market metric row. Returns True if inserted/updated."""
-        sql = """
-            INSERT INTO market_metrics (
-                period_begin, period_end, period_duration, region_name, property_type,
-                median_sale_price, median_list_price, median_ppsf, homes_sold,
-                new_listings, inventory, months_of_supply, median_dom,
-                avg_sale_to_list, sold_above_list_pct, price_drops_pct,
-                off_market_in_two_weeks_pct
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(period_begin, period_duration, region_name, property_type)
-            DO UPDATE SET
-                period_end = excluded.period_end,
-                median_sale_price = excluded.median_sale_price,
-                median_list_price = excluded.median_list_price,
-                median_ppsf = excluded.median_ppsf,
-                homes_sold = excluded.homes_sold,
-                new_listings = excluded.new_listings,
-                inventory = excluded.inventory,
-                months_of_supply = excluded.months_of_supply,
-                median_dom = excluded.median_dom,
-                avg_sale_to_list = excluded.avg_sale_to_list,
-                sold_above_list_pct = excluded.sold_above_list_pct,
-                price_drops_pct = excluded.price_drops_pct,
-                off_market_in_two_weeks_pct = excluded.off_market_in_two_weeks_pct
-        """
-        params = (
-            metric.period_begin.isoformat(),
-            metric.period_end.isoformat(),
-            metric.period_duration,
-            metric.region_name,
-            metric.property_type,
-            metric.median_sale_price,
-            metric.median_list_price,
-            metric.median_ppsf,
-            metric.homes_sold,
-            metric.new_listings,
-            metric.inventory,
-            metric.months_of_supply,
-            metric.median_dom,
-            metric.avg_sale_to_list,
-            metric.sold_above_list_pct,
-            metric.price_drops_pct,
-            metric.off_market_in_two_weeks_pct,
-        )
-        cursor = self.conn.execute(sql, params)
-        self.conn.commit()
-        return cursor.rowcount > 0
+        return self.upsert_market_metrics_batch([metric]) > 0
 
     def upsert_market_metrics_batch(self, metrics: list[MarketMetric]) -> int:
         """Insert/update a batch of market metrics. Returns count of affected rows."""
@@ -750,18 +682,7 @@ class Database:
 
     def upsert_mortgage_rate(self, rate: MortgageRate) -> bool:
         """Insert or update a mortgage rate observation."""
-        sql = """
-            INSERT INTO mortgage_rates (observation_date, rate_30yr, rate_15yr)
-            VALUES (?, ?, ?)
-            ON CONFLICT(observation_date) DO UPDATE SET
-                rate_30yr = excluded.rate_30yr,
-                rate_15yr = excluded.rate_15yr
-        """
-        cursor = self.conn.execute(
-            sql, (rate.observation_date.isoformat(), rate.rate_30yr, rate.rate_15yr)
-        )
-        self.conn.commit()
-        return cursor.rowcount > 0
+        return self.upsert_mortgage_rates_batch([rate]) > 0
 
     def upsert_mortgage_rates_batch(self, rates: list[MortgageRate]) -> int:
         """Insert/update a batch of mortgage rates. Returns count of affected rows."""
@@ -1122,6 +1043,44 @@ class Database:
             )
         return len(updates)
 
+    # ------------------------------------------------------------------
+    # property_sales spatial enrichment
+    # ------------------------------------------------------------------
+
+    def get_sales_missing_neighborhood(self) -> list[dict]:
+        """Get property_sales rows missing neighborhood that have lat/long."""
+        rows = self.conn.execute(
+            "SELECT id, latitude, longitude FROM property_sales "
+            "WHERE neighborhood IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_sales_missing_zoning(self) -> list[dict]:
+        """Get property_sales rows missing zoning_class that have lat/long."""
+        rows = self.conn.execute(
+            "SELECT id, latitude, longitude FROM property_sales "
+            "WHERE zoning_class IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_sales_neighborhood_batch(self, updates: list[tuple[str, int]]) -> int:
+        """Batch update neighborhood on property_sales. Each tuple is (neighborhood, sale_id)."""
+        with self.conn:
+            self.conn.executemany(
+                "UPDATE property_sales SET neighborhood = ? WHERE id = ?",
+                updates,
+            )
+        return len(updates)
+
+    def update_sales_zoning_batch(self, updates: list[tuple[str, int]]) -> int:
+        """Batch update zoning_class on property_sales. Each tuple is (zoning_class, sale_id)."""
+        with self.conn:
+            self.conn.executemany(
+                "UPDATE property_sales SET zoning_class = ? WHERE id = ?",
+                updates,
+            )
+        return len(updates)
+
     def update_properties_enrichment_batch(self, updates: list[dict]) -> int:
         """Batch update API-enriched fields on properties.
 
@@ -1322,8 +1281,6 @@ class Database:
             Dict with keys from precomputed_scenarios plus a ``property``
             sub-dict containing the properties row, or ``None``.
         """
-        import math
-
         delta = max_distance_m / 111_139.0
         rows = self.conn.execute(
             """
@@ -1339,18 +1296,6 @@ class Database:
 
         if not rows:
             return None
-
-        def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-            R = 6_371_000
-            dlat = math.radians(lat2 - lat1)
-            dlon = math.radians(lon2 - lon1)
-            a = (
-                math.sin(dlat / 2) ** 2
-                + math.cos(math.radians(lat1))
-                * math.cos(math.radians(lat2))
-                * math.sin(dlon / 2) ** 2
-            )
-            return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
         best: Optional[dict] = None
         best_dist = float("inf")
@@ -2076,8 +2021,6 @@ class Database:
         Returns:
             Dict of property_sales columns for the nearest match, or ``None``.
         """
-        import math
-
         # Approximate bounding box in degrees (1° lat ≈ 111 139 m)
         delta = max_distance_m / 111_139.0
         rows = self.conn.execute(
@@ -2092,18 +2035,6 @@ class Database:
 
         if not rows:
             return None
-
-        def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-            R = 6_371_000  # Earth radius in metres
-            dlat = math.radians(lat2 - lat1)
-            dlon = math.radians(lon2 - lon1)
-            a = (
-                math.sin(dlat / 2) ** 2
-                + math.cos(math.radians(lat1))
-                * math.cos(math.radians(lat2))
-                * math.sin(dlon / 2) ** 2
-            )
-            return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
         best: Optional[dict] = None
         best_dist = float("inf")

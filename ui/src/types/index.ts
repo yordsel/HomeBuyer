@@ -719,11 +719,238 @@ export type ResponseBlockType =
   | 'property_search_results'
   | 'query_result';
 
-export interface ResponseBlock {
-  type: ResponseBlockType;
-  tool_name: string;
-  data: Record<string, unknown>;
+// ---------------------------------------------------------------------------
+// Block data interfaces (used by the discriminated union ResponseBlock)
+// ---------------------------------------------------------------------------
+
+export interface PropertyDetailBlockData {
+  address?: string;
+  neighborhood?: string;
+  zip_code?: string;
+  zoning_class?: string;
+  beds?: number;
+  baths?: number;
+  sqft?: number;
+  lot_size_sqft?: number;
+  year_built?: number;
+  property_type?: string;
+  use_description?: string;
+  last_sale_price?: number;
+  last_sale_date?: string;
+  building_sqft?: number;
+  latitude?: number;
+  longitude?: number;
+  property_category?: string;
+  record_type?: string;
 }
+
+export interface PredictionBlockData {
+  predicted_price: number;
+  price_lower: number;
+  price_upper: number;
+  neighborhood?: string;
+  base_value?: number;
+  feature_contributions?: {
+    name: string;
+    value: number;
+    raw_feature?: string;
+  }[];
+}
+
+export interface CompBlockData {
+  address: string;
+  sale_date: string;
+  sale_price: number;
+  beds?: number;
+  baths?: number;
+  sqft?: number;
+  price_per_sqft?: number;
+}
+
+export interface NeighborhoodBlockData {
+  name?: string;
+  median_price?: number;
+  avg_price?: number;
+  median_ppsf?: number;
+  sale_count?: number;
+  yoy_price_change_pct?: number;
+  dominant_zoning?: string[];
+  median_lot_size?: number;
+  avg_year_built?: number;
+  property_type_breakdown?: Record<string, number>;
+}
+
+export interface DevelopmentBlockData {
+  zoning?: {
+    zone_class?: string;
+    zone_desc?: string;
+    general_plan?: string;
+  };
+  zone_rule?: {
+    max_lot_coverage_pct?: number;
+    max_height_ft?: number;
+    is_hillside?: boolean;
+    residential?: boolean;
+  };
+  units?: {
+    base_max_units?: number;
+    middle_housing_eligible?: boolean;
+    middle_housing_max_units?: number;
+    effective_max_units?: number;
+  };
+  adu?: {
+    eligible?: boolean;
+    max_adu_sqft?: number;
+    remaining_lot_coverage_sqft?: number;
+    notes?: string;
+  };
+  sb9?: {
+    eligible?: boolean;
+    can_split?: boolean;
+    max_total_units?: number;
+    notes?: string;
+  };
+}
+
+export interface SellVsHoldBlockData {
+  current_predicted_value?: number;
+  confidence_range?: [number, number];
+  neighborhood?: string;
+  yoy_appreciation_pct?: number;
+  mortgage_rate_30yr?: number;
+  hold_scenarios?: Record<
+    string,
+    {
+      projected_value?: number;
+      appreciation_pct?: number;
+      gross_gain?: number;
+      estimated_sell_costs?: number;
+      net_gain?: number;
+    }
+  >;
+  rental_estimate?: {
+    monthly_rent?: number;
+    annual_gross_rent?: number;
+    annual_net_rent?: number;
+    cap_rate_pct?: number;
+    price_to_rent_ratio?: number;
+    expense_ratio_pct?: number;
+    estimation_method?: string;
+  };
+}
+
+export interface MarketBlockData {
+  current_market?: {
+    period?: string;
+    median_sale_price?: number;
+    median_list_price?: number;
+    sale_to_list_ratio?: number;
+    sold_above_list_pct?: number;
+    homes_sold_monthly?: number;
+    median_days_on_market?: number;
+    mortgage_rate_30yr?: number;
+  };
+  data_coverage?: {
+    total_sales?: number;
+    neighborhoods_covered?: number;
+  };
+  top_neighborhoods_by_price?: {
+    name: string;
+    median_price?: number;
+    sales?: number;
+    yoy_change?: number;
+  }[];
+}
+
+export interface ImprovementBlockData {
+  current_price?: number;
+  improved_price?: number;
+  total_delta?: number;
+  total_cost?: number;
+  roi?: number;
+  categories?: {
+    category: string;
+    avg_cost?: number;
+    ml_delta?: number;
+    roi?: number;
+    market_premium_pct?: number;
+  }[];
+}
+
+export interface InvestmentScenarioBlockItem {
+  scenario_name?: string;
+  scenario_type?: string;
+  total_investment?: number;
+  monthly_cash_flow?: number;
+  cap_rate_pct?: number;
+  cash_on_cash_pct?: number;
+  total_monthly_rent?: number;
+  development_feasible?: boolean;
+}
+
+export interface InvestmentScenariosBlockData {
+  property_address?: string;
+  property_value?: number;
+  neighborhood?: string;
+  scenarios?: InvestmentScenarioBlockItem[];
+  best_scenario?: string;
+  recommendation_notes?: string;
+}
+
+export interface RentalIncomeBlockData {
+  scenario_name?: string;
+  property_value?: number;
+  total_monthly_rent?: number;
+  total_annual_rent?: number;
+  expenses?: {
+    property_tax?: number;
+    insurance?: number;
+    maintenance?: number;
+    vacancy_reserve?: number;
+    management_fee?: number;
+    total_annual?: number;
+    expense_ratio_pct?: number;
+  };
+  mortgage?: {
+    monthly_piti?: number;
+    rate_30yr?: number;
+    down_payment_pct?: number;
+    loan_amount?: number;
+  };
+  cap_rate_pct?: number;
+  cash_on_cash_pct?: number;
+  monthly_cash_flow?: number;
+  gross_rent_multiplier?: number;
+  price_to_rent_ratio?: number;
+  units?: {
+    unit_type?: string;
+    beds?: number;
+    monthly_rent?: number;
+  }[];
+}
+
+// ---------------------------------------------------------------------------
+// Discriminated union: ResponseBlock
+// ---------------------------------------------------------------------------
+
+interface ResponseBlockBase {
+  tool_name: string;
+}
+
+export type ResponseBlock =
+  | (ResponseBlockBase & { type: 'property_detail'; data: PropertyDetailBlockData })
+  | (ResponseBlockBase & { type: 'prediction_card'; data: PredictionBlockData })
+  | (ResponseBlockBase & { type: 'comps_table'; data: CompBlockData[] })
+  | (ResponseBlockBase & { type: 'neighborhood_stats'; data: NeighborhoodBlockData })
+  | (ResponseBlockBase & { type: 'development_potential'; data: DevelopmentBlockData })
+  | (ResponseBlockBase & { type: 'sell_vs_hold'; data: SellVsHoldBlockData })
+  | (ResponseBlockBase & { type: 'market_summary'; data: MarketBlockData })
+  | (ResponseBlockBase & { type: 'improvement_sim'; data: ImprovementBlockData })
+  | (ResponseBlockBase & { type: 'investment_scenarios'; data: InvestmentScenariosBlockData })
+  | (ResponseBlockBase & { type: 'rental_income'; data: RentalIncomeBlockData })
+  | (ResponseBlockBase & { type: 'property_search_results'; data: PropertySearchResultsData })
+  | (ResponseBlockBase & { type: 'query_result'; data: QueryResultData })
+  | (ResponseBlockBase & { type: 'investment_prospectus'; data: InvestmentProspectusResponse });
 
 // ---------------------------------------------------------------------------
 // Search result types (from search_properties tool)
@@ -794,14 +1021,30 @@ export interface ChatMessage {
   content: string;
   blocks?: ResponseBlock[];
   toolsUsed?: string[];
+  /** Tool execution events for rendering compact status chips in chat. */
+  toolEvents?: ToolEvent[];
+}
+
+/** A streamed tool execution event (start or result). */
+export interface ToolEvent {
+  name: string;
+  label: string;
+  /** The block produced by the tool, if any. */
+  block?: ResponseBlock;
+  /** True once the tool has finished executing. */
+  done: boolean;
 }
 
 export interface WorkingSetMeta {
   count: number;
   descriptor: string;
   session_id: string;
-  /** Addresses currently in the working set — used to prune the sidebar after filters. */
-  addresses?: string[];
+  /** Sample of up to 25 properties from the working set for sidebar display. */
+  sample?: WorkingSetProperty[];
+  /** Properties the user has drilled into with per-property tools (LIFO, max 10). */
+  discussed?: WorkingSetProperty[];
+  /** Number of active filters — non-zero means undo is available. */
+  filter_depth?: number;
 }
 
 export interface WorkingSetProperty {
@@ -821,6 +1064,8 @@ export interface WorkingSetProperty {
   longitude: number | null;
   property_category: string | null;
   record_type: string | null;
+  lot_group_key: string | null;
+  situs_unit: string | null;
 }
 
 export interface WorkingSetPage {

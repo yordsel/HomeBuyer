@@ -4,32 +4,10 @@
  */
 import { BarChart3, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { formatCurrency } from '../../lib/utils';
+import type { MarketBlockData } from '../../types';
 
-interface MarketData {
-  current_market?: {
-    period?: string;
-    median_sale_price?: number;
-    median_list_price?: number;
-    sale_to_list_ratio?: number;
-    sold_above_list_pct?: number;
-    homes_sold_monthly?: number;
-    median_days_on_market?: number;
-    mortgage_rate_30yr?: number;
-  };
-  data_coverage?: {
-    total_sales?: number;
-    neighborhoods_covered?: number;
-  };
-  top_neighborhoods_by_price?: {
-    name: string;
-    median_price?: number;
-    sales?: number;
-    yoy_change?: number;
-  }[];
-}
-
-export function ChatMarketSummary({ data }: { data: Record<string, unknown> }) {
-  const d = data as unknown as MarketData;
+export function ChatMarketSummary({ data }: { data: MarketBlockData }) {
+  const d = data;
   const m = d.current_market;
 
   if (!m) {

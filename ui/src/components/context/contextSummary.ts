@@ -24,9 +24,8 @@ export function formatCompactCurrency(amount: number): string {
 /** Extract predicted price from blocks first, then property summary data. */
 function getPredictedPrice(tracked: TrackedProperty): number | null {
   const predBlock = tracked.blocks.find((b) => b.type === 'prediction_card');
-  if (predBlock) {
-    const price = (predBlock.data as Record<string, unknown>).predicted_price;
-    if (typeof price === 'number') return price;
+  if (predBlock && predBlock.type === 'prediction_card') {
+    return predBlock.data.predicted_price ?? null;
   }
   return tracked.property.predicted_price ?? null;
 }

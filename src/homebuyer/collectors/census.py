@@ -18,6 +18,7 @@ import requests
 from homebuyer.config import BERKELEY_ZIP_CODES, CENSUS_ACS_BASE_URL
 from homebuyer.storage.database import Database
 from homebuyer.storage.models import CensusIncome, CollectionResult
+from homebuyer.utils.parse import safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -149,14 +150,14 @@ class CensusCollector:
             moe_str = row[moe_idx]
 
             # Census uses negative values or null for suppressed data
-            income = _safe_int(income_str)
+            income = safe_int(income_str)
             if income is None or income <= 0:
                 logger.debug(
                     "Skipping %s year %d: income=%s", zip_code, year, income_str
                 )
                 continue
 
-            moe = _safe_int(moe_str)
+            moe = safe_int(moe_str)
             # Negative MOE means a calculated/substituted value
             if moe is not None and moe < 0:
                 moe = abs(moe)
@@ -173,11 +174,3 @@ class CensusCollector:
         return records
 
 
-def _safe_int(value: Optional[str]) -> Optional[int]:
-    """Parse an integer, returning None for invalid or null values."""
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (ValueError, TypeError):
-        return None

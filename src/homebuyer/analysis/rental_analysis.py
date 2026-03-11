@@ -332,7 +332,7 @@ class RentalAnalyzer:
                 SELECT AVG(price_per_sqft) as nbr_ppsf
                 FROM property_sales
                 WHERE price_per_sqft IS NOT NULL
-                  AND neighborhood_normalized = ?
+                  AND neighborhood = ?
                   AND sale_date >= date('now', '-2 years')
                 """,
                 (neighborhood,),
@@ -401,18 +401,10 @@ class RentalAnalyzer:
         is_jumbo = loan_amount > _JUMBO_THRESHOLD
 
         # Monthly P&I (standard 30-year amortization)
-        monthly_rate = (rate_30yr / 100) / 12
+        from homebuyer.utils.mortgage import calc_monthly_payment
         n_payments = 360
-        if monthly_rate > 0 and loan_amount > 0:
-            monthly_pi = int(
-                math.ceil(
-                    loan_amount
-                    * (monthly_rate * (1 + monthly_rate) ** n_payments)
-                    / ((1 + monthly_rate) ** n_payments - 1)
-                )
-            )
-        else:
-            monthly_pi = 0
+        monthly_pi = int(math.ceil(calc_monthly_payment(loan_amount, rate_30yr, n_payments)))
+        monthly_rate = (rate_30yr / 100) / 12
 
         monthly_tax = int(round(property_value * _PROPERTY_TAX_RATE / 12))
         monthly_ins = int(round(property_value * _INSURANCE_RATE / 12))
@@ -448,15 +440,9 @@ class RentalAnalyzer:
 
     def _get_current_mortgage_rate(self) -> float:
         """Query the latest 30yr mortgage rate from the DB."""
+        from homebuyer.utils.mortgage import get_current_mortgage_rate
         try:
-            row = self.db.conn.execute(
-                """
-                SELECT rate_30yr FROM mortgage_rates
-                WHERE rate_30yr IS NOT NULL
-                ORDER BY observation_date DESC LIMIT 1
-                """
-            ).fetchone()
-            return row["rate_30yr"] if row else _DEFAULT_RATE
+            return get_current_mortgage_rate(self.db)
         except Exception:
             return _DEFAULT_RATE
 

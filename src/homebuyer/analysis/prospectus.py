@@ -1103,10 +1103,11 @@ class ProspectusGenerator:
         ) / total_value
 
         # Diversification notes
-        neighborhoods = {p.neighborhood for p in prospectuses}
+        neighborhoods = {p.neighborhood for p in prospectuses if p.neighborhood}
         approaches = {
             _STRATEGY_LABELS.get(p.recommended_approach, p.recommended_approach)
             for p in prospectuses
+            if p.recommended_approach
         }
         notes_parts: list[str] = []
         if len(neighborhoods) > 1:
@@ -1114,7 +1115,7 @@ class ProspectusGenerator:
                 f"Diversified across {len(neighborhoods)} neighborhoods: "
                 f"{', '.join(sorted(neighborhoods))}"
             )
-        else:
+        elif neighborhoods:
             notes_parts.append(
                 f"Concentrated in {next(iter(neighborhoods))}"
             )

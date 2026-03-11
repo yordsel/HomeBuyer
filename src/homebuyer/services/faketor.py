@@ -17,6 +17,14 @@ from homebuyer.services.facts import compute_facts_for_tool
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+
+_CLAUDE_MODEL = "claude-sonnet-4-20250514"
+_MAX_ITERATIONS = 12
+_FALLBACK_REPLY = "Here's what I found based on my analysis so far."
+
+# ---------------------------------------------------------------------------
 # Tool definitions for Claude
 # ---------------------------------------------------------------------------
 
@@ -382,6 +390,8 @@ FAKETOR_TOOLS = [
     {
         "name": "search_properties",
         "description": (
+            "PREFER update_working_set for working set operations — it supports replace, "
+            "narrow, and expand modes with proper working set management.\n\n"
             "Search Berkeley properties by criteria to find development opportunities. "
             "Returns multiple properties with development potential summaries (ADU eligibility, "
             "SB9 lot split eligibility, max units, zoning), data quality flags, and pre-computed "
@@ -390,9 +400,7 @@ FAKETOR_TOOLS = [
             "development opportunities, or search for investment targets. Do NOT use this for "
             "looking up a single known address — use lookup_property instead.\n\n"
             "Results are capped at 25 properties. The response includes total_matching — the "
-            "true count of all matching properties. When total_matching > results returned, use "
-            "query_database to run aggregate analysis (counts, averages, distributions) across "
-            "ALL matching properties, or to retrieve additional properties with custom SQL. "
+            "true count of all matching properties. "
             "The search results populate the session working set for follow-up queries."
         ),
         "input_schema": {
@@ -555,8 +563,10 @@ FAKETOR_TOOLS = [
     {
         "name": "query_database",
         "description": (
-            "Execute a read-only SQL query against the Berkeley property database to answer "
-            "analytical, aggregate, or ad-hoc questions that the other tools can't handle. "
+            "Execute a read-only SQL query against the Berkeley property database for "
+            "ANALYTICAL and AGGREGATE questions only — counts, averages, distributions, "
+            "groupings, and other statistics. Do NOT use this to change which properties "
+            "are in the working set; use update_working_set instead.\n\n"
             "Use this for questions like 'how many properties have X?', 'what is the average Y?', "
             "'which neighborhoods have the most Z?', or any counting/filtering/grouping question.\n\n"
             "AVAILABLE TABLES AND COLUMNS:\n\n"
@@ -599,17 +609,27 @@ FAKETOR_TOOLS = [
             "market_metrics — market trends:\n"
             "  period_begin, period_end, median_sale_price, median_list_price, median_ppsf,\n"
             "  homes_sold, new_listings, inventory, months_of_supply, median_dom, avg_sale_to_list\n\n"
+            "precomputed_scenarios — cached investment analysis per property:\n"
+            "  property_id (INTEGER → properties.id), scenario_type (TEXT, use 'buyer'),\n"
+            "  prediction_json (TEXT — JSON with predicted_price, confidence_pct),\n"
+            "  rental_json (TEXT — JSON with investment scenarios, cap_rate, cash_on_cash),\n"
+            "  potential_json (TEXT — JSON with ADU/SB9 development feasibility, effective_max_units),\n"
+            "  computed_at (TEXT)\n"
+            "  Use json_extract() to query JSON fields, e.g.:\n"
+            "    json_extract(ps.prediction_json, '$.predicted_price')\n"
+            "    json_extract(ps.potential_json, '$.adu.eligible')\n"
+            "    json_extract(ps.potential_json, '$.effective_max_units')\n"
+            "  JOIN: LEFT JOIN precomputed_scenarios ps ON p.id = ps.property_id "
+            "AND ps.scenario_type = 'buyer'\n"
+            "  Use this table to RANK properties by investment metrics across the entire "
+            "working set in a single query — much faster than calling per-property tools.\n\n"
             "COMMON property_type VALUES: 'Single Family Residential', 'Multi-Family (2-4 Unit)', "
             "'Condo/Co-op', 'Townhouse', 'Multi-Family (5+ Unit)', 'Land', 'Manufactured'\n\n"
             "COMPUTED FIELDS — NOT database columns (do NOT use in SQL):\n"
             "  adu_eligible, sb9_eligible, effective_max_units, middle_housing_eligible\n"
-            "  These are computed at runtime by the development calculator using zoning rules, "
-            "lot coverage, and property category. They are stored as JSON inside "
-            "precomputed_scenarios.potential_json but are NOT queryable as columns.\n"
-            "  → To filter by ADU/SB9 eligibility, use search_properties with adu_eligible=true "
-            "or sb9_eligible=true instead of query_database.\n"
-            "  → To count ADU-eligible properties in the working set, use search_properties with "
-            "adu_eligible=true and the relevant criteria, then check _facts.total_matching.\n\n"
+            "  These are computed at runtime by the development calculator. "
+            "  → To filter by ADU/SB9 eligibility, use update_working_set with adu_eligible=true "
+            "or sb9_eligible=true.\n\n"
             "RULES:\n"
             "- Only SELECT statements are allowed (no INSERT, UPDATE, DELETE, DROP, etc.)\n"
             "- Use LIMIT to cap results (max 100 rows returned)\n"
@@ -622,7 +642,7 @@ FAKETOR_TOOLS = [
             "When a session working set is active, a temporary table _working_set is available with column:\n"
             "  property_id INTEGER\n"
             "Use JOIN _working_set ws ON p.id = ws.property_id to restrict queries to the current set.\n"
-            "The working set contains property IDs from the most recent search_properties or filtered results."
+            "The working set contains property IDs from the most recent update_working_set or search_properties results."
         ),
         "input_schema": {
             "type": "object",
@@ -645,6 +665,135 @@ FAKETOR_TOOLS = [
             "required": ["sql"],
         },
     },
+    {
+        "name": "update_working_set",
+        "description": (
+            "Change the session property working set — the universe of properties under discussion. "
+            "Use this tool ANY TIME the user's request changes which properties are in scope.\n\n"
+            "THREE MODES:\n"
+            "• replace — Start fresh. Use for a new topic or when the user's criteria are unrelated "
+            "to the current set. Cues: 'show me ...', 'find ...', 'what about ...', 'switch to ...'.\n"
+            "• narrow — Sub-filter the current set. Use when the user refines within the current results. "
+            "Cues: 'which of those ...', 'of these, ...', 'filter to ...', 'only the ones that ...'.\n"
+            "• expand — Add more properties to the current set. Use when the user wants to broaden scope. "
+            "Cues: 'also include ...', 'add ... to the set', 'what about also looking at ...'.\n\n"
+            "You can provide EITHER structured filter parameters OR a sql query (not both). "
+            "Structured parameters are preferred for standard filters; sql for complex conditions.\n\n"
+            "For sql in narrow mode, a temporary table _working_set(property_id) is available "
+            "containing the current working set IDs. Use: "
+            "SELECT p.id, p.address, ... FROM properties p JOIN _working_set ws ON p.id = ws.property_id WHERE ...\n\n"
+            "IMPORTANT: When using sql, ALWAYS include p.id in the SELECT list so the system can "
+            "update the working set with the matching property IDs.\n\n"
+            "After the working set is updated, the system automatically sends the updated sample "
+            "and metadata to the frontend — no separate query needed."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["replace", "narrow", "expand"],
+                    "description": (
+                        "How to update the working set: "
+                        "'replace' (new set), 'narrow' (sub-filter), 'expand' (add to set)"
+                    ),
+                },
+                "neighborhoods": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Filter by neighborhood name(s). Examples: 'North Berkeley', "
+                        "'Elmwood', 'Thousand Oaks', 'West Berkeley', 'Berkeley Hills', "
+                        "'Claremont', 'Central Berkeley', 'Cragmont', 'Northbrae', etc."
+                    ),
+                },
+                "zoning_classes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Filter by exact zoning class(es). E.g. ['R-1', 'R-2']. "
+                        "Common residential: R-1, R-1H, R-2, R-2A, R-2AH, R-2H, "
+                        "R-3, R-3H, R-4, R-4H, ES-R, MU-R."
+                    ),
+                },
+                "zoning_pattern": {
+                    "type": "string",
+                    "description": (
+                        "SQL LIKE pattern for zoning class. E.g. 'R-2%' matches "
+                        "R-2, R-2A, R-2AH, R-2H."
+                    ),
+                },
+                "property_type": {
+                    "type": "string",
+                    "description": (
+                        "Filter by property type. E.g. 'Single Family Residential', "
+                        "'Multi-Family (2-4 Unit)', 'Condo/Co-op'."
+                    ),
+                },
+                "property_category": {
+                    "type": "string",
+                    "description": (
+                        "Filter by property category. "
+                        "Values: 'sfr', 'duplex', 'triplex', 'fourplex', 'apartment', "
+                        "'condo', 'townhouse', 'pud', 'coop', 'land', 'mixed_use'."
+                    ),
+                },
+                "record_type": {
+                    "type": "string",
+                    "description": (
+                        "Filter by record type: 'lot' (physical lot) or 'unit' "
+                        "(sellable unit within a lot — condos, co-ops)."
+                    ),
+                },
+                "ownership_type": {
+                    "type": "string",
+                    "description": (
+                        "Filter by ownership type: 'fee_simple', 'common_interest', 'cooperative'."
+                    ),
+                },
+                "min_price": {"type": "integer", "description": "Minimum last sale price"},
+                "max_price": {"type": "integer", "description": "Maximum last sale price"},
+                "min_beds": {"type": "number", "description": "Minimum bedrooms"},
+                "max_beds": {"type": "number", "description": "Maximum bedrooms"},
+                "min_baths": {"type": "number", "description": "Minimum bathrooms"},
+                "max_baths": {"type": "number", "description": "Maximum bathrooms"},
+                "min_lot_sqft": {"type": "integer", "description": "Minimum lot size in sqft"},
+                "max_lot_sqft": {"type": "integer", "description": "Maximum lot size in sqft"},
+                "min_sqft": {"type": "integer", "description": "Minimum living area sqft"},
+                "max_sqft": {"type": "integer", "description": "Maximum living area sqft"},
+                "min_year_built": {"type": "integer", "description": "Minimum year built"},
+                "max_year_built": {"type": "integer", "description": "Maximum year built"},
+                "adu_eligible": {
+                    "type": "boolean",
+                    "description": "If true, only include ADU-eligible properties",
+                },
+                "sb9_eligible": {
+                    "type": "boolean",
+                    "description": "If true, only include SB9-eligible properties",
+                },
+                "sql": {
+                    "type": "string",
+                    "description": (
+                        "SQL query for complex conditions. MUST include p.id in SELECT. "
+                        "In narrow mode, _working_set temp table is available. "
+                        "Example: SELECT p.id, p.address FROM properties p "
+                        "JOIN _working_set ws ON p.id = ws.property_id "
+                        "WHERE p.property_category = 'sfr'"
+                    ),
+                },
+                "explanation": {
+                    "type": "string",
+                    "description": "Human-readable description of the update (e.g. 'SFR properties in R-3 zoning')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return in the response (default 10, max 25). "
+                    "Does NOT limit the working set size — all matching properties are tracked.",
+                },
+            },
+            "required": ["mode"],
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -665,6 +814,7 @@ TOOL_TO_BLOCK_TYPE: dict[str, str] = {
     "get_market_summary": "market_summary",
     "search_properties": "property_search_results",
     "query_database": "query_result",
+    "update_working_set": "property_search_results",
 }
 
 # ---------------------------------------------------------------------------
@@ -730,6 +880,18 @@ then use those details when calling other tools
   and current market conditions
 - For investment scenarios, compare the as-is scenario with the best development option \
   and highlight the trade-offs (capital required, timeline, risk)
+- IMPORTANT: NEVER call per-property analysis tools (get_price_prediction, \
+  analyze_investment_scenarios, get_development_potential, estimate_rental_income, \
+  get_comparable_sales, estimate_sell_vs_hold) in a loop for multiple properties. You have \
+  a limited iteration budget and will run out before finishing, leaving the user with an \
+  incomplete answer. Instead:
+  • For "which have the best investment potential" or ranking questions: use query_database \
+    to rank properties using the precomputed_scenarios table (see PRECOMPUTED ANALYSIS DATA \
+    below), then optionally drill into the top 2-3 individually
+  • For comprehensive multi-property reports: use generate_investment_prospectus with \
+    from_working_set=true — it handles batch analysis internally
+  • For aggregate statistics across the working set: use query_database with the _working_set \
+    temp table
 - When the user asks for an "investment prospectus", "property report", or "comprehensive \
   investment summary", use generate_investment_prospectus. This tool aggregates valuation, \
   market data, development potential, rental scenarios, comps, and risk factors into a single \
@@ -790,26 +952,61 @@ DATA ACCURACY RULES:
 
 WORKING SET RULES:
 When a session working set is active (shown in "PROPERTY WORKING SET" above), it contains the \
-current set of properties the user is discussing. Follow these rules:
+current universe of properties the user is discussing. Follow these rules:
 - "these", "those", "the current set", "the results" refer to the properties in the working set
-- When the user asks to narrow or filter the working set (e.g. "which of those are in North \
-  Berkeley?"), use query_database with a JOIN against the _working_set temp table: \
-  SELECT ... FROM properties p JOIN _working_set ws ON p.id = ws.property_id WHERE ...
-- IMPORTANT: When using query_database to filter/narrow the working set, ALWAYS include \
-  p.id in the SELECT list. This allows the system to automatically update the working set \
-  to only the matching properties. Without p.id, the working set won't be narrowed. \
-  Example: SELECT p.id, p.address, p.beds ... FROM properties p JOIN _working_set ws ON ...
-- When the user asks aggregate questions about the current set (e.g. "what's the average lot \
-  size of these?"), use query_database with the _working_set JOIN. For pure aggregates \
-  (COUNT, AVG, etc.), you don't need p.id since those don't narrow the set
-- When the user says "go back", "undo that", "remove the last filter", or wants to restore \
-  the previous set, use undo_filter
-- The working set is automatically populated when you use search_properties or query_database \
-  queries that return property IDs — you don't need to manage it manually
-- The working set descriptor shows distributions and ranges — use these for quick summaries \
-  without needing to re-query
-- If the user asks about a specific property from the working set, you can still use \
-  lookup_property or other per-property tools with that property's details
+- Use update_working_set for ALL operations that change which properties are in scope: \
+  new searches (mode=replace), sub-filters (mode=narrow), adding properties (mode=expand). \
+  The system automatically sends updated sidebar data to the frontend after each call.
+- For ADU/SB9 eligibility filtering, use update_working_set with adu_eligible=true or \
+  sb9_eligible=true — this works in all three modes (replace, narrow, expand).
+- Use query_database ONLY for pure analytics (counts, averages, distributions, groupings) \
+  that do NOT change which properties are in the working set.
+- When the user says "go back", "undo that", "remove the last filter", use undo_filter.
+- If the user asks about a specific property, use lookup_property or other per-property tools.
+- IMPORTANT: Always call update_working_set even if the working set descriptor seems to \
+  contain the answer. The descriptor is a summary for your context — the frontend needs \
+  tool calls to update the sidebar.
+
+PRECOMPUTED ANALYSIS DATA:
+The database has a precomputed_scenarios table with cached investment analysis for ALL properties. \
+Use query_database to rank and compare properties across the entire working set in a SINGLE \
+query — never loop per-property tools. The table columns:
+- property_id (INTEGER) — joins to properties.id
+- scenario_type (TEXT) — use 'buyer'
+- prediction_json (TEXT) — JSON: {predicted_price, confidence_pct}
+- rental_json (TEXT) — JSON: {scenarios: [{scenario_name, cap_rate_pct, cash_on_cash_pct, \
+  monthly_cash_flow, gross_rent_multiplier, total_monthly_rent, ...}], \
+  best_scenario: "name string", not_applicable: 0|1}. \
+  scenarios[0] is always "Rent As-Is". best_scenario is the NAME of the highest-return scenario.
+- potential_json (TEXT) — JSON: {adu: {eligible: 0|1}, sb9: {eligible: 0|1}, effective_max_units}
+
+Key json_extract paths:
+  json_extract(ps.prediction_json, '$.predicted_price')
+  json_extract(ps.rental_json, '$.scenarios[0].cap_rate_pct')     -- as-is cap rate
+  json_extract(ps.rental_json, '$.scenarios[0].cash_on_cash_pct') -- as-is cash-on-cash
+  json_extract(ps.rental_json, '$.scenarios[0].monthly_cash_flow') -- as-is cash flow
+  json_extract(ps.rental_json, '$.scenarios[0].total_monthly_rent') -- as-is rent
+  json_extract(ps.rental_json, '$.best_scenario')                 -- best scenario name
+  json_extract(ps.potential_json, '$.adu.eligible')
+  json_extract(ps.potential_json, '$.sb9.eligible')
+  json_extract(ps.potential_json, '$.effective_max_units')
+
+Example — Rank working set by investment potential (single query, all properties):
+  SELECT p.id, p.address, p.last_sale_price, p.lot_size_sqft, p.zoning_class,
+         json_extract(ps.prediction_json, '$.predicted_price') as pred_price,
+         json_extract(ps.rental_json, '$.scenarios[0].cap_rate_pct') as cap_rate,
+         json_extract(ps.rental_json, '$.scenarios[0].monthly_cash_flow') as monthly_cf,
+         json_extract(ps.rental_json, '$.best_scenario') as best_scenario,
+         json_extract(ps.potential_json, '$.adu.eligible') as adu_ok,
+         json_extract(ps.potential_json, '$.sb9.eligible') as sb9_ok
+  FROM _working_set ws
+  JOIN properties p ON ws.property_id = p.id
+  LEFT JOIN precomputed_scenarios ps ON p.id = ps.property_id AND ps.scenario_type = 'buyer'
+  ORDER BY json_extract(ps.rental_json, '$.scenarios[0].cap_rate_pct') DESC
+  LIMIT 10
+
+This queries ALL properties in the working set in ONE tool call. After identifying top candidates, \
+you can drill into 2-3 specific properties with per-property tools for detailed analysis.
 
 DATA QUALITY AWARENESS:
 - About 232 Multi-Family 5+ properties have PER-UNIT assessor features (sqft, beds, baths \
@@ -949,15 +1146,23 @@ class FaketorService:
 
         try:
             # Agentic loop: keep going until Claude stops calling tools
-            max_iterations = 12
-            for _ in range(max_iterations):
+            for iteration in range(_MAX_ITERATIONS):
                 # Inject accumulated facts summary into system prompt
                 system = base_system
                 if accumulator.tool_sequence:
                     system = base_system + "\n\n" + accumulator.get_summary()
 
+                # Warn when approaching iteration limit so the model wraps up
+                remaining = _MAX_ITERATIONS - iteration
+                if remaining <= 3 and iteration > 0:
+                    system += (
+                        f"\n\n⚠️ ITERATION BUDGET: You have {remaining} tool calls remaining. "
+                        "Summarize what you've found so far and provide your answer. "
+                        "Do NOT start new per-property analyses."
+                    )
+
                 response = self._client.messages.create(
-                    model="claude-sonnet-4-20250514",
+                    model=_CLAUDE_MODEL,
                     max_tokens=4096,
                     system=system,
                     tools=FAKETOR_TOOLS,
@@ -1047,7 +1252,7 @@ class FaketorService:
 
             # If we hit max iterations, return what we have with a graceful message
             fallback_reply = (
-                "Here's what I found based on my analysis so far."
+                _FALLBACK_REPLY
                 if blocks
                 else "I gathered a lot of data but ran out of room to summarize it. Could you ask a more specific question?"
             )
@@ -1086,6 +1291,7 @@ class FaketorService:
         "lookup_permits": "Looking up permits...",
         "query_database": "Querying database...",
         "undo_filter": "Undoing last filter...",
+        "generate_investment_prospectus": "Generating investment prospectus...",
     }
 
     def chat_stream(
@@ -1120,16 +1326,24 @@ class FaketorService:
         accumulator = AnalysisAccumulator()
 
         try:
-            max_iterations = 12
-            for _ in range(max_iterations):
+            for iteration in range(_MAX_ITERATIONS):
                 # Inject accumulated facts summary into system prompt
                 system = base_system
                 if accumulator.tool_sequence:
                     system = base_system + "\n\n" + accumulator.get_summary()
 
+                # Warn when approaching iteration limit so the model wraps up
+                remaining = _MAX_ITERATIONS - iteration
+                if remaining <= 3 and iteration > 0:
+                    system += (
+                        f"\n\n⚠️ ITERATION BUDGET: You have {remaining} tool calls remaining. "
+                        "Summarize what you've found so far and provide your answer. "
+                        "Do NOT start new per-property analyses."
+                    )
+
                 # Stream this iteration's response
                 with self._client.messages.stream(
-                    model="claude-sonnet-4-20250514",
+                    model=_CLAUDE_MODEL,
                     max_tokens=4096,
                     system=system,
                     tools=FAKETOR_TOOLS,
@@ -1240,7 +1454,7 @@ class FaketorService:
             full_reply = "".join(all_text_parts)
             if not full_reply:
                 full_reply = (
-                    "Here's what I found based on my analysis so far."
+                    _FALLBACK_REPLY
                     if blocks
                     else "I gathered a lot of data but ran out of room to summarize it. Could you ask a more specific question?"
                 )

@@ -195,6 +195,7 @@ export function ContextPanel() {
                 onSelectProperty={(t) => setSelectedProperty(t)}
                 onViewAll={() => setShowAll(true)}
                 totalWorkingSetCount={workingSetMeta?.count ?? undefined}
+                filterDepth={workingSetMeta?.filter_depth ?? 0}
               />
             )}
 

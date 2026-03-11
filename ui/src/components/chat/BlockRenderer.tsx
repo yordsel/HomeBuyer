@@ -1,7 +1,11 @@
 /**
  * Maps response block types to their corresponding chat card components.
  * Used by ChatPage to render rich structured data inline in conversations.
+ *
+ * Wrapped in an ErrorBoundary so a rendering crash in any block card
+ * (e.g., missing fields, null dereferences) won't unmount the entire app.
  */
+import { Component, type ReactNode } from 'react';
 import type { ResponseBlock } from '../../types';
 import { ChatPropertyCard } from './ChatPropertyCard';
 import { ChatPredictionCard } from './ChatPredictionCard';
@@ -17,6 +21,46 @@ import { ChatSearchResults } from './ChatSearchResults';
 import { ChatQueryResult } from './ChatQueryResult';
 import { ChatInvestmentProspectus } from './ChatInvestmentProspectus';
 
+// ---------------------------------------------------------------------------
+// Error boundary — catches render crashes in any block card
+// ---------------------------------------------------------------------------
+
+interface EBProps {
+  children: ReactNode;
+  blockType: string;
+}
+interface EBState {
+  error: Error | null;
+}
+
+class BlockErrorBoundary extends Component<EBProps, EBState> {
+  state: EBState = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error(`BlockRenderer crash in "${this.props.blockType}":`, error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 my-2 text-xs text-red-700">
+          <p className="font-medium">Failed to render {this.props.blockType} card</p>
+          <p className="text-red-500 mt-1 truncate">{this.state.error.message}</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Block renderer
+// ---------------------------------------------------------------------------
+
 interface BlockRendererProps {
   block: ResponseBlock;
   /** Callback when a property address is clicked in a block card. */
@@ -24,34 +68,58 @@ interface BlockRendererProps {
 }
 
 export function BlockRenderer({ block, onAddressClick }: BlockRendererProps) {
+  let content: ReactNode;
+
   switch (block.type) {
     case 'property_detail':
-      return <ChatPropertyCard data={block.data} onAddressClick={onAddressClick} />;
+      content = <ChatPropertyCard data={block.data} onAddressClick={onAddressClick} />;
+      break;
     case 'prediction_card':
-      return <ChatPredictionCard data={block.data} />;
+      content = <ChatPredictionCard data={block.data} />;
+      break;
     case 'comps_table':
-      return <ChatCompsTable data={block.data} onAddressClick={onAddressClick} />;
+      content = <ChatCompsTable data={block.data} onAddressClick={onAddressClick} />;
+      break;
     case 'neighborhood_stats':
-      return <ChatNeighborhoodStats data={block.data} />;
+      content = <ChatNeighborhoodStats data={block.data} />;
+      break;
     case 'development_potential':
-      return <ChatDevelopmentCard data={block.data} />;
+      content = <ChatDevelopmentCard data={block.data} />;
+      break;
     case 'sell_vs_hold':
-      return <ChatSellVsHoldCard data={block.data} />;
+      content = <ChatSellVsHoldCard data={block.data} />;
+      break;
     case 'market_summary':
-      return <ChatMarketSummary data={block.data} />;
+      content = <ChatMarketSummary data={block.data} />;
+      break;
     case 'improvement_sim':
-      return <ChatImprovementSim data={block.data} />;
+      content = <ChatImprovementSim data={block.data} />;
+      break;
     case 'investment_scenarios':
-      return <ChatInvestmentScenarios data={block.data} />;
+      content = <ChatInvestmentScenarios data={block.data} />;
+      break;
     case 'rental_income':
-      return <ChatRentalIncome data={block.data} />;
+      content = <ChatRentalIncome data={block.data} />;
+      break;
     case 'property_search_results':
-      return <ChatSearchResults data={block.data} onAddressClick={onAddressClick} />;
+      content = <ChatSearchResults data={block.data} onAddressClick={onAddressClick} />;
+      break;
     case 'query_result':
-      return <ChatQueryResult data={block.data} />;
+      content = <ChatQueryResult data={block.data} />;
+      break;
     case 'investment_prospectus':
-      return <ChatInvestmentProspectus data={block.data} />;
-    default:
+      content = <ChatInvestmentProspectus data={block.data} />;
+      break;
+    default: {
+      const _exhaustive: never = block;
+      void _exhaustive;
       return null;
+    }
   }
+
+  return (
+    <BlockErrorBoundary blockType={block.type}>
+      {content}
+    </BlockErrorBoundary>
+  );
 }

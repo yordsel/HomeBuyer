@@ -5,25 +5,15 @@
  */
 import { formatCurrency, formatDate } from '../../lib/utils';
 import { AddressChip } from './AddressChip';
-
-interface CompData {
-  address: string;
-  sale_date: string;
-  sale_price: number;
-  beds?: number;
-  baths?: number;
-  sqft?: number;
-  price_per_sqft?: number;
-}
+import type { CompBlockData } from '../../types';
 
 interface ChatCompsTableProps {
-  data: Record<string, unknown>;
+  data: CompBlockData[];
   onAddressClick?: (address: string) => void;
 }
 
 export function ChatCompsTable({ data, onAddressClick }: ChatCompsTableProps) {
-  // data is an array of comps
-  const comps = (Array.isArray(data) ? data : []) as CompData[];
+  const comps = Array.isArray(data) ? data : [];
   const display = comps.slice(0, 5);
 
   if (display.length === 0) {

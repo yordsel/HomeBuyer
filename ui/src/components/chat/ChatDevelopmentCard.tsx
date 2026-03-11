@@ -3,41 +3,10 @@
  * Shows zoning, ADU eligibility, SB9 eligibility, and unit potential.
  */
 import { Building2, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
+import type { DevelopmentBlockData } from '../../types';
 
-interface DevelopmentData {
-  zoning?: {
-    zone_class?: string;
-    zone_desc?: string;
-    general_plan?: string;
-  };
-  zone_rule?: {
-    max_lot_coverage_pct?: number;
-    max_height_ft?: number;
-    is_hillside?: boolean;
-    residential?: boolean;
-  };
-  units?: {
-    base_max_units?: number;
-    middle_housing_eligible?: boolean;
-    middle_housing_max_units?: number;
-    effective_max_units?: number;
-  };
-  adu?: {
-    eligible?: boolean;
-    max_adu_sqft?: number;
-    remaining_lot_coverage_sqft?: number;
-    notes?: string;
-  };
-  sb9?: {
-    eligible?: boolean;
-    can_split?: boolean;
-    max_total_units?: number;
-    notes?: string;
-  };
-}
-
-export function ChatDevelopmentCard({ data }: { data: Record<string, unknown> }) {
-  const d = data as unknown as DevelopmentData;
+export function ChatDevelopmentCard({ data }: { data: DevelopmentBlockData }) {
+  const d = data;
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden my-2">

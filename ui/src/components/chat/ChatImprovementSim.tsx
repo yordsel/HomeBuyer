@@ -4,24 +4,10 @@
  */
 import { Wrench, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { formatCurrency } from '../../lib/utils';
+import type { ImprovementBlockData } from '../../types';
 
-interface ImprovementData {
-  current_price?: number;
-  improved_price?: number;
-  total_delta?: number;
-  total_cost?: number;
-  roi?: number;
-  categories?: {
-    category: string;
-    avg_cost?: number;
-    ml_delta?: number;
-    roi?: number;
-    market_premium_pct?: number;
-  }[];
-}
-
-export function ChatImprovementSim({ data }: { data: Record<string, unknown> }) {
-  const d = data as unknown as ImprovementData;
+export function ChatImprovementSim({ data }: { data: ImprovementBlockData }) {
+  const d = data;
   const categories = d.categories ?? [];
 
   return (

@@ -18,37 +18,21 @@ import type {
   RentalAnalysisResponse,
   RentEstimate,
   WorkingSetPage,
+  ResponseBlock,
+  WorkingSetMeta,
 } from '../types';
 
 // ---------------------------------------------------------------------------
-// Runtime detection: Tauri IPC vs direct HTTP to FastAPI
+// API base: in local dev hit the FastAPI server directly;
+// in production use relative URLs (same-origin).
 // ---------------------------------------------------------------------------
 
-const isTauri = '__TAURI_INTERNALS__' in window;
-
-// In Tauri or local dev, hit the local FastAPI server directly.
-// In production (same-origin), use relative URLs so the request goes
-// to the same host that served the frontend.
 const isLocal =
   window.location.hostname === 'localhost' ||
   window.location.hostname === '127.0.0.1';
-const API_BASE = isTauri || isLocal ? 'http://127.0.0.1:8787' : '';
+const API_BASE = isLocal ? 'http://127.0.0.1:8787' : '';
 
-/**
- * Wrapper that uses Tauri invoke() when running inside the Tauri shell,
- * or falls back to direct HTTP calls to the FastAPI backend when running
- * in a regular browser (useful for dev/preview without Tauri).
- */
-async function tauriInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  if (isTauri) {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return invoke<T>(command, args);
-  }
-  // Fallback: not available, throw so the HTTP functions below are used instead
-  throw new Error('Not in Tauri');
-}
-
-/** Simple GET helper for browser-mode API calls. */
+/** Simple GET helper. */
 async function apiGet<T>(path: string): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`);
   if (!resp.ok) {
@@ -58,7 +42,7 @@ async function apiGet<T>(path: string): Promise<T> {
   return resp.json();
 }
 
-/** Simple POST helper for browser-mode API calls. */
+/** Simple POST helper. */
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
@@ -77,12 +61,10 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
 // ============================================================================
 
 export async function getHealth(): Promise<{ status: string; model_loaded: boolean }> {
-  if (isTauri) return tauriInvoke('health');
   return apiGet('/api/health');
 }
 
 export async function getStatus(): Promise<DatabaseStatus> {
-  if (isTauri) return tauriInvoke('get_status');
   return apiGet('/api/status');
 }
 
@@ -91,14 +73,12 @@ export async function getStatus(): Promise<DatabaseStatus> {
 // ============================================================================
 
 export async function predictListing(url: string): Promise<ListingPredictionResponse> {
-  if (isTauri) return tauriInvoke('predict_listing', { url });
   return apiPost('/api/predict/listing', { url });
 }
 
 export async function predictManual(
   payload: ManualPredictPayload,
 ): Promise<{ prediction: PredictionResult }> {
-  if (isTauri) return tauriInvoke('predict_manual', { payload });
   return apiPost('/api/predict/manual', payload);
 }
 
@@ -106,7 +86,6 @@ export async function predictMapClick(
   latitude: number,
   longitude: number,
 ): Promise<MapClickResponse> {
-  if (isTauri) return tauriInvoke('predict_map_click', { latitude, longitude });
   return apiPost('/api/predict/map-click', { latitude, longitude });
 }
 
@@ -118,12 +97,6 @@ export async function getNeighborhoods(
   minSales?: number,
   years?: number,
 ): Promise<NeighborhoodStats[]> {
-  if (isTauri) {
-    return tauriInvoke('get_neighborhoods', {
-      min_sales: minSales ?? null,
-      years: years ?? null,
-    });
-  }
   const params = new URLSearchParams();
   if (minSales != null) params.set('min_sales', String(minSales));
   if (years != null) params.set('years', String(years));
@@ -135,15 +108,11 @@ export async function getNeighborhoodDetail(
   name: string,
   years?: number,
 ): Promise<NeighborhoodStats> {
-  if (isTauri) {
-    return tauriInvoke('get_neighborhood_detail', { name, years: years ?? null });
-  }
   const qs = years != null ? `?years=${years}` : '';
   return apiGet(`/api/neighborhoods/${encodeURIComponent(name)}${qs}`);
 }
 
 export async function getNeighborhoodGeoJson(): Promise<NeighborhoodGeoJson> {
-  if (isTauri) return tauriInvoke('get_neighborhood_geojson');
   return apiGet('/api/neighborhoods/geojson');
 }
 
@@ -152,13 +121,11 @@ export async function getNeighborhoodGeoJson(): Promise<NeighborhoodGeoJson> {
 // ============================================================================
 
 export async function getMarketTrend(months?: number): Promise<MarketSnapshot[]> {
-  if (isTauri) return tauriInvoke('get_market_trend', { months: months ?? null });
   const qs = months != null ? `?months=${months}` : '';
   return apiGet(`/api/market/trend${qs}`);
 }
 
 export async function getMarketSummary(): Promise<MarketSummary> {
-  if (isTauri) return tauriInvoke('get_market_summary');
   return apiGet('/api/market/summary');
 }
 
@@ -167,7 +134,6 @@ export async function getMarketSummary(): Promise<MarketSummary> {
 // ============================================================================
 
 export async function getModelInfo(): Promise<ModelInfo> {
-  if (isTauri) return tauriInvoke('get_model_info');
   return apiGet('/api/model/info');
 }
 
@@ -180,13 +146,6 @@ export async function getAffordability(
   downPct?: number,
   hoa?: number,
 ): Promise<AffordabilityResult> {
-  if (isTauri) {
-    return tauriInvoke('get_affordability', {
-      budget,
-      down_pct: downPct ?? null,
-      hoa: hoa ?? null,
-    });
-  }
   const params = new URLSearchParams();
   if (downPct != null) params.set('down_pct', String(downPct));
   if (hoa != null) params.set('hoa', String(hoa));
@@ -205,7 +164,6 @@ export async function getComparables(payload: {
   sqft?: number;
   year_built?: number;
 }): Promise<ComparableProperty[]> {
-  if (isTauri) return tauriInvoke('get_comparables', { payload });
   return apiPost('/api/comps', payload);
 }
 
@@ -220,7 +178,6 @@ export async function getPropertyPotential(payload: {
   lot_size_sqft?: number;
   sqft?: number;
 }): Promise<DevelopmentPotentialResponse> {
-  if (isTauri) return tauriInvoke('get_property_potential', { payload });
   return apiPost('/api/property/potential', payload);
 }
 
@@ -235,7 +192,6 @@ export async function getPropertyPotentialSummary(payload: {
   baths?: number;
   year_built?: number;
 }): Promise<PotentialSummaryResponse> {
-  if (isTauri) return tauriInvoke('get_property_potential_summary', { payload });
   return apiPost('/api/property/potential/summary', payload);
 }
 
@@ -253,7 +209,6 @@ export async function getImprovementSimulation(payload: {
   property_type?: string;
   hoa_per_month?: number;
 }): Promise<ImprovementSimResponse> {
-  if (isTauri) return tauriInvoke('get_improvement_simulation', { payload });
   return apiPost('/api/property/improvement-sim', payload);
 }
 
@@ -278,7 +233,6 @@ export async function getRentalAnalysis(payload: {
   down_payment_pct?: number;
   self_managed?: boolean;
 }): Promise<RentalAnalysisResponse> {
-  if (isTauri) return tauriInvoke('get_rental_analysis', { payload });
   return apiPost('/api/property/rental-analysis', payload);
 }
 
@@ -291,7 +245,6 @@ export async function getRentEstimate(payload: {
   neighborhood?: string;
   list_price?: number;
 }): Promise<RentEstimate> {
-  if (isTauri) return tauriInvoke('get_rent_estimate', { payload });
   return apiPost('/api/property/rent-estimate', payload);
 }
 
@@ -316,8 +269,132 @@ export async function sendFaketorMessage(payload: {
   property_type?: string;
   property_category?: string;
 }): Promise<FaketorChatResponse> {
-  if (isTauri) return tauriInvoke('faketor_chat', { payload });
   return apiPost('/api/faketor/chat', payload);
+}
+
+// ---------------------------------------------------------------------------
+// SSE streaming chat
+// ---------------------------------------------------------------------------
+
+export interface StreamCallbacks {
+  onTextDelta: (text: string) => void;
+  onToolStart: (name: string, label: string) => void;
+  onToolResult: (name: string, block: ResponseBlock | null) => void;
+  onDone: (reply: string, toolCalls: { name: string; input: Record<string, unknown> }[], blocks: ResponseBlock[]) => void;
+  onWorkingSet: (meta: WorkingSetMeta) => void;
+  onError: (message: string) => void;
+}
+
+/**
+ * Stream a Faketor chat message via SSE.
+ * Returns an AbortController so the caller can cancel.
+ */
+export function streamFaketorMessage(
+  payload: {
+    latitude: number;
+    longitude: number;
+    message: string;
+    history?: { role: string; content: string }[];
+    session_id?: string;
+    address?: string;
+    neighborhood?: string;
+    zip_code?: string;
+    beds?: number;
+    baths?: number;
+    sqft?: number;
+    lot_size_sqft?: number;
+    year_built?: number;
+    property_type?: string;
+    property_category?: string;
+  },
+  callbacks: StreamCallbacks,
+): AbortController {
+  const controller = new AbortController();
+
+  (async () => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/faketor/chat/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        callbacks.onError(data.detail ?? `HTTP ${resp.status}`);
+        return;
+      }
+
+      const reader = resp.body?.getReader();
+      if (!reader) {
+        callbacks.onError('No response body');
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE events from the buffer
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() ?? '';
+
+        for (const part of parts) {
+          const lines = part.split('\n');
+          let eventType = '';
+          let eventData = '';
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.slice(7);
+            } else if (line.startsWith('data: ')) {
+              eventData = line.slice(6);
+            }
+          }
+
+          if (!eventType || !eventData) continue;
+
+          try {
+            const data = JSON.parse(eventData);
+
+            switch (eventType) {
+              case 'text_delta':
+                callbacks.onTextDelta(data.text);
+                break;
+              case 'tool_start':
+                callbacks.onToolStart(data.name, data.label);
+                break;
+              case 'tool_result':
+                callbacks.onToolResult(data.name, data.block ?? null);
+                break;
+              case 'done':
+                callbacks.onDone(data.reply, data.tool_calls ?? [], data.blocks ?? []);
+                break;
+              case 'working_set':
+                callbacks.onWorkingSet(data as WorkingSetMeta);
+                break;
+              case 'error':
+                callbacks.onError(data.message);
+                break;
+            }
+          } catch {
+            // Skip malformed JSON
+          }
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      callbacks.onError(err instanceof Error ? err.message : 'Stream connection failed');
+    }
+  })();
+
+  return controller;
 }
 
 export async function getWorkingSetProperties(params: {

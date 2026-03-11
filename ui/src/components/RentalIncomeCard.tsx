@@ -11,7 +11,8 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import * as api from '../lib/tauri';
+import * as api from '../lib/api';
+import { formatCurrency, formatNumber } from '../lib/utils';
 import type { RentalAnalysisResponse, ExpenseBreakdown } from '../types';
 
 interface RentalIncomeCardProps {
@@ -25,15 +26,8 @@ interface RentalIncomeCardProps {
   lot_size_sqft?: number;
   year_built?: number;
   list_price?: number;
-}
-
-function fmt(n: number): string {
-  return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
-}
-
-function fmtCurrency(n: number): string {
-  if (n < 0) return `-$${fmt(Math.abs(n))}`;
-  return `$${fmt(n)}`;
+  /** Pre-fetched rental analysis data. When provided, the card skips its own fetch. */
+  rentalData?: RentalAnalysisResponse;
 }
 
 export function RentalIncomeCard(props: RentalIncomeCardProps) {
@@ -43,9 +37,14 @@ export function RentalIncomeCard(props: RentalIncomeCardProps) {
   const [showExpenses, setShowExpenses] = useState(false);
   const [showMortgage, setShowMortgage] = useState(false);
 
+  // Use parent-provided data when available; fall back to internal fetch.
+  const effectiveData = props.rentalData ?? data;
+
   useEffect(() => {
+    // Skip fetch when the parent already provides the data.
+    if (props.rentalData) return;
     fetchAnalysis();
-  }, [props.latitude, props.longitude]);
+  }, [props.latitude, props.longitude, props.rentalData, props.address, props.neighborhood, props.beds, props.baths, props.sqft, props.lot_size_sqft, props.year_built, props.list_price]);
 
   async function fetchAnalysis() {
     setLoading(true);
@@ -72,7 +71,7 @@ export function RentalIncomeCard(props: RentalIncomeCardProps) {
   }
 
   // Get the as-is scenario for the summary card
-  const asIs = data?.scenarios.find((s) => s.scenario_type === 'as_is') ?? null;
+  const asIs = effectiveData?.scenarios.find((s) => s.scenario_type === 'as_is') ?? null;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -82,7 +81,7 @@ export function RentalIncomeCard(props: RentalIncomeCardProps) {
           <DollarSign size={18} className="text-green-600" />
           <h3 className="font-semibold text-gray-900">Rental Income Analysis</h3>
         </div>
-        {data && (
+        {effectiveData && (
           <button
             onClick={fetchAnalysis}
             className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600"
@@ -123,7 +122,7 @@ export function RentalIncomeCard(props: RentalIncomeCardProps) {
               <MetricBox
                 icon={<Home size={14} className="text-green-600" />}
                 label="Monthly Rent"
-                value={fmtCurrency(asIs.total_monthly_rent)}
+                value={formatCurrency(asIs.total_monthly_rent)}
                 sub={`${asIs.units[0]?.estimation_method ?? ''}`}
               />
               <MetricBox
@@ -141,7 +140,7 @@ export function RentalIncomeCard(props: RentalIncomeCardProps) {
               <MetricBox
                 icon={<Receipt size={14} className="text-amber-600" />}
                 label="Monthly Cash Flow"
-                value={fmtCurrency(asIs.monthly_cash_flow)}
+                value={formatCurrency(asIs.monthly_cash_flow)}
                 sub={asIs.monthly_cash_flow >= 0 ? 'Positive' : 'Negative'}
                 valueColor={asIs.monthly_cash_flow >= 0 ? 'text-green-700' : 'text-red-600'}
               />
@@ -157,10 +156,10 @@ export function RentalIncomeCard(props: RentalIncomeCardProps) {
                   <div key={i} className="flex items-center justify-between text-sm">
                     <span className="text-gray-600">
                       {u.unit_type === 'main_house' ? 'Main House' : u.unit_type} —{' '}
-                      {u.beds}bd/{u.baths}ba{u.sqft ? `, ${fmt(u.sqft)} sqft` : ''}
+                      {u.beds}bd/{u.baths}ba{u.sqft ? `, ${formatNumber(u.sqft)} sqft` : ''}
                     </span>
                     <span className="font-semibold text-gray-900">
-                      {fmtCurrency(u.monthly_rent)}/mo
+                      {formatCurrency(u.monthly_rent)}/mo
                     </span>
                   </div>
                 ))}
@@ -173,7 +172,7 @@ export function RentalIncomeCard(props: RentalIncomeCardProps) {
             {/* Expense Breakdown (collapsible) */}
             <CollapsibleSection
               title="Operating Expenses"
-              subtitle={`${fmtCurrency(asIs.expenses.total_annual)}/yr (${asIs.expenses.expense_ratio_pct}% ratio)`}
+              subtitle={`${formatCurrency(asIs.expenses.total_annual)}/yr (${asIs.expenses.expense_ratio_pct}% ratio)`}
               open={showExpenses}
               onToggle={() => setShowExpenses(!showExpenses)}
             >
@@ -183,25 +182,25 @@ export function RentalIncomeCard(props: RentalIncomeCardProps) {
             {/* Mortgage Details (collapsible) */}
             <CollapsibleSection
               title="Mortgage Analysis"
-              subtitle={`${fmtCurrency(asIs.mortgage.monthly_piti)}/mo PITI at ${asIs.mortgage.rate_30yr}%`}
+              subtitle={`${formatCurrency(asIs.mortgage.monthly_piti)}/mo PITI at ${asIs.mortgage.rate_30yr}%`}
               open={showMortgage}
               onToggle={() => setShowMortgage(!showMortgage)}
             >
               <div className="space-y-1.5 text-sm">
-                <Row label="Property Value" value={fmtCurrency(asIs.mortgage.property_value)} />
+                <Row label="Property Value" value={formatCurrency(asIs.mortgage.property_value)} />
                 <Row
                   label={`Down Payment (${asIs.mortgage.down_payment_pct}%)`}
-                  value={fmtCurrency(asIs.mortgage.down_payment_amount)}
+                  value={formatCurrency(asIs.mortgage.down_payment_amount)}
                 />
-                <Row label="Loan Amount" value={fmtCurrency(asIs.mortgage.loan_amount)} />
+                <Row label="Loan Amount" value={formatCurrency(asIs.mortgage.loan_amount)} />
                 {asIs.mortgage.is_jumbo && (
                   <p className="text-xs text-amber-600">Jumbo loan — may have higher rate</p>
                 )}
                 <div className="border-t border-gray-200 pt-1.5 mt-1.5">
-                  <Row label="Monthly P&I" value={fmtCurrency(asIs.mortgage.monthly_pi)} />
-                  <Row label="Monthly Tax" value={fmtCurrency(asIs.mortgage.monthly_tax)} />
-                  <Row label="Monthly Insurance" value={fmtCurrency(asIs.mortgage.monthly_insurance)} />
-                  <Row label="Monthly PITI" value={fmtCurrency(asIs.mortgage.monthly_piti)} bold />
+                  <Row label="Monthly P&I" value={formatCurrency(asIs.mortgage.monthly_pi)} />
+                  <Row label="Monthly Tax" value={formatCurrency(asIs.mortgage.monthly_tax)} />
+                  <Row label="Monthly Insurance" value={formatCurrency(asIs.mortgage.monthly_insurance)} />
+                  <Row label="Monthly PITI" value={formatCurrency(asIs.mortgage.monthly_piti)} bold />
                 </div>
               </div>
             </CollapsibleSection>
@@ -212,18 +211,18 @@ export function RentalIncomeCard(props: RentalIncomeCardProps) {
                 Estimated Annual Tax Savings
               </p>
               <p className="text-lg font-bold text-blue-800">
-                {fmtCurrency(asIs.tax_benefits.estimated_tax_savings)}
+                {formatCurrency(asIs.tax_benefits.estimated_tax_savings)}
               </p>
               <p className="text-xs text-blue-600 mt-0.5">
-                Depreciation: {fmtCurrency(asIs.tax_benefits.depreciation_annual)} | Interest
-                deduction: {fmtCurrency(asIs.tax_benefits.mortgage_interest_deduction)}
+                Depreciation: {formatCurrency(asIs.tax_benefits.depreciation_annual)} | Interest
+                deduction: {formatCurrency(asIs.tax_benefits.mortgage_interest_deduction)}
               </p>
             </div>
 
             {/* Disclaimer */}
-            {data!.disclaimers.length > 0 && (
+            {effectiveData!.disclaimers.length > 0 && (
               <p className="text-xs text-gray-400 leading-relaxed">
-                {data!.disclaimers[0]}
+                {effectiveData!.disclaimers[0]}
               </p>
             )}
           </div>
@@ -275,10 +274,10 @@ function ExpenseTable({ expenses }: { expenses: ExpenseBreakdown }) {
   return (
     <div className="space-y-1.5 text-sm">
       {items.map((item) => (
-        <Row key={item.label} label={item.label} value={fmtCurrency(item.value)} />
+        <Row key={item.label} label={item.label} value={formatCurrency(item.value)} />
       ))}
       <div className="border-t border-gray-200 pt-1.5">
-        <Row label="Total Annual Expenses" value={fmtCurrency(expenses.total_annual)} bold />
+        <Row label="Total Annual Expenses" value={formatCurrency(expenses.total_annual)} bold />
       </div>
     </div>
   );

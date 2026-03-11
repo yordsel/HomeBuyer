@@ -5,31 +5,15 @@
  */
 import { Home, MapPin, Ruler, Calendar, DollarSign, LayoutGrid, ExternalLink } from 'lucide-react';
 import { formatCurrency, formatNumber } from '../../lib/utils';
-
-interface PropertyData {
-  address?: string;
-  neighborhood?: string;
-  zip_code?: string;
-  zoning_class?: string;
-  beds?: number;
-  baths?: number;
-  sqft?: number;
-  lot_size_sqft?: number;
-  year_built?: number;
-  property_type?: string;
-  use_description?: string;
-  last_sale_price?: number;
-  last_sale_date?: string;
-  building_sqft?: number;
-}
+import type { PropertyDetailBlockData } from '../../types';
 
 interface ChatPropertyCardProps {
-  data: Record<string, unknown>;
+  data: PropertyDetailBlockData;
   onAddressClick?: (address: string) => void;
 }
 
 export function ChatPropertyCard({ data, onAddressClick }: ChatPropertyCardProps) {
-  const d = data as unknown as PropertyData;
+  const d = data;
   const isClickable = !!onAddressClick && !!d.address;
 
   const handleClick = () => {

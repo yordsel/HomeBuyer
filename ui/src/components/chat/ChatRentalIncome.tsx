@@ -4,41 +4,10 @@
  */
 import { Home, DollarSign } from 'lucide-react';
 import { formatCurrency, formatPct } from '../../lib/utils';
+import type { RentalIncomeBlockData } from '../../types';
 
-interface RentalData {
-  scenario_name?: string;
-  property_value?: number;
-  total_monthly_rent?: number;
-  total_annual_rent?: number;
-  expenses?: {
-    property_tax?: number;
-    insurance?: number;
-    maintenance?: number;
-    vacancy_reserve?: number;
-    management_fee?: number;
-    total_annual?: number;
-    expense_ratio_pct?: number;
-  };
-  mortgage?: {
-    monthly_piti?: number;
-    rate_30yr?: number;
-    down_payment_pct?: number;
-    loan_amount?: number;
-  };
-  cap_rate_pct?: number;
-  cash_on_cash_pct?: number;
-  monthly_cash_flow?: number;
-  gross_rent_multiplier?: number;
-  price_to_rent_ratio?: number;
-  units?: {
-    unit_type?: string;
-    beds?: number;
-    monthly_rent?: number;
-  }[];
-}
-
-export function ChatRentalIncome({ data }: { data: Record<string, unknown> }) {
-  const d = data as unknown as RentalData;
+export function ChatRentalIncome({ data }: { data: RentalIncomeBlockData }) {
+  const d = data;
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden my-2">

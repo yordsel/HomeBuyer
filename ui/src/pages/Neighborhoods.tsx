@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Loader2, ArrowUpDown } from 'lucide-react';
 import { toast } from 'sonner';
-import * as api from '../lib/tauri';
+import * as api from '../lib/api';
 import { NeighborhoodCard } from '../components/NeighborhoodCard';
 import { NeighborhoodMap } from '../components/NeighborhoodMap';
 import { ViewToggle, type ViewMode } from '../components/ViewToggle';

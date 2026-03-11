@@ -4,36 +4,10 @@
  */
 import { Scale, TrendingUp } from 'lucide-react';
 import { formatCurrency, formatPct } from '../../lib/utils';
+import type { SellVsHoldBlockData } from '../../types';
 
-interface SellVsHoldData {
-  current_predicted_value?: number;
-  confidence_range?: [number, number];
-  neighborhood?: string;
-  yoy_appreciation_pct?: number;
-  mortgage_rate_30yr?: number;
-  hold_scenarios?: Record<
-    string,
-    {
-      projected_value?: number;
-      appreciation_pct?: number;
-      gross_gain?: number;
-      estimated_sell_costs?: number;
-      net_gain?: number;
-    }
-  >;
-  rental_estimate?: {
-    monthly_rent?: number;
-    annual_gross_rent?: number;
-    annual_net_rent?: number;
-    cap_rate_pct?: number;
-    price_to_rent_ratio?: number;
-    expense_ratio_pct?: number;
-    estimation_method?: string;
-  };
-}
-
-export function ChatSellVsHoldCard({ data }: { data: Record<string, unknown> }) {
-  const d = data as unknown as SellVsHoldData;
+export function ChatSellVsHoldCard({ data }: { data: SellVsHoldBlockData }) {
+  const d = data;
   const scenarios = d.hold_scenarios ?? {};
 
   return (

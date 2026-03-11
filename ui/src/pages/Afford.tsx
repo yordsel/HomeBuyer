@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { DollarSign, Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
-import * as api from '../lib/tauri';
+import * as api from '../lib/api';
 import { StatCard } from '../components/StatCard';
 import { formatCurrency } from '../lib/utils';
 import type { AffordabilityResult } from '../types';

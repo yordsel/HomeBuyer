@@ -24,6 +24,8 @@ from homebuyer.prediction.evaluate import (
 )
 from homebuyer.prediction.features import (
     FeatureBuilder,
+    MAX_TRAINING_SALE_PRICE,
+    MIN_TRAINING_SALE_DATE,
     MIN_TRAINING_SALE_PRICE,
     PROPERTY_TYPE_MAP,
 )
@@ -108,10 +110,12 @@ def train_model(
              = UPPER(TRIM(p.street_number || ' ' || p.street_name))
         WHERE ps.sale_price IS NOT NULL
           AND ps.sale_price >= ?
+          AND ps.sale_price <= ?
+          AND ps.sale_date >= ?
           AND ps.neighborhood IS NOT NULL
         ORDER BY ps.sale_date
         """,
-        (MIN_TRAINING_SALE_PRICE,),
+        (MIN_TRAINING_SALE_PRICE, MAX_TRAINING_SALE_PRICE, MIN_TRAINING_SALE_DATE),
     ).fetchall()
 
     # The raw query returns more rows than X because build_training_data()

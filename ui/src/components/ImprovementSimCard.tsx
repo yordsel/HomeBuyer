@@ -8,7 +8,7 @@ import {
   CheckCircle2,
   RefreshCw,
 } from 'lucide-react';
-import * as api from '../lib/tauri';
+import * as api from '../lib/api';
 import { formatCurrency } from '../lib/utils';
 import type { ImprovementSimResponse, ImprovementSimCategory } from '../types';
 
@@ -34,7 +34,7 @@ export function ImprovementSimCard(props: ImprovementSimCardProps) {
 
   useEffect(() => {
     fetchSimulation();
-  }, [props.latitude, props.longitude]);
+  }, [props.latitude, props.longitude, props.address, props.neighborhood, props.zip_code, props.beds, props.baths, props.sqft, props.lot_size_sqft, props.year_built, props.property_type]);
 
   async function fetchSimulation() {
     setLoading(true);

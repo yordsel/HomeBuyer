@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Search, Loader2, AlertCircle, Map, Link } from 'lucide-react';
 import { toast } from 'sonner';
-import * as api from '../lib/tauri';
+import * as api from '../lib/api';
 import { PredictionCard } from '../components/PredictionCard';
 import { PriceBreakdown } from '../components/PriceBreakdown';
 import { CompsTable } from '../components/CompsTable';

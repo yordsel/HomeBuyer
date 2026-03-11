@@ -22,6 +22,7 @@ import requests
 
 from homebuyer.processing.normalize import normalize_neighborhood
 from homebuyer.utils.http import create_session, rate_limited_get
+from homebuyer.utils.parse import safe_float, safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -247,21 +248,21 @@ class ListingFetcher:
         # Coordinates
         geo = entity.get("geo", {})
         if isinstance(geo, dict):
-            result["latitude"] = _safe_float(geo.get("latitude"))
-            result["longitude"] = _safe_float(geo.get("longitude"))
+            result["latitude"] = safe_float(geo.get("latitude"))
+            result["longitude"] = safe_float(geo.get("longitude"))
 
         # Property details
-        result["beds"] = _safe_float(
+        result["beds"] = safe_float(
             entity.get("numberOfBedrooms") or entity.get("numberOfRooms")
         )
-        result["baths"] = _safe_float(entity.get("numberOfBathroomsTotal"))
-        result["sqft"] = _safe_int(
+        result["baths"] = safe_float(entity.get("numberOfBathroomsTotal"))
+        result["sqft"] = safe_int(
             entity.get("floorSize", {}).get("value")
             if isinstance(entity.get("floorSize"), dict)
             else entity.get("floorSize")
         )
-        result["year_built"] = _safe_int(entity.get("yearBuilt"))
-        result["lot_size_sqft"] = _safe_int(
+        result["year_built"] = safe_int(entity.get("yearBuilt"))
+        result["lot_size_sqft"] = safe_int(
             entity.get("lotSize", {}).get("value")
             if isinstance(entity.get("lotSize"), dict)
             else entity.get("lotSize")
@@ -284,9 +285,9 @@ class ListingFetcher:
         # List price — prefer wrapper offers, then entity offers
         offers = wrapper_offers or entity.get("offers", {})
         if isinstance(offers, dict):
-            result["list_price"] = _safe_int(offers.get("price"))
+            result["list_price"] = safe_int(offers.get("price"))
         elif isinstance(offers, list) and offers:
-            result["list_price"] = _safe_int(offers[0].get("price"))
+            result["list_price"] = safe_int(offers[0].get("price"))
 
         # Only return if we got at least an address
         if result.get("address"):
@@ -311,7 +312,7 @@ class ListingFetcher:
                 r"Lot Size Square Feet[:\"]?\s*[:\"]?\s*([\d,]+)", html
             )
             if match:
-                result["lot_size_sqft"] = _safe_int(match.group(1))
+                result["lot_size_sqft"] = safe_int(match.group(1))
                 logger.debug("Scraped lot_size_sqft=%s from HTML.", result["lot_size_sqft"])
 
         if not result.get("lot_size_sqft"):
@@ -323,7 +324,7 @@ class ListingFetcher:
             ]:
                 match = re.search(acres_pattern, html, re.IGNORECASE)
                 if match:
-                    acres = _safe_float(match.group(1))
+                    acres = safe_float(match.group(1))
                     if acres and acres > 0:
                         result["lot_size_sqft"] = int(acres * 43_560)
                         logger.debug(
@@ -341,14 +342,14 @@ class ListingFetcher:
                 re.IGNORECASE,
             )
             if match:
-                result["hoa_per_month"] = _safe_int(match.group(1))
+                result["hoa_per_month"] = safe_int(match.group(1))
                 logger.debug("Scraped hoa_per_month=%s from HTML.", result["hoa_per_month"])
 
         # Year built (if missing from JSON-LD)
         if not result.get("year_built"):
             match = re.search(r"Year Built[:\"]?\s*[:\"]?\s*(\d{4})", html)
             if match:
-                result["year_built"] = _safe_int(match.group(1))
+                result["year_built"] = safe_int(match.group(1))
 
         # Garage spaces (useful context, store for future use)
         if not result.get("garage_spaces"):
@@ -356,7 +357,7 @@ class ListingFetcher:
                 r"Garage Spaces[:\"]?\s*[:\"]?\s*(\d+)", html
             )
             if match:
-                result["garage_spaces"] = _safe_int(match.group(1))
+                result["garage_spaces"] = safe_int(match.group(1))
 
     def _parse_from_inline_js(self, html: str) -> Optional[dict]:
         """Try to extract property data from inline JavaScript state.
@@ -381,7 +382,7 @@ class ListingFetcher:
         for key, pattern in meta_patterns.items():
             match = re.search(pattern, html, re.IGNORECASE)
             if match:
-                result[key] = _safe_float(match.group(1).replace(",", ""))
+                result[key] = safe_float(match.group(1).replace(",", ""))
 
         # Try to find list price
         price_match = re.search(
@@ -389,7 +390,7 @@ class ListingFetcher:
             html,
         )
         if price_match:
-            result["list_price"] = _safe_int(
+            result["list_price"] = safe_int(
                 price_match.group(1) or price_match.group(2)
             )
 
@@ -449,17 +450,17 @@ class ListingFetcher:
         result["zip_code"] = address_info.get("postalCode", "")
 
         # Coordinates
-        result["latitude"] = _safe_float(address_info.get("latitude"))
-        result["longitude"] = _safe_float(address_info.get("longitude"))
+        result["latitude"] = safe_float(address_info.get("latitude"))
+        result["longitude"] = safe_float(address_info.get("longitude"))
 
         # Property details
-        result["beds"] = _safe_float(basic_info.get("beds"))
-        result["baths"] = _safe_float(basic_info.get("baths"))
-        result["sqft"] = _safe_int(basic_info.get("sqFt"))
-        result["year_built"] = _safe_int(basic_info.get("yearBuilt"))
-        result["lot_size_sqft"] = _safe_int(basic_info.get("lotSqFt"))
-        result["hoa_per_month"] = _safe_int(basic_info.get("hoa", {}).get("amount"))
-        result["list_price"] = _safe_int(basic_info.get("price"))
+        result["beds"] = safe_float(basic_info.get("beds"))
+        result["baths"] = safe_float(basic_info.get("baths"))
+        result["sqft"] = safe_int(basic_info.get("sqFt"))
+        result["year_built"] = safe_int(basic_info.get("yearBuilt"))
+        result["lot_size_sqft"] = safe_int(basic_info.get("lotSqFt"))
+        result["hoa_per_month"] = safe_int(basic_info.get("hoa", {}).get("amount"))
+        result["list_price"] = safe_int(basic_info.get("price"))
 
         # Property type
         prop_type = basic_info.get("propertyType", "")
@@ -574,18 +575,3 @@ def _nearest_neighborhood(lat: float, lon: float, max_distance_deg: float = 0.00
     return None
 
 
-def _safe_float(value) -> Optional[float]:
-    """Convert to float, returning None on failure."""
-    if value is None:
-        return None
-    try:
-        result = float(str(value).replace(",", ""))
-        return result if result == result else None  # NaN check
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_int(value) -> Optional[int]:
-    """Convert to int, returning None on failure."""
-    f = _safe_float(value)
-    return int(f) if f is not None else None

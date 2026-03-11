@@ -7,11 +7,12 @@
  */
 import { useState } from 'react';
 import { FileText, Download, Loader2, TrendingUp, GitCompare, BookOpen } from 'lucide-react';
+import { toast } from 'sonner';
 import { formatCurrency, formatPct } from '../../lib/utils';
 import type { InvestmentProspectusResponse, PropertyProspectus, PortfolioSummary } from '../../types';
 
-export function ChatInvestmentProspectus({ data }: { data: Record<string, unknown> }) {
-  const d = data as unknown as InvestmentProspectusResponse;
+export function ChatInvestmentProspectus({ data }: { data: InvestmentProspectusResponse }) {
+  const d = data;
   const properties = d.properties ?? [];
 
   if (properties.length === 0) {
@@ -93,7 +94,7 @@ function PropertyCard({
       <div className="px-4 py-2.5 flex items-center justify-between">
         <DownloadButton data={data} />
         <span className="text-[9px] text-gray-400">
-          {p.data_sources.length} data sources
+          {(p.data_sources ?? []).length} data sources
           {p.generated_at && ` \u00B7 ${new Date(p.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
         </span>
       </div>
@@ -163,7 +164,7 @@ function PortfolioCard({
       <div className="px-4 py-2.5 flex items-center justify-between">
         <DownloadButton data={data} label="Download Portfolio (PDF)" />
         <span className="text-[9px] text-gray-400">
-          {properties[0]?.data_sources?.length || 0} data sources
+          {(properties[0]?.data_sources ?? []).length} data sources
         </span>
       </div>
     </div>
@@ -237,7 +238,7 @@ function SimilarCard({
       <div className="px-4 py-2.5 flex items-center justify-between">
         <DownloadButton data={data} label="Download Comparison (PDF)" />
         <span className="text-[9px] text-gray-400">
-          {properties[0]?.data_sources?.length || 0} data sources
+          {(properties[0]?.data_sources ?? []).length} data sources
         </span>
       </div>
     </div>
@@ -318,7 +319,7 @@ function ThesisCard({
       <div className="px-4 py-2.5 flex items-center justify-between">
         <DownloadButton data={data} label="Download Thesis (PDF)" />
         <span className="text-[9px] text-gray-400">
-          {properties[0]?.data_sources?.length || 0} data sources
+          {(properties[0]?.data_sources ?? []).length} data sources
         </span>
       </div>
     </div>
@@ -390,6 +391,7 @@ function DownloadButton({ data, label }: { data: InvestmentProspectusResponse; l
       await generateProspectusPdf(data);
     } catch (err) {
       console.error('PDF generation failed:', err);
+      toast.error('PDF generation failed. Please try again.');
     } finally {
       setLoading(false);
     }

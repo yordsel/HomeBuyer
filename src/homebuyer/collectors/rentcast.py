@@ -18,6 +18,8 @@ from typing import Optional
 
 import requests
 
+from homebuyer.utils.parse import safe_float, safe_int
+
 logger = logging.getLogger(__name__)
 
 RENTCAST_BASE_URL = "https://api.rentcast.io/v1"
@@ -241,31 +243,31 @@ class RentcastClient:
         source_fields: list[str] = []
 
         # --- Bedrooms ---
-        beds = _safe_float(prop.get("bedrooms"))
+        beds = safe_float(prop.get("bedrooms"))
         if beds is not None:
             detail.beds = beds
             source_fields.append("beds")
 
         # --- Bathrooms ---
-        baths = _safe_float(prop.get("bathrooms"))
+        baths = safe_float(prop.get("bathrooms"))
         if baths is not None:
             detail.baths = baths
             source_fields.append("baths")
 
         # --- Square footage ---
-        sqft = _safe_int(prop.get("squareFootage"))
+        sqft = safe_int(prop.get("squareFootage"))
         if sqft is not None and sqft > 0:
             detail.sqft = sqft
             source_fields.append("sqft")
 
         # --- Year built ---
-        year = _safe_int(prop.get("yearBuilt"))
+        year = safe_int(prop.get("yearBuilt"))
         if year is not None and 1800 <= year <= 2030:
             detail.year_built = year
             source_fields.append("year_built")
 
         # --- Lot size ---
-        lot_sqft = _safe_int(prop.get("lotSize"))
+        lot_sqft = safe_int(prop.get("lotSize"))
         if lot_sqft is not None and lot_sqft > 0:
             detail.lot_size_sqft = lot_sqft
             source_fields.append("lot_size_sqft")
@@ -277,7 +279,7 @@ class RentcastClient:
             source_fields.append("property_type")
 
         # --- Last sale ---
-        sale_price = _safe_int(prop.get("lastSalePrice"))
+        sale_price = safe_int(prop.get("lastSalePrice"))
         if sale_price is not None and sale_price > 0:
             detail.last_sale_price = sale_price
             source_fields.append("last_sale_price")
@@ -292,7 +294,7 @@ class RentcastClient:
         if tax_assessments:
             latest_year = max(tax_assessments.keys(), default=None)
             if latest_year:
-                detail.assessed_value = _safe_int(
+                detail.assessed_value = safe_int(
                     tax_assessments[latest_year].get("value")
                 )
 
@@ -300,7 +302,7 @@ class RentcastClient:
         if prop_taxes:
             latest_year = max(prop_taxes.keys(), default=None)
             if latest_year:
-                detail.tax_amount = _safe_int(
+                detail.tax_amount = safe_int(
                     prop_taxes[latest_year].get("total")
                 )
 
@@ -316,7 +318,7 @@ class RentcastClient:
         sale_transactions: list[RentcastSaleTransaction] = []
         for date_key in sorted(history.keys()):
             txn = history[date_key]
-            price = _safe_int(txn.get("price"))
+            price = safe_int(txn.get("price"))
             if price and price > 0:
                 sale_transactions.append(RentcastSaleTransaction(
                     sale_date=date_key[:10],
@@ -394,16 +396,3 @@ def _map_property_type(rentcast_type: str) -> str:
     return rentcast_type
 
 
-def _safe_float(value: object) -> Optional[float]:
-    if value is None:
-        return None
-    try:
-        result = float(str(value).replace(",", ""))
-        return result if result == result else None  # noqa: PLR0124 (NaN check)
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_int(value: object) -> Optional[int]:
-    f = _safe_float(value)
-    return int(f) if f is not None else None

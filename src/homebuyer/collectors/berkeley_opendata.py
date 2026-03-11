@@ -22,6 +22,7 @@ import requests
 from homebuyer.config import BERKELEY_OPENDATA_BESO_URL
 from homebuyer.storage.database import Database
 from homebuyer.storage.models import BESORecord, CollectionResult
+from homebuyer.utils.parse import safe_float, safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,7 @@ class BESOCollector:
                 continue
 
             property_type = row.get("beso_property_type")
-            floor_area = _safe_int(row.get("floor_area"))
+            floor_area = safe_int(row.get("floor_area"))
             assessment_status = row.get("assessment_first_cycle_status")
 
             # Extract the most recent year with data
@@ -165,8 +166,8 @@ class BESOCollector:
                 eui_key = fields["site_eui"]
                 status_key = fields["benchmark_status"]
 
-                score = _safe_int(row.get(score_key))
-                eui = _safe_float(row.get(eui_key))
+                score = safe_int(row.get(score_key))
+                eui = safe_float(row.get(eui_key))
                 bench_status = row.get(status_key)
 
                 # Only create a record if we have at least some data
@@ -189,21 +190,3 @@ class BESOCollector:
         return records
 
 
-def _safe_int(value: Optional[str]) -> Optional[int]:
-    """Parse an integer, returning None for invalid or null values."""
-    if value is None:
-        return None
-    try:
-        return int(float(value))
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_float(value: Optional[str]) -> Optional[float]:
-    """Parse a float, returning None for invalid or null values."""
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return None

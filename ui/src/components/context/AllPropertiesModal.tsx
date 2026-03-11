@@ -24,7 +24,7 @@ import { PropertyDetailModal } from './PropertyDetailModal';
 import type { TrackedProperty } from '../../context/PropertyContext';
 import type { ResponseBlockType, WorkingSetProperty } from '../../types';
 import { formatCurrency, formatNumber } from '../../lib/utils';
-import { getWorkingSetProperties } from '../../lib/tauri';
+import { getWorkingSetProperties } from '../../lib/api';
 
 interface AllPropertiesModalProps {
   open: boolean;
@@ -62,9 +62,8 @@ const FILTER_OPTIONS: { type: ResponseBlockType; label: string }[] = [
 
 function getPredictedPrice(tracked: TrackedProperty): number | null {
   const predBlock = tracked.blocks.find((b) => b.type === 'prediction_card');
-  if (predBlock) {
-    const price = (predBlock.data as Record<string, unknown>).predicted_price;
-    if (typeof price === 'number') return price;
+  if (predBlock && predBlock.type === 'prediction_card') {
+    return predBlock.data.predicted_price ?? null;
   }
   return tracked.property.predicted_price ?? null;
 }

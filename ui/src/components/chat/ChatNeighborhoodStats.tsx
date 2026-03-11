@@ -4,22 +4,10 @@
  */
 import { MapPin, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { formatCurrency, formatPct, formatNumber } from '../../lib/utils';
+import type { NeighborhoodBlockData } from '../../types';
 
-interface NeighborhoodData {
-  name?: string;
-  median_price?: number;
-  avg_price?: number;
-  median_ppsf?: number;
-  sale_count?: number;
-  yoy_price_change_pct?: number;
-  dominant_zoning?: string[];
-  median_lot_size?: number;
-  avg_year_built?: number;
-  property_type_breakdown?: Record<string, number>;
-}
-
-export function ChatNeighborhoodStats({ data }: { data: Record<string, unknown> }) {
-  const d = data as unknown as NeighborhoodData;
+export function ChatNeighborhoodStats({ data }: { data: NeighborhoodBlockData }) {
+  const d = data;
 
   const yoy = d.yoy_price_change_pct;
   const trendIcon =

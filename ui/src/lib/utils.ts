@@ -48,6 +48,27 @@ export function getTodayString(): string {
 }
 
 /**
+ * Format a number as compact USD: $1.2M, $345K, or full currency for small values.
+ */
+export function formatCompact(n: number | null | undefined): string {
+  if (n == null) return '—';
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return formatCurrency(n);
+}
+
+/**
+ * Format a backend tool name for display: strip common prefixes, replace
+ * underscores with spaces, and title-case each word.
+ */
+export function formatToolName(name: string): string {
+  return name
+    .replace(/^(get_|estimate_|analyze_|lookup_)/, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
  * Truncate a string to a max length with ellipsis.
  */
 export function truncate(s: string, maxLen: number): string {

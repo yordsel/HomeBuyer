@@ -21,6 +21,7 @@ import requests
 from homebuyer.config import BERKELEY_OPENDATA_PARCELS_URL
 from homebuyer.storage.database import Database
 from homebuyer.storage.models import BerkeleyParcel, CollectionResult, UseCode
+from homebuyer.utils.parse import safe_float, safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -190,8 +191,8 @@ class ParcelCollector:
                 continue
 
             # Extract coordinates
-            lat = _safe_float(row.get("latitude"))
-            lon = _safe_float(row.get("longitude"))
+            lat = safe_float(row.get("latitude"))
+            lon = safe_float(row.get("longitude"))
 
             # Fallback: try the_geom if lat/lon columns aren't present
             if lat is None or lon is None:
@@ -253,8 +254,8 @@ class ParcelCollector:
                 zip_code = "94702"
 
             # Lot and building size
-            lot_size = _safe_int(row.get("lot_size"))
-            building_sqft = _safe_int(
+            lot_size = safe_int(row.get("lot_size"))
+            building_sqft = safe_int(
                 row.get("building_ar")
                 or row.get("building_sqft")
                 or row.get("bldg_sqft")
@@ -306,26 +307,3 @@ class ParcelCollector:
         return parcels
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _safe_float(value: object) -> Optional[float]:
-    """Parse a float, returning None for invalid or null values."""
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_int(value: object) -> Optional[int]:
-    """Parse an integer, returning None for invalid or null values."""
-    if value is None:
-        return None
-    try:
-        return int(float(value))
-    except (ValueError, TypeError):
-        return None

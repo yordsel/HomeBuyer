@@ -15,6 +15,7 @@ from homebuyer.config import REDFIN_MARKET_S3_CITY, RAW_DIR
 from homebuyer.storage.database import Database
 from homebuyer.storage.models import CollectionResult, MarketMetric
 from homebuyer.utils.http import create_session, stream_download
+from homebuyer.utils.parse import safe_float, safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -151,38 +152,20 @@ class RedfinMarketCollector:
             period_duration=period_duration,
             region_name=region,
             property_type=property_type,
-            median_sale_price=_safe_int(row.get("MEDIAN_SALE_PRICE")),
-            median_list_price=_safe_int(row.get("MEDIAN_LIST_PRICE")),
-            median_ppsf=_safe_float(row.get("MEDIAN_PPSF")),
-            homes_sold=_safe_int(row.get("HOMES_SOLD")),
-            new_listings=_safe_int(row.get("NEW_LISTINGS")),
-            inventory=_safe_int(row.get("INVENTORY")),
-            months_of_supply=_safe_float(row.get("MONTHS_OF_SUPPLY")),
-            median_dom=_safe_int(row.get("MEDIAN_DOM")),
-            avg_sale_to_list=_safe_float(row.get("AVG_SALE_TO_LIST")),
-            sold_above_list_pct=_safe_float(row.get("SOLD_ABOVE_LIST")),
-            price_drops_pct=_safe_float(row.get("PRICE_DROPS")),
-            off_market_in_two_weeks_pct=_safe_float(
+            median_sale_price=safe_int(row.get("MEDIAN_SALE_PRICE")),
+            median_list_price=safe_int(row.get("MEDIAN_LIST_PRICE")),
+            median_ppsf=safe_float(row.get("MEDIAN_PPSF")),
+            homes_sold=safe_int(row.get("HOMES_SOLD")),
+            new_listings=safe_int(row.get("NEW_LISTINGS")),
+            inventory=safe_int(row.get("INVENTORY")),
+            months_of_supply=safe_float(row.get("MONTHS_OF_SUPPLY")),
+            median_dom=safe_int(row.get("MEDIAN_DOM")),
+            avg_sale_to_list=safe_float(row.get("AVG_SALE_TO_LIST")),
+            sold_above_list_pct=safe_float(row.get("SOLD_ABOVE_LIST")),
+            price_drops_pct=safe_float(row.get("PRICE_DROPS")),
+            off_market_in_two_weeks_pct=safe_float(
                 row.get("OFF_MARKET_IN_TWO_WEEKS")
             ),
         )
 
 
-def _safe_float(value: str | None) -> float | None:
-    """Parse a string to float, returning None on failure, empty, or 'NA'."""
-    if not value or not value.strip():
-        return None
-    cleaned = value.strip()
-    if cleaned.upper() == "NA":
-        return None
-    try:
-        result = float(cleaned)
-        return result if result == result else None  # NaN check
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_int(value: str | None) -> int | None:
-    """Parse a string to int via float, returning None on failure."""
-    f = _safe_float(value)
-    return int(f) if f is not None else None

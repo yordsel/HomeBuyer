@@ -9,10 +9,12 @@ Usage:
 """
 
 import logging
+import os
+import re
 import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import date
+from pathlib import Path as _Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -26,6 +28,279 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from homebuyer.config import DB_PATH, GEO_DIR
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Zone description lookup (used in predict_map_click and elsewhere)
+# ---------------------------------------------------------------------------
+
+_ZONE_DESCRIPTIONS: dict[str, str] = {
+    "C-AC": "Adeline Corridor Commercial",
+    "C-C": "Community Commercial",
+    "C-DMU": "Downtown Mixed Use",
+    "C-DMU Buffer": "Downtown Mixed Use Buffer",
+    "C-DMU Core": "Downtown Mixed Use Core",
+    "C-DMU Corridor": "Downtown Mixed Use Corridor",
+    "C-DMU Outer Core": "Downtown Mixed Use Outer Core",
+    "C-E": "Employment",
+    "C-N": "Neighborhood Commercial",
+    "C-NS": "North Shattuck Commercial",
+    "C-SA": "South Area Commercial",
+    "C-SO": "Solano Avenue Commercial",
+    "C-T": "Telegraph Avenue Commercial",
+    "C-U": "University Avenue Commercial",
+    "C-W": "West Berkeley Commercial",
+    "M": "Manufacturing",
+    "MM": "Mixed Manufacturing",
+    "MRD": "Mixed Residential/Development",
+    "MULI": "Mixed Use Light Industrial",
+    "MUR": "Mixed Use Residential",
+    "SP": "Specific Plan",
+    "U": "Unclassified",
+}
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers (deduplicated from multiple endpoints)
+# ---------------------------------------------------------------------------
+
+
+def _store_prediction_from_result(db, result, prop: dict, source: str):
+    """Store a prediction result in the cache. Used by all prediction endpoints."""
+    lat = prop.get("latitude")
+    lon = prop.get("longitude")
+    if not lat or not lon:
+        return
+    db.store_prediction(
+        latitude=lat,
+        longitude=lon,
+        predicted_price=result.predicted_price,
+        price_lower=result.price_lower,
+        price_upper=result.price_upper,
+        neighborhood=result.neighborhood or prop.get("neighborhood"),
+        zip_code=prop.get("zip_code"),
+        beds=prop.get("beds"),
+        baths=prop.get("baths"),
+        sqft=prop.get("sqft"),
+        year_built=prop.get("year_built"),
+        lot_size_sqft=prop.get("lot_size_sqft"),
+        property_type=prop.get("property_type"),
+        list_price=prop.get("list_price"),
+        hoa_per_month=prop.get("hoa_per_month"),
+        base_value=result.base_value,
+        predicted_premium_pct=result.predicted_premium_pct,
+        feature_contributions=result.feature_contributions,
+        source=source,
+    )
+
+
+def _resolve_property_from_db(
+    lat: float,
+    lon: float,
+    overrides: dict,
+    db,
+    geocoder,
+    *,
+    extra_fields: tuple[str, ...] = (),
+) -> dict:
+    """Resolve property details from DB nearest-sale + geocoder fallback.
+
+    ``overrides`` supplies caller-provided values that take precedence.
+    Returns a property dict suitable for ML prediction or analysis.
+    """
+    # Start with caller values
+    neighborhood = overrides.get("neighborhood")
+    zip_code = overrides.get("zip_code") or "94702"
+    sqft = overrides.get("sqft")
+    lot_size_sqft = overrides.get("lot_size_sqft")
+    address = overrides.get("address")
+    beds = overrides.get("beds")
+    baths = overrides.get("baths")
+    year_built = overrides.get("year_built")
+
+    # Fill gaps from nearest sale
+    if db:
+        nearest = db.find_nearest_sale(lat, lon, max_distance_m=50)
+        if nearest:
+            if not neighborhood:
+                neighborhood = nearest.get("neighborhood")
+            if sqft is None:
+                sqft = nearest.get("sqft")
+            if lot_size_sqft is None:
+                lot_size_sqft = nearest.get("lot_size_sqft")
+            if not address:
+                address = nearest.get("address")
+            if beds is None:
+                beds = nearest.get("beds")
+            if baths is None:
+                baths = nearest.get("baths")
+            if year_built is None:
+                year_built = nearest.get("year_built")
+            if not overrides.get("zip_code"):
+                zip_code = nearest.get("zip_code") or zip_code
+
+    # Geocoder fallback for neighborhood
+    if not neighborhood and geocoder:
+        neighborhood = geocoder.geocode_point(lat, lon)
+        if not neighborhood:
+            neighborhood = geocoder.geocode_nearest(lat, lon)
+    if not neighborhood:
+        neighborhood = "Berkeley"
+
+    prop = {
+        "latitude": lat,
+        "longitude": lon,
+        "neighborhood": neighborhood,
+        "zip_code": zip_code,
+        "beds": beds,
+        "baths": baths,
+        "sqft": sqft,
+        "lot_size_sqft": lot_size_sqft,
+        "year_built": year_built,
+        "property_type": overrides.get("property_type"),
+        "hoa_per_month": overrides.get("hoa_per_month"),
+        "address": address,
+    }
+    # Copy through any extra fields the caller needs
+    for f in extra_fields:
+        if f not in prop and f in overrides:
+            prop[f] = overrides[f]
+    return prop
+
+
+def _validate_sql(sql: str, *, allow_create: bool = False) -> str | None:
+    """Validate a SQL query for safety. Returns error message or None if OK."""
+    sql_upper = sql.upper().lstrip()
+    if not sql_upper.startswith("SELECT"):
+        return (
+            "Only SELECT queries are allowed. "
+            "INSERT, UPDATE, DELETE, DROP, and other modifying statements are blocked."
+        )
+    blocked = [
+        "INSERT", "UPDATE", "DELETE", "DROP", "ALTER",
+        "ATTACH", "DETACH", "PRAGMA", "VACUUM", "REINDEX",
+    ]
+    if not allow_create:
+        blocked.append("CREATE")
+    sql_words = set(re.findall(r'\b[A-Z]+\b', sql_upper))
+    blocked_found = sql_words & set(blocked)
+    if blocked_found:
+        return (
+            f"Query contains blocked keywords: {', '.join(sorted(blocked_found))}. "
+            "Only read-only SELECT queries are allowed."
+        )
+    return None
+
+
+def _enforce_sql_limit(sql: str) -> str:
+    """Add LIMIT 100 to a SQL query if none is present."""
+    if "LIMIT" not in sql.upper():
+        return sql.rstrip(";") + " LIMIT 100"
+    return sql
+
+
+def _clean_address_for_rentcast(address: str, zip_code: str) -> str:
+    """Strip city suffix from an address for RentCast API lookup."""
+    street = re.sub(r"\s+\d{5}(-\d{4})?$", "", address.strip())
+    for city in ("BERKELEY", "ALBANY", "EMERYVILLE", "OAKLAND", "KENSINGTON"):
+        if street.upper().endswith(f" {city}"):
+            street = street[:-(len(city) + 1)].strip()
+            break
+    return f"{street}, Berkeley, CA {zip_code}".strip()
+
+
+def _build_working_set_metadata(working_set, session_id: str | None) -> dict:
+    """Build working-set metadata dict for frontend sidebar.
+
+    Always returns metadata (even when count is 0) so the frontend
+    can synchronize its sidebar state with the server.
+    """
+    return {
+        "count": working_set.count,
+        "descriptor": working_set.get_descriptor(),
+        "session_id": session_id,
+        "sample": working_set.get_sample(25),
+        "discussed": [p.to_dict() for p in working_set.discussed],
+        "filter_depth": len(working_set.filter_stack),
+    }
+
+
+# Tools that operate on a single property (trigger discussed-property tracking)
+_PER_PROPERTY_TOOLS = {
+    "lookup_property",
+    "get_development_potential",
+    "get_improvement_simulation",
+    "get_price_prediction",
+    "get_comparable_sales",
+    "estimate_sell_vs_hold",
+    "estimate_rental_income",
+    "analyze_investment_scenarios",
+    "generate_investment_prospectus",
+    "lookup_permits",
+}
+
+
+def _track_discussed_property(
+    working_set,
+    tool_name: str,
+    tool_input: dict,
+    result_str: str,
+) -> None:
+    """Mark a property as discussed after a per-property tool call.
+
+    Tries to extract the property ID from the tool input first, then
+    falls back to parsing the result JSON.  If the property is in the
+    working set we use ``add_discussed``; otherwise we build a
+    ``PropertyRecord`` from the result and use ``add_discussed_record``.
+    """
+    from homebuyer.services.session_cache import PropertyRecord, WORKING_SET_FIELDS
+
+    # Parse result JSON once and reuse
+    result_data: dict | None = None
+    try:
+        parsed = json.loads(result_str)
+        if isinstance(parsed, dict):
+            result_data = parsed
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # 1. Try to get property_id from tool_input
+    property_id = tool_input.get("property_id")
+
+    # 2. Fallback: parse result JSON for "id" field
+    if property_id is None and result_data is not None:
+        property_id = result_data.get("id")
+
+    if property_id is None:
+        return
+
+    # Ensure int
+    try:
+        property_id = int(property_id)
+    except (ValueError, TypeError):
+        return
+
+    # 3. Try adding from working set first (most common case)
+    if property_id in working_set.properties:
+        working_set.add_discussed(property_id)
+        logger.info("Discussed property %d tracked from working set", property_id)
+        return
+
+    # 4. Property not in working set — build a record from the result
+    if result_data is not None:
+        try:
+            record_kwargs = {
+                k: result_data.get(k) for k in WORKING_SET_FIELDS
+            }
+            record_kwargs["id"] = property_id
+            record = PropertyRecord(**record_kwargs)
+            working_set.add_discussed_record(record)
+            logger.info(
+                "Discussed property %d tracked (not in working set)",
+                property_id,
+            )
+        except Exception as e:
+            logger.warning("Could not build PropertyRecord for discussed tracking: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -334,28 +609,7 @@ def predict_listing(req: ListingPredictRequest):
     result = model.predict_single(_state.db, listing)
 
     # Store in predictions cache
-    if listing.get("latitude") and listing.get("longitude"):
-        _state.db.store_prediction(
-            latitude=listing["latitude"],
-            longitude=listing["longitude"],
-            predicted_price=result.predicted_price,
-            price_lower=result.price_lower,
-            price_upper=result.price_upper,
-            neighborhood=result.neighborhood or listing.get("neighborhood"),
-            zip_code=listing.get("zip_code"),
-            beds=listing.get("beds"),
-            baths=listing.get("baths"),
-            sqft=listing.get("sqft"),
-            year_built=listing.get("year_built"),
-            lot_size_sqft=listing.get("lot_size_sqft"),
-            property_type=listing.get("property_type"),
-            list_price=listing.get("list_price"),
-            hoa_per_month=listing.get("hoa_per_month"),
-            base_value=result.base_value,
-            predicted_premium_pct=result.predicted_premium_pct,
-            feature_contributions=result.feature_contributions,
-            source="predict",
-        )
+    _store_prediction_from_result(_state.db, result, listing, source="predict")
 
     # Find comparable sales
     analyzer = _state.get_analyzer()
@@ -408,28 +662,7 @@ def predict_manual(req: ManualPredictRequest):
     result = model.predict_single(_state.db, prop)
 
     # Store in predictions cache
-    if prop.get("latitude") and prop.get("longitude"):
-        _state.db.store_prediction(
-            latitude=prop["latitude"],
-            longitude=prop["longitude"],
-            predicted_price=result.predicted_price,
-            price_lower=result.price_lower,
-            price_upper=result.price_upper,
-            neighborhood=result.neighborhood or prop.get("neighborhood"),
-            zip_code=prop.get("zip_code"),
-            beds=prop.get("beds"),
-            baths=prop.get("baths"),
-            sqft=prop.get("sqft"),
-            year_built=prop.get("year_built"),
-            lot_size_sqft=prop.get("lot_size_sqft"),
-            property_type=prop.get("property_type"),
-            list_price=prop.get("list_price"),
-            hoa_per_month=prop.get("hoa_per_month"),
-            base_value=result.base_value,
-            predicted_premium_pct=result.predicted_premium_pct,
-            feature_contributions=result.feature_contributions,
-            source="manual",
-        )
+    _store_prediction_from_result(_state.db, result, prop, source="manual")
 
     return {
         "prediction": _prediction_to_dict(result),
@@ -549,13 +782,7 @@ def predict_map_click(req: MapClickRequest):
             zip_code_val = prop.get("zip_code") or zip_code
 
             if _state.rentcast and _state.rentcast.enabled and address:
-                import re
-                _street = re.sub(r"\s+\d{5}(-\d{4})?$", "", address.strip())
-                for _city in ("BERKELEY", "ALBANY", "EMERYVILLE", "OAKLAND", "KENSINGTON"):
-                    if _street.upper().endswith(f" {_city}"):
-                        _street = _street[:-(len(_city) + 1)].strip()
-                        break
-                _full_addr = f"{_street}, Berkeley, CA {zip_code_val}".strip()
+                _full_addr = _clean_address_for_rentcast(address, zip_code_val)
                 _enrich_detail = _state.rentcast.lookup_property(address=_full_addr)
 
             if _enrich_detail:
@@ -572,26 +799,10 @@ def predict_map_click(req: MapClickRequest):
         result = model.predict_single(_state.db, prop)
 
         # Store in predictions cache
-        _state.db.store_prediction(
-            latitude=prop.get("latitude", req.latitude),
-            longitude=prop.get("longitude", req.longitude),
-            predicted_price=result.predicted_price,
-            price_lower=result.price_lower,
-            price_upper=result.price_upper,
-            neighborhood=result.neighborhood or neighborhood,
-            zip_code=prop.get("zip_code") or zip_code,
-            beds=prop.get("beds"),
-            baths=prop.get("baths"),
-            sqft=prop.get("sqft"),
-            year_built=prop.get("year_built"),
-            lot_size_sqft=prop.get("lot_size_sqft"),
-            property_type=prop.get("property_type"),
-            list_price=prop.get("list_price"),
-            base_value=result.base_value,
-            predicted_premium_pct=result.predicted_premium_pct,
-            feature_contributions=result.feature_contributions,
-            source="map-click",
-        )
+        prop.setdefault("latitude", req.latitude)
+        prop.setdefault("longitude", req.longitude)
+        prop.setdefault("zip_code", zip_code)
+        _store_prediction_from_result(_state.db, result, prop, source="map-click")
 
         analyzer = _state.get_analyzer()
         comps = analyzer.find_comparables(
@@ -641,26 +852,7 @@ def predict_map_click(req: MapClickRequest):
         result = model.predict_single(_state.db, prop)
 
         # Store in predictions cache
-        _state.db.store_prediction(
-            latitude=req.latitude,
-            longitude=req.longitude,
-            predicted_price=result.predicted_price,
-            price_lower=result.price_lower,
-            price_upper=result.price_upper,
-            neighborhood=result.neighborhood or neighborhood,
-            zip_code=zip_code,
-            beds=prop.get("beds"),
-            baths=prop.get("baths"),
-            sqft=prop.get("sqft"),
-            year_built=prop.get("year_built"),
-            lot_size_sqft=prop.get("lot_size_sqft"),
-            property_type=prop.get("property_type"),
-            list_price=prop.get("list_price"),
-            base_value=result.base_value,
-            predicted_premium_pct=result.predicted_premium_pct,
-            feature_contributions=result.feature_contributions,
-            source="map-click",
-        )
+        _store_prediction_from_result(_state.db, result, prop, source="map-click")
 
         analyzer = _state.get_analyzer()
         comps = analyzer.find_comparables(
@@ -958,50 +1150,12 @@ def improvement_simulation(req: ImprovementSimRequest):
             detail="Development potential calculator not available.",
         )
 
-    # Resolve property details from DB if needed
-    neighborhood = req.neighborhood
-    zip_code = req.zip_code or "94702"
-    sqft = req.sqft
-    lot_size_sqft = req.lot_size_sqft
-    address = req.address
-
-    if _state.db:
-        nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=50)
-        if nearest:
-            if not neighborhood:
-                neighborhood = nearest.get("neighborhood")
-            if sqft is None:
-                sqft = nearest.get("sqft")
-            if lot_size_sqft is None:
-                lot_size_sqft = nearest.get("lot_size_sqft")
-            if not address:
-                address = nearest.get("address")
-            if not req.zip_code:
-                zip_code = nearest.get("zip_code") or zip_code
-
-    if not neighborhood:
-        if _state.geocoder:
-            neighborhood = _state.geocoder.geocode_point(req.latitude, req.longitude)
-            if not neighborhood:
-                neighborhood = _state.geocoder.geocode_nearest(req.latitude, req.longitude)
-        if not neighborhood:
-            neighborhood = "Berkeley"
-
-    # Build property dict for the ML model
-    prop = {
-        "latitude": req.latitude,
-        "longitude": req.longitude,
-        "neighborhood": neighborhood,
-        "zip_code": zip_code,
-        "beds": req.beds,
-        "baths": req.baths,
-        "sqft": sqft,
-        "lot_size_sqft": lot_size_sqft,
-        "year_built": req.year_built,
-        "property_type": req.property_type,
-        "hoa_per_month": req.hoa_per_month,
-        "address": address,
-    }
+    # Resolve property details from DB + geocoder
+    prop = _resolve_property_from_db(
+        req.latitude, req.longitude,
+        req.model_dump(exclude_none=True),
+        _state.db, _state.geocoder,
+    )
 
     # Get improvement cost data from permits DB
     roi_data = _state.dev_calc._compute_improvement_roi()
@@ -1078,76 +1232,21 @@ def rental_analysis(req: RentalAnalysisRequest):
     if precomputed and precomputed.get("rental_json"):
         return json.loads(precomputed["rental_json"])
 
-    # Resolve property details from DB (same pattern as improvement_simulation)
-    neighborhood = req.neighborhood
-    zip_code = req.zip_code or "94702"
-    sqft = req.sqft
-    lot_size_sqft = req.lot_size_sqft
-    address = req.address
-    beds = req.beds
-    baths = req.baths
-    year_built = req.year_built
+    # Resolve property details from DB + geocoder
+    prop = _resolve_property_from_db(
+        req.latitude, req.longitude,
+        req.model_dump(exclude_none=True),
+        _state.db, _state.geocoder,
+        extra_fields=("list_price",),
+    )
 
-    if _state.db:
-        nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=50)
-        if nearest:
-            if not neighborhood:
-                neighborhood = nearest.get("neighborhood")
-            if sqft is None:
-                sqft = nearest.get("sqft")
-            if lot_size_sqft is None:
-                lot_size_sqft = nearest.get("lot_size_sqft")
-            if not address:
-                address = nearest.get("address")
-            if beds is None:
-                beds = nearest.get("beds")
-            if baths is None:
-                baths = nearest.get("baths")
-            if year_built is None:
-                year_built = nearest.get("year_built")
-            if not req.zip_code:
-                zip_code = nearest.get("zip_code") or zip_code
+    from homebuyer.analysis.rental_analysis import rental_analysis_to_dict
 
-    if not neighborhood:
-        if _state.geocoder:
-            neighborhood = _state.geocoder.geocode_point(req.latitude, req.longitude)
-            if not neighborhood:
-                neighborhood = _state.geocoder.geocode_nearest(req.latitude, req.longitude)
-        if not neighborhood:
-            neighborhood = "Berkeley"
-
-    prop = {
-        "latitude": req.latitude,
-        "longitude": req.longitude,
-        "neighborhood": neighborhood,
-        "zip_code": zip_code,
-        "beds": beds,
-        "baths": baths,
-        "sqft": sqft,
-        "lot_size_sqft": lot_size_sqft,
-        "year_built": year_built,
-        "property_type": req.property_type,
-        "hoa_per_month": req.hoa_per_month,
-        "address": address,
-        "list_price": req.list_price,
-    }
-
-    from homebuyer.analysis.rental_analysis import rental_analysis_to_dict, PropertyValueRequired
-
-    try:
-        result = _state.rental_analyzer.analyze(
-            prop,
-            down_payment_pct=req.down_payment_pct,
-            self_managed=req.self_managed,
-        )
-    except PropertyValueRequired:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Cannot determine property value. Provide list_price, or run "
-                "price prediction first to get a predicted_price."
-            ),
-        )
+    result = _state.rental_analyzer.analyze(
+        prop,
+        down_payment_pct=req.down_payment_pct,
+        self_managed=req.self_managed,
+    )
     return rental_analysis_to_dict(result)
 
 
@@ -1245,12 +1344,25 @@ def _make_session_tool_executor(working_set=None):
             and working_set.count > 0
         ):
             result_str = _execute_query_with_working_set(tool_input, working_set)
+        # For update_working_set with SQL in narrow mode, inject temp table
+        elif (
+            tool_name == "update_working_set"
+            and tool_input.get("sql")
+            and tool_input.get("mode") == "narrow"
+            and working_set is not None
+            and working_set.count > 0
+        ):
+            result_str = _execute_update_working_set_with_temp_table(tool_input, working_set)
         else:
             result_str = _faketor_tool_executor(tool_name, tool_input)
 
         # Post-execution: update the working set if applicable
         if working_set is not None:
             _update_working_set(working_set, tool_name, tool_input, result_str)
+
+        # Track discussed properties from per-property tool calls
+        if working_set is not None and tool_name in _PER_PROPERTY_TOOLS:
+            _track_discussed_property(working_set, tool_name, tool_input, result_str)
 
         return result_str
 
@@ -1283,32 +1395,11 @@ def _execute_query_with_working_set(tool_input: dict, working_set) -> str:
     if not sql:
         return json.dumps({"error": "No SQL query provided"})
 
-    # Safety: only allow SELECT statements
-    sql_upper = sql.upper().lstrip()
-    if not sql_upper.startswith("SELECT"):
-        return json.dumps({
-            "error": "Only SELECT queries are allowed. "
-            "INSERT, UPDATE, DELETE, DROP, and other modifying statements are blocked."
-        })
-
-    # Block dangerous keywords
-    _BLOCKED_KEYWORDS = (
-        "INSERT", "UPDATE", "DELETE", "DROP", "ALTER",
-        "ATTACH", "DETACH", "PRAGMA", "VACUUM", "REINDEX",
-    )
-    import re
-    sql_words = set(re.findall(r'\b[A-Z]+\b', sql_upper))
-    # CREATE is allowed here because we create temp tables internally
-    blocked_found = sql_words & set(_BLOCKED_KEYWORDS)
-    if blocked_found:
-        return json.dumps({
-            "error": f"Query contains blocked keywords: {', '.join(sorted(blocked_found))}. "
-            "Only read-only SELECT queries are allowed."
-        })
-
-    # Enforce LIMIT
-    if "LIMIT" not in sql_upper:
-        sql = sql.rstrip(";") + " LIMIT 100"
+    # Safety: validate SQL (CREATE allowed for temp table)
+    error = _validate_sql(sql, allow_create=True)
+    if error:
+        return json.dumps({"error": error})
+    sql = _enforce_sql_limit(sql)
 
     logger.info("query_database (session, %d props): %s", working_set.count, sql)
 
@@ -1350,6 +1441,67 @@ def _execute_query_with_working_set(tool_input: dict, working_set) -> str:
             pass
 
 
+def _execute_update_working_set_with_temp_table(tool_input: dict, working_set) -> str:
+    """Execute update_working_set with SQL mode and _working_set temp table.
+
+    Used for narrow mode where the SQL references _working_set.
+    """
+    if not _state or not _state.db:
+        return json.dumps({"error": "Database not available"})
+
+    sql = (tool_input.get("sql") or "").strip()
+    mode = tool_input.get("mode", "narrow")
+    explanation = tool_input.get("explanation", "")
+    requested_limit = min(tool_input.get("limit", 10), 25)
+
+    if not sql:
+        return json.dumps({"error": "No SQL query provided"})
+
+    error = _validate_sql(sql, allow_create=True)
+    if error:
+        return json.dumps({"error": error})
+    sql = _enforce_sql_limit(sql)
+
+    logger.info("update_working_set (sql+temp, mode=%s, %d props): %s",
+                mode, working_set.count, sql)
+
+    conn = _state.db.conn
+    try:
+        # Create temp table with working set IDs
+        conn.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS _working_set "
+            "(property_id INTEGER PRIMARY KEY)"
+        )
+        conn.execute("DELETE FROM _working_set")
+        property_ids = working_set.get_property_ids()
+        conn.executemany(
+            "INSERT OR IGNORE INTO _working_set (property_id) VALUES (?)",
+            [(pid,) for pid in property_ids],
+        )
+
+        cursor = conn.execute(sql)
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        rows = cursor.fetchall()
+        results = [dict(zip(columns, row)) for row in rows]
+
+        return json.dumps({
+            "mode": mode,
+            "source": "sql",
+            "results": results[:requested_limit],
+            "total_matching": len(results),
+            "filters_applied": {"sql": sql, "explanation": explanation},
+        }, default=str)
+    except Exception as e:
+        error_msg = str(e)
+        logger.warning("update_working_set (sql+temp) failed: %s", e, exc_info=True)
+        return json.dumps({"error": f"SQL error: {error_msg}", "query": sql})
+    finally:
+        try:
+            conn.execute("DROP TABLE IF EXISTS _working_set")
+        except Exception:
+            pass
+
+
 def _update_working_set(working_set, tool_name: str, tool_input: dict, result_str: str) -> None:
     """Update the session working set based on tool results."""
     try:
@@ -1377,9 +1529,20 @@ def _update_working_set(working_set, tool_name: str, tool_input: dict, result_st
 
         # If there are more matches than returned, fetch ALL for the working set
         # (but only when there are no dev-potential post-filters)
+        _LIGHTWEIGHT_KEYS = {
+            "neighborhoods", "zoning_classes", "zoning_pattern",
+            "property_type", "property_category", "record_type",
+            "ownership_type", "min_price", "max_price",
+            "min_beds", "max_beds", "min_baths", "max_baths",
+            "min_lot_sqft", "max_lot_sqft", "min_sqft", "max_sqft",
+            "min_year_built", "max_year_built",
+        }
         if total_matching > len(results) and _state and _state.db and not has_dev_filter:
             try:
-                all_rows = _state.db.search_properties_lightweight(**filters)
+                lightweight_filters = {
+                    k: v for k, v in filters.items() if k in _LIGHTWEIGHT_KEYS
+                }
+                all_rows = _state.db.search_properties_lightweight(**lightweight_filters)
             except Exception as e:
                 logger.warning("Lightweight search for working set failed: %s", e, exc_info=True)
                 all_rows = results  # fallback to the 25
@@ -1415,6 +1578,102 @@ def _update_working_set(working_set, tool_name: str, tool_input: dict, result_st
         else:
             working_set.push_filter(ids_in_result, explanation, tool_name)
 
+    elif tool_name == "update_working_set":
+        mode = data.get("mode", "replace")
+        results = data.get("results", [])
+        filters = data.get("filters_applied", {})
+        total_matching = data.get("total_matching", len(results))
+        desc = tool_input.get("explanation") or _describe_search_filters(filters)
+
+        # ADU/SB9 are post-filters
+        has_dev_filter = bool(
+            tool_input.get("adu_eligible") or tool_input.get("sb9_eligible")
+        )
+
+        # For structured searches with more matches than returned,
+        # fetch ALL for the working set via lightweight search
+        _LIGHTWEIGHT_KEYS = {
+            "neighborhoods", "zoning_classes", "zoning_pattern",
+            "property_type", "property_category", "record_type",
+            "ownership_type", "min_price", "max_price",
+            "min_beds", "max_beds", "min_baths", "max_baths",
+            "min_lot_sqft", "max_lot_sqft", "min_sqft", "max_sqft",
+            "min_year_built", "max_year_built",
+        }
+        source = data.get("source", "structured")
+        all_rows = results  # default: use the returned results
+
+        if (
+            source == "structured"
+            and total_matching > len(results)
+            and _state and _state.db
+            and not has_dev_filter
+        ):
+            try:
+                lightweight_filters = {
+                    k: v for k, v in filters.items() if k in _LIGHTWEIGHT_KEYS
+                }
+                all_rows = _state.db.search_properties_lightweight(**lightweight_filters)
+            except Exception as e:
+                logger.warning("Lightweight search for working set failed: %s", e, exc_info=True)
+                all_rows = results  # fallback
+
+        if mode == "replace":
+            working_set.set_properties(all_rows, desc, tool_name)
+
+        elif mode == "narrow":
+            if not results:
+                # Narrow to empty — still push a filter so undo works
+                working_set.push_filter(set(), desc, tool_name)
+            else:
+                new_ids = {r["id"] for r in all_rows if r.get("id")}
+                working_set.push_filter(new_ids, desc, tool_name)
+
+        elif mode == "expand":
+            if results:
+                # For expand, fetch full records for IDs not already in set
+                ids_to_add = {
+                    r["id"] for r in all_rows
+                    if r.get("id") and r["id"] not in working_set.properties
+                }
+                if ids_to_add:
+                    _expand_working_set_from_ids(
+                        working_set, ids_to_add, desc, tool_name,
+                    )
+
+
+def _expand_working_set_from_ids(
+    working_set, property_ids: set[int], description: str, source_tool: str,
+) -> None:
+    """Expand the working set by fetching new property records from the DB."""
+    if not _state or not _state.db:
+        return
+    # Filter out IDs already in working set (safety check)
+    new_ids = property_ids - set(working_set.properties.keys())
+    if not new_ids:
+        return
+
+    _WS_FIELDS = (
+        "id, address, neighborhood, beds, baths, sqft, building_sqft, "
+        "lot_size_sqft, zoning_class, property_type, last_sale_price, year_built, "
+        "latitude, longitude, property_category, record_type, lot_group_key, situs_unit"
+    )
+    _SQLITE_VAR_LIMIT = 900  # Stay under SQLite's default 999 limit
+
+    try:
+        rows: list[dict] = []
+        id_list = list(new_ids)
+        # Batch queries to avoid SQLite variable limit
+        for i in range(0, len(id_list), _SQLITE_VAR_LIMIT):
+            batch = id_list[i : i + _SQLITE_VAR_LIMIT]
+            placeholders = ",".join("?" * len(batch))
+            sql = f"SELECT {_WS_FIELDS} FROM properties WHERE id IN ({placeholders})"
+            cursor = _state.db.conn.execute(sql, batch)
+            rows.extend(dict(row) for row in cursor.fetchall())
+        working_set.expand_properties(rows, description, source_tool)
+    except Exception as e:
+        logger.warning("Failed to expand working set from IDs: %s", e)
+
 
 def _populate_working_set_from_ids(
     working_set, property_ids: set[int], description: str, source_tool: str,
@@ -1422,16 +1681,24 @@ def _populate_working_set_from_ids(
     """Populate the working set by fetching property records from the DB."""
     if not _state or not _state.db:
         return
-    placeholders = ",".join("?" * len(property_ids))
-    sql = (
-        f"SELECT id, address, neighborhood, beds, baths, sqft, building_sqft, "
-        f"lot_size_sqft, zoning_class, property_type, last_sale_price, year_built, "
-        f"latitude, longitude, property_category, record_type, lot_group_key, situs_unit "
-        f"FROM properties WHERE id IN ({placeholders})"
+
+    _WS_FIELDS = (
+        "id, address, neighborhood, beds, baths, sqft, building_sqft, "
+        "lot_size_sqft, zoning_class, property_type, last_sale_price, year_built, "
+        "latitude, longitude, property_category, record_type, lot_group_key, situs_unit"
     )
+    _SQLITE_VAR_LIMIT = 900  # Stay under SQLite's default 999 limit
+
     try:
-        cursor = _state.db.conn.execute(sql, list(property_ids))
-        rows = [dict(row) for row in cursor.fetchall()]
+        rows: list[dict] = []
+        id_list = list(property_ids)
+        # Batch queries to avoid SQLite variable limit
+        for i in range(0, len(id_list), _SQLITE_VAR_LIMIT):
+            batch = id_list[i : i + _SQLITE_VAR_LIMIT]
+            placeholders = ",".join("?" * len(batch))
+            sql = f"SELECT {_WS_FIELDS} FROM properties WHERE id IN ({placeholders})"
+            cursor = _state.db.conn.execute(sql, batch)
+            rows.extend(dict(row) for row in cursor.fetchall())
         working_set.set_properties(rows, description, source_tool)
     except Exception as e:
         logger.warning("Failed to populate working set from IDs: %s", e)
@@ -1449,6 +1716,241 @@ def _describe_search_filters(filters: dict) -> str:
         else:
             parts.append(f"{label}: {val}")
     return "; ".join(parts) if parts else "all properties"
+
+
+def _execute_update_working_set(tool_input: dict) -> str:
+    """Execute the update_working_set tool.
+
+    Handles both structured mode (filter params) and SQL mode.
+    Returns search results in the same format as search_properties
+    so the frontend can render property_search_results blocks.
+    """
+    if not _state or not _state.db:
+        return json.dumps({"error": "Database not available"})
+
+    mode = tool_input.get("mode", "replace")
+    sql = (tool_input.get("sql") or "").strip()
+    explanation = tool_input.get("explanation", "")
+    requested_limit = min(tool_input.get("limit", 10), 25)
+    adu_filter = tool_input.get("adu_eligible")
+    sb9_filter = tool_input.get("sb9_eligible")
+
+    if sql:
+        # --- SQL mode ---
+        error = _validate_sql(sql, allow_create=True)
+        if error:
+            return json.dumps({"error": error})
+        sql = _enforce_sql_limit(sql)
+
+        logger.info("update_working_set (sql, mode=%s): %s", mode, sql)
+        try:
+            cursor = _state.db.conn.execute(sql)
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            rows = cursor.fetchall()
+            results = [dict(zip(columns, row)) for row in rows]
+        except Exception as e:
+            logger.warning("update_working_set SQL failed: %s", e, exc_info=True)
+            return json.dumps({"error": f"SQL error: {str(e)}", "query": sql})
+
+        # ADU/SB9 post-filtering for SQL mode (if rows have dev potential)
+        if adu_filter or sb9_filter:
+            filtered = []
+            for row in results:
+                pot_raw = row.get("potential_json")
+                if pot_raw:
+                    try:
+                        pot = json.loads(pot_raw) if isinstance(pot_raw, str) else pot_raw
+                        adu = pot.get("adu", {})
+                        sb9 = pot.get("sb9", {})
+                        if adu_filter and not adu.get("eligible"):
+                            continue
+                        if sb9_filter and not sb9.get("eligible"):
+                            continue
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                elif adu_filter or sb9_filter:
+                    continue  # Can't verify eligibility without dev data
+                filtered.append(row)
+            results = filtered
+
+        return json.dumps({
+            "mode": mode,
+            "source": "sql",
+            "results": results[:requested_limit],
+            "total_matching": len(results),
+            "filters_applied": {"sql": sql, "explanation": explanation},
+        }, default=str)
+
+    else:
+        # --- Structured mode ---
+        _search_filters = dict(
+            neighborhoods=tool_input.get("neighborhoods"),
+            zoning_classes=tool_input.get("zoning_classes"),
+            zoning_pattern=tool_input.get("zoning_pattern"),
+            property_type=tool_input.get("property_type"),
+            property_category=tool_input.get("property_category"),
+            record_type=tool_input.get("record_type"),
+            ownership_type=tool_input.get("ownership_type"),
+            min_price=tool_input.get("min_price"),
+            max_price=tool_input.get("max_price"),
+            min_beds=tool_input.get("min_beds"),
+            max_beds=tool_input.get("max_beds"),
+            min_baths=tool_input.get("min_baths"),
+            max_baths=tool_input.get("max_baths"),
+            min_lot_sqft=tool_input.get("min_lot_sqft"),
+            max_lot_sqft=tool_input.get("max_lot_sqft"),
+            min_sqft=tool_input.get("min_sqft"),
+            max_sqft=tool_input.get("max_sqft"),
+            min_year_built=tool_input.get("min_year_built"),
+            max_year_built=tool_input.get("max_year_built"),
+        )
+
+        # Get true total count
+        total_matching = _state.db.count_properties_advanced(**_search_filters)
+
+        # Over-fetch when post-filtering on dev potential flags
+        sql_limit = requested_limit * 4 if (adu_filter or sb9_filter) else requested_limit
+
+        rows = _state.db.search_properties_advanced(
+            **_search_filters,
+            limit=sql_limit,
+        )
+
+        if not rows:
+            return json.dumps({
+                "mode": mode,
+                "source": "structured",
+                "results": [],
+                "total_found": 0,
+                "total_matching": total_matching,
+                "message": "No properties match your criteria.",
+            })
+
+        results = []
+        for row in rows:
+            # Parse development potential from precomputed JSON
+            dev_summary = None
+            potential_raw = row.get("potential_json")
+            if potential_raw:
+                try:
+                    pot = json.loads(potential_raw)
+                    adu = pot.get("adu") or {}
+                    sb9 = pot.get("sb9") or {}
+                    units = pot.get("units") or {}
+                    zoning = pot.get("zoning") or {}
+                    dev_summary = {
+                        "adu_eligible": adu.get("eligible", False),
+                        "adu_max_sqft": adu.get("max_adu_sqft"),
+                        "sb9_eligible": sb9.get("eligible", False),
+                        "sb9_can_split": sb9.get("can_split", False),
+                        "sb9_max_units": sb9.get("max_total_units"),
+                        "effective_max_units": units.get("effective_max_units"),
+                        "middle_housing_eligible": units.get("middle_housing_eligible", False),
+                        "zone_class": zoning.get("zone_class"),
+                        "zone_desc": zoning.get("zone_desc"),
+                    }
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Post-filter on ADU/SB9 eligibility
+            if adu_filter and (not dev_summary or not dev_summary.get("adu_eligible")):
+                continue
+            if sb9_filter and (not dev_summary or not dev_summary.get("sb9_eligible")):
+                continue
+
+            # Parse predicted price
+            predicted_price = None
+            prediction_confidence = None
+            pred_raw = row.get("prediction_json")
+            if pred_raw:
+                try:
+                    pred = json.loads(pred_raw)
+                    predicted_price = pred.get("predicted_price")
+                    prediction_confidence = pred.get("prediction_confidence")
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Data quality flags
+            r_sqft = row.get("sqft")
+            r_building_sqft = row.get("building_sqft")
+            r_lot_size_sqft = row.get("lot_size_sqft")
+
+            data_quality = "normal"
+            data_quality_note = None
+            if r_building_sqft and r_sqft and r_sqft > 0:
+                try:
+                    bld_ratio = float(r_building_sqft) / float(r_sqft)
+                    if bld_ratio > 3:
+                        data_quality = "per_unit_mismatch"
+                        data_quality_note = (
+                            f"Per-unit features likely: building sqft ({r_building_sqft:,}) "
+                            f"is {bld_ratio:.1f}x the listing sqft ({r_sqft:,})."
+                        )
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+            if data_quality == "normal" and row.get("property_type") == "Multi-Family (5+ Unit)":
+                data_quality = "mf5_limited_data"
+                data_quality_note = "Multi-family 5+ unit — limited comparable data."
+
+            building_to_lot_ratio = None
+            if r_building_sqft and r_lot_size_sqft and r_lot_size_sqft > 0:
+                try:
+                    building_to_lot_ratio = round(
+                        float(r_building_sqft) / float(r_lot_size_sqft), 3
+                    )
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+
+            r_record_type = row.get("record_type")
+            if data_quality == "normal" and r_record_type == "unit" and (not r_lot_size_sqft or r_lot_size_sqft == 0):
+                data_quality = "shared_lot_no_size"
+                data_quality_note = "Condo unit with shared lot — lot size may be zero or shared."
+
+            results.append({
+                "id": row.get("id"),
+                "address": row.get("address"),
+                "neighborhood": row.get("neighborhood"),
+                "zip_code": row.get("zip_code"),
+                "zoning_class": row.get("zoning_class"),
+                "beds": row.get("beds"),
+                "baths": row.get("baths"),
+                "sqft": row.get("sqft"),
+                "building_sqft": r_building_sqft,
+                "lot_size_sqft": r_lot_size_sqft,
+                "building_to_lot_ratio": building_to_lot_ratio,
+                "year_built": row.get("year_built"),
+                "property_type": row.get("property_type"),
+                "property_category": row.get("property_category"),
+                "record_type": r_record_type,
+                "situs_unit": row.get("situs_unit"),
+                "lot_group_key": row.get("lot_group_key"),
+                "last_sale_price": row.get("last_sale_price"),
+                "last_sale_date": row.get("last_sale_date"),
+                "predicted_price": predicted_price,
+                "prediction_confidence": prediction_confidence,
+                "data_quality": data_quality,
+                "data_quality_note": data_quality_note,
+                "development": dev_summary,
+                "latitude": row.get("latitude"),
+                "longitude": row.get("longitude"),
+            })
+
+            if len(results) >= requested_limit:
+                break
+
+        filters_applied = {
+            k: v for k, v in tool_input.items()
+            if v is not None and k not in ("limit", "mode", "sql", "explanation")
+        }
+
+        return json.dumps({
+            "mode": mode,
+            "source": "structured",
+            "results": results,
+            "total_found": len(results),
+            "total_matching": total_matching,
+            "filters_applied": filters_applied,
+        }, default=str)
 
 
 def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
@@ -1519,33 +2021,10 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         model = _require_model()
         if not _state or not _state.dev_calc:
             return json.dumps({"error": "Development calculator not available"})
-        lat = tool_input["latitude"]
-        lon = tool_input["longitude"]
-        neighborhood = tool_input.get("neighborhood")
-        sqft = tool_input.get("sqft")
-        lot_size = tool_input.get("lot_size_sqft")
-        address = tool_input.get("address")
-        if _state.db:
-            nearest = _state.db.find_nearest_sale(lat, lon, max_distance_m=50)
-            if nearest:
-                if not neighborhood:
-                    neighborhood = nearest.get("neighborhood")
-                if sqft is None:
-                    sqft = nearest.get("sqft")
-                if lot_size is None:
-                    lot_size = nearest.get("lot_size_sqft")
-        if not neighborhood and _state.geocoder:
-            neighborhood = _state.geocoder.geocode_point(lat, lon) or "Berkeley"
-        prop = {
-            "latitude": lat, "longitude": lon,
-            "neighborhood": neighborhood or "Berkeley",
-            "zip_code": tool_input.get("zip_code", "94702"),
-            "beds": tool_input.get("beds"), "baths": tool_input.get("baths"),
-            "sqft": sqft, "lot_size_sqft": lot_size,
-            "year_built": tool_input.get("year_built"),
-            "property_type": tool_input.get("property_type", "Single Family Residential"),
-            "address": address,
-        }
+        prop = _resolve_property_from_db(
+            tool_input["latitude"], tool_input["longitude"],
+            tool_input, _state.db, _state.geocoder,
+        )
         roi_data = _state.dev_calc._compute_improvement_roi()
         improvements = [{"category": r.category, "estimated_cost": r.avg_job_value}
                         for r in roi_data]
@@ -1639,15 +2118,10 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         # Reuse cached prediction (or override with user-stated value)
         if current_value_override:
             current_value = int(current_value_override)
+            pred_dict = {"price_lower": current_value, "price_upper": current_value}
         else:
             pred_dict = _get_or_compute_prediction(tool_input, source="chat")
             current_value = pred_dict["predicted_price"]
-
-        # If no override, still need pred_dict for confidence range
-        if not current_value_override:
-            pred_dict = _get_or_compute_prediction(tool_input, source="chat")
-        else:
-            pred_dict = {"price_lower": current_value, "price_upper": current_value}
 
         # Get neighborhood YoY appreciation
         neighborhood = tool_input.get("neighborhood", "Berkeley")
@@ -1766,19 +2240,12 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         if current_value_override:
             prop["list_price"] = int(current_value_override)  # _resolve_property_value picks up list_price first
 
-        from homebuyer.analysis.rental_analysis import _scenario_to_dict, PropertyValueRequired
-        try:
-            scenario = _state.rental_analyzer.build_scenario_as_is(
-                prop,
-                down_payment_pct=tool_input.get("down_payment_pct", 20.0),
-                rate_override=mortgage_rate_override,
-            )
-        except PropertyValueRequired:
-            return json.dumps({
-                "error": "Cannot estimate rental income without a property value. "
-                "Please run get_price_prediction first to get the predicted price, "
-                "then call this tool again with the predicted price as current_value_override."
-            })
+        from homebuyer.analysis.rental_analysis import _scenario_to_dict
+        scenario = _state.rental_analyzer.build_scenario_as_is(
+            prop,
+            down_payment_pct=tool_input.get("down_payment_pct", 20.0),
+            rate_override=mortgage_rate_override,
+        )
         return json.dumps(_scenario_to_dict(scenario), default=str)
 
     elif tool_name == "analyze_investment_scenarios":
@@ -1831,21 +2298,14 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             except Exception:
                 pass
 
-        from homebuyer.analysis.rental_analysis import rental_analysis_to_dict, PropertyValueRequired
-        try:
-            result = _state.rental_analyzer.analyze(
-                prop,
-                down_payment_pct=tool_input.get("down_payment_pct", 20.0),
-                self_managed=tool_input.get("self_managed", True),
-                rate_override=mortgage_rate_override,
-                property_category=inv_property_category,
-            )
-        except PropertyValueRequired:
-            return json.dumps({
-                "error": "Cannot analyze investment scenarios without a property value. "
-                "Please run get_price_prediction first to get the predicted price, "
-                "then call this tool again with the predicted price as current_value_override."
-            })
+        from homebuyer.analysis.rental_analysis import rental_analysis_to_dict
+        result = _state.rental_analyzer.analyze(
+            prop,
+            down_payment_pct=tool_input.get("down_payment_pct", 20.0),
+            self_managed=tool_input.get("self_managed", True),
+            rate_override=mortgage_rate_override,
+            property_category=inv_property_category,
+        )
         return json.dumps(rental_analysis_to_dict(result), default=str)
 
     elif tool_name == "generate_investment_prospectus":
@@ -1914,13 +2374,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             zip_code_val = best.get("zip_code", "")
 
             if _state.rentcast and _state.rentcast.enabled and address:
-                import re
-                _street = re.sub(r"\s+\d{5}(-\d{4})?$", "", address.strip())
-                for _city in ("BERKELEY", "ALBANY", "EMERYVILLE", "OAKLAND", "KENSINGTON"):
-                    if _street.upper().endswith(f" {_city}"):
-                        _street = _street[:-(len(_city) + 1)].strip()
-                        break
-                _full_addr = f"{_street}, Berkeley, CA {zip_code_val}".strip()
+                _full_addr = _clean_address_for_rentcast(address, zip_code_val)
                 _enrich_detail = _state.rentcast.lookup_property(address=_full_addr)
 
             if _enrich_detail:
@@ -2149,6 +2603,9 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             "filters_applied": filters_applied,
         }, default=str)
 
+    elif tool_name == "update_working_set":
+        return _execute_update_working_set(tool_input)
+
     elif tool_name == "lookup_permits":
         if not _state or not _state.db:
             return json.dumps({"error": "Database not available"})
@@ -2176,33 +2633,11 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         if not sql:
             return json.dumps({"error": "No SQL query provided"})
 
-        # Safety: only allow SELECT statements
-        sql_upper = sql.upper().lstrip()
-        if not sql_upper.startswith("SELECT"):
-            return json.dumps({
-                "error": "Only SELECT queries are allowed. "
-                "INSERT, UPDATE, DELETE, DROP, and other modifying statements are blocked."
-            })
-
-        # Block dangerous keywords that could appear in subqueries or CTEs
-        _BLOCKED_KEYWORDS = (
-            "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE",
-            "ATTACH", "DETACH", "PRAGMA", "VACUUM", "REINDEX",
-        )
-        # Tokenize on whitespace/punctuation to avoid false positives
-        # (e.g. "DELETE" in a column alias) — check word boundaries
-        import re
-        sql_words = set(re.findall(r'\b[A-Z]+\b', sql_upper))
-        blocked_found = sql_words & set(_BLOCKED_KEYWORDS)
-        if blocked_found:
-            return json.dumps({
-                "error": f"Query contains blocked keywords: {', '.join(sorted(blocked_found))}. "
-                "Only read-only SELECT queries are allowed."
-            })
-
-        # Enforce a LIMIT to prevent unbounded result sets
-        if "LIMIT" not in sql_upper:
-            sql = sql.rstrip(";") + " LIMIT 100"
+        # Safety: validate SQL (no CREATE allowed in non-session path)
+        error = _validate_sql(sql)
+        if error:
+            return json.dumps({"error": error})
+        sql = _enforce_sql_limit(sql)
 
         logger.info("query_database: %s | explanation: %s", sql, explanation)
 
@@ -2231,75 +2666,46 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
 
 def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
     """Resolve property context from request + DB for Faketor chat."""
-    neighborhood = req.neighborhood
-    sqft = req.sqft
-    lot_size = req.lot_size_sqft
-    beds = req.beds
-    baths = req.baths
-    year_built = req.year_built
-    address = req.address
-    zip_code = req.zip_code
-    property_category = req.property_category
-
-    if _state.db:
-        nearest = _state.db.find_nearest_sale(req.latitude, req.longitude, max_distance_m=50)
-        if nearest:
-            if not neighborhood:
-                neighborhood = nearest.get("neighborhood")
-            if sqft is None:
-                sqft = nearest.get("sqft")
-            if lot_size is None:
-                lot_size = nearest.get("lot_size_sqft")
-            if beds is None:
-                beds = nearest.get("beds")
-            if baths is None:
-                baths = nearest.get("baths")
-            if year_built is None:
-                year_built = nearest.get("year_built")
-            if not address:
-                address = nearest.get("address")
-            if not zip_code:
-                zip_code = nearest.get("zip_code")
-
-        # Enrich property_category from properties table if not provided
-        if not property_category:
-            try:
-                delta = 50 / 111_139.0  # ~50m bounding box
-                row = _state.db.conn.execute(
-                    """SELECT property_category, record_type
-                       FROM properties
-                       WHERE latitude BETWEEN ? AND ?
-                         AND longitude BETWEEN ? AND ?
-                       LIMIT 1""",
-                    (req.latitude - delta, req.latitude + delta,
-                     req.longitude - delta, req.longitude + delta),
-                ).fetchone()
-                if row:
-                    property_category = row["property_category"]
-            except Exception:
-                pass
-
-    if not neighborhood and _state.geocoder:
-        neighborhood = _state.geocoder.geocode_point(req.latitude, req.longitude)
-        if not neighborhood:
-            neighborhood = _state.geocoder.geocode_nearest(req.latitude, req.longitude)
-    if not neighborhood:
-        neighborhood = "Berkeley"
-
-    return {
-        "latitude": req.latitude,
-        "longitude": req.longitude,
-        "address": address or req.address,
-        "neighborhood": neighborhood,
-        "zip_code": zip_code or "94702",
-        "beds": beds,
-        "baths": baths,
-        "sqft": sqft,
-        "lot_size_sqft": lot_size,
-        "year_built": year_built,
-        "property_type": req.property_type,
-        "property_category": property_category,
+    overrides = {
+        k: v for k, v in {
+            "neighborhood": req.neighborhood,
+            "sqft": req.sqft,
+            "lot_size_sqft": req.lot_size_sqft,
+            "beds": req.beds,
+            "baths": req.baths,
+            "year_built": req.year_built,
+            "address": req.address,
+            "zip_code": req.zip_code,
+            "property_type": req.property_type,
+        }.items() if v is not None
     }
+
+    prop = _resolve_property_from_db(
+        req.latitude, req.longitude,
+        overrides, _state.db, _state.geocoder,
+    )
+
+    # Enrich property_category from properties table if not provided
+    property_category = req.property_category
+    if not property_category and _state.db:
+        try:
+            delta = 50 / 111_139.0  # ~50m bounding box
+            row = _state.db.conn.execute(
+                """SELECT property_category, record_type
+                   FROM properties
+                   WHERE latitude BETWEEN ? AND ?
+                     AND longitude BETWEEN ? AND ?
+                   LIMIT 1""",
+                (req.latitude - delta, req.latitude + delta,
+                 req.longitude - delta, req.longitude + delta),
+            ).fetchone()
+            if row:
+                property_category = row["property_category"]
+        except Exception:
+            pass
+
+    prop["property_category"] = property_category
+    return prop
 
 
 @app.post("/api/faketor/chat")
@@ -2325,16 +2731,9 @@ def faketor_chat(req: FaketorChatRequest):
     )
 
     # Attach working set metadata for the frontend sidebar
-    if working_set and working_set.count > 0:
-        result["working_set"] = {
-            "count": working_set.count,
-            "descriptor": working_set.get_descriptor(),
-            "session_id": req.session_id,
-            "addresses": [
-                prop.address for prop in working_set.properties.values()
-                if prop.address
-            ],
-        }
+    # Always emit — even when count is 0 — so the frontend can sync.
+    if working_set is not None:
+        result["working_set"] = _build_working_set_metadata(working_set, req.session_id)
 
     return result
 
@@ -2365,17 +2764,13 @@ def faketor_chat_stream(req: FaketorChatRequest):
             data = json.dumps(event["data"], default=str)
             yield f"event: {event_type}\ndata: {data}\n\n"
 
-        # Emit working set metadata after the chat is done
-        if working_set and working_set.count > 0:
-            ws_data = json.dumps({
-                "count": working_set.count,
-                "descriptor": working_set.get_descriptor(),
-                "session_id": req.session_id,
-                "addresses": [
-                    prop.address for prop in working_set.properties.values()
-                    if prop.address
-                ],
-            }, default=str)
+        # Emit working set metadata after the chat is done.
+        # Always emit — even when count is 0 — so the frontend can sync.
+        if working_set is not None:
+            ws_data = json.dumps(
+                _build_working_set_metadata(working_set, req.session_id),
+                default=str,
+            )
             yield f"event: working_set\ndata: {ws_data}\n\n"
 
     return StreamingResponse(
@@ -2572,26 +2967,7 @@ def _get_or_compute_prediction(tool_input: dict, source: str = "chat") -> dict:
     pred_dict = _prediction_to_dict(result)
 
     # 3) Store in cache
-    _state.db.store_prediction(
-        latitude=lat,
-        longitude=lon,
-        predicted_price=result.predicted_price,
-        price_lower=result.price_lower,
-        price_upper=result.price_upper,
-        neighborhood=result.neighborhood or neighborhood,
-        zip_code=zip_code,
-        beds=beds,
-        baths=baths,
-        sqft=sqft,
-        year_built=year_built,
-        lot_size_sqft=lot_size_sqft,
-        property_type=property_type,
-        list_price=result.list_price,
-        base_value=result.base_value,
-        predicted_premium_pct=result.predicted_premium_pct,
-        feature_contributions=result.feature_contributions,
-        source=source,
-    )
+    _store_prediction_from_result(_state.db, result, prop, source=source)
 
     return pred_dict
 
@@ -2946,32 +3322,6 @@ def _collect_permits_background(address: str) -> None:
 
 
 # Common non-residential zone descriptions for user-friendly error messages
-_ZONE_DESCRIPTIONS: dict[str, str] = {
-    "C-AC": "Adeline Corridor Commercial",
-    "C-C": "Community Commercial",
-    "C-DMU": "Downtown Mixed Use",
-    "C-DMU Buffer": "Downtown Mixed Use Buffer",
-    "C-DMU Core": "Downtown Mixed Use Core",
-    "C-DMU Corridor": "Downtown Mixed Use Corridor",
-    "C-DMU Outer Core": "Downtown Mixed Use Outer Core",
-    "C-E": "Employment",
-    "C-N": "Neighborhood Commercial",
-    "C-NS": "North Shattuck Commercial",
-    "C-SA": "South Area Commercial",
-    "C-SO": "Solano Avenue Commercial",
-    "C-T": "Telegraph Avenue Commercial",
-    "C-U": "University Avenue Commercial",
-    "C-W": "West Berkeley Commercial",
-    "M": "Manufacturing",
-    "MM": "Mixed Manufacturing",
-    "MRD": "Mixed Residential/Development",
-    "MULI": "Mixed Use Light Industrial",
-    "MUR": "Mixed Use Residential",
-    "SP": "Specific Plan",
-    "U": "Unclassified",
-}
-
-
 def _neighborhood_stats_to_dict(stats) -> dict:
     """Convert NeighborhoodStats to JSON-serializable dict."""
     return {
@@ -2996,9 +3346,6 @@ def _neighborhood_stats_to_dict(stats) -> dict:
 # ---------------------------------------------------------------------------
 # Static file serving for production (React SPA)
 # ---------------------------------------------------------------------------
-
-import os
-from pathlib import Path as _Path
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
