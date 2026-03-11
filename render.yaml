@@ -22,9 +22,5 @@ services:
         fromDatabase:
           name: homebuyer-db
           property: connectionString
-      - key: ATTOM_API_KEY
-        sync: false
       - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: RENTCAST_API_KEY
         sync: false
