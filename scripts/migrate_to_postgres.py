@@ -225,6 +225,7 @@ def main():
     logger.info("Initializing PostgreSQL schema...")
     from homebuyer.storage.database import Database
     pg_db = Database(database_url)
+    pg_db.connect()
     pg_db.initialize_schema()
     logger.info("Schema initialized.")
 
