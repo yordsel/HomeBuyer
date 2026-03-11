@@ -152,39 +152,32 @@ class MarketAnalyzer:
         stats.median_sqft = row["avg_sqft"]  # approx
         stats.avg_year_built = row["avg_year_built"]
 
-        # Calculate median via subquery
-        median_row = self.db.execute(
+        # Calculate median sale price
+        prices = self.db.execute(
             """
             SELECT sale_price FROM property_sales
             WHERE neighborhood = ? AND sale_date >= ? AND sale_price IS NOT NULL
             ORDER BY sale_price
-            LIMIT 1 OFFSET (
-                SELECT COUNT(*) / 2 FROM property_sales
-                WHERE neighborhood = ? AND sale_date >= ? AND sale_price IS NOT NULL
-            )
             """,
-            (neighborhood, cutoff.isoformat(), neighborhood, cutoff.isoformat()),
-        ).fetchone()
-        if median_row:
-            stats.median_price = median_row["sale_price"]
+            (neighborhood, cutoff.isoformat()),
+        ).fetchall()
+        if prices:
+            mid = len(prices) // 2
+            stats.median_price = prices[mid]["sale_price"]
 
         # Median price per sqft
-        ppsf_median = self.db.execute(
+        ppsf_rows = self.db.execute(
             """
             SELECT price_per_sqft FROM property_sales
             WHERE neighborhood = ? AND sale_date >= ?
               AND price_per_sqft IS NOT NULL
             ORDER BY price_per_sqft
-            LIMIT 1 OFFSET (
-                SELECT COUNT(*) / 2 FROM property_sales
-                WHERE neighborhood = ? AND sale_date >= ?
-                  AND price_per_sqft IS NOT NULL
-            )
             """,
-            (neighborhood, cutoff.isoformat(), neighborhood, cutoff.isoformat()),
-        ).fetchone()
-        if ppsf_median:
-            stats.median_ppsf = round(ppsf_median["price_per_sqft"], 2)
+            (neighborhood, cutoff.isoformat()),
+        ).fetchall()
+        if ppsf_rows:
+            mid = len(ppsf_rows) // 2
+            stats.median_ppsf = round(ppsf_rows[mid]["price_per_sqft"], 2)
 
         # Year-over-year price change
         stats.yoy_price_change_pct = self._calc_yoy_change(neighborhood)
@@ -965,22 +958,18 @@ class MarketAnalyzer:
         cutoff = (date.today() - timedelta(days=lookback_years * 365)).isoformat()
 
         # Median lot size
-        lot_row = self.db.execute(
+        lot_rows = self.db.execute(
             """
             SELECT lot_size_sqft FROM property_sales
             WHERE neighborhood = ? AND sale_date >= ?
               AND lot_size_sqft IS NOT NULL AND lot_size_sqft > 0
             ORDER BY lot_size_sqft
-            LIMIT 1 OFFSET (
-                SELECT COUNT(*) / 2 FROM property_sales
-                WHERE neighborhood = ? AND sale_date >= ?
-                  AND lot_size_sqft IS NOT NULL AND lot_size_sqft > 0
-            )
             """,
-            (stats.name, cutoff, stats.name, cutoff),
-        ).fetchone()
-        if lot_row:
-            stats.median_lot_size = lot_row["lot_size_sqft"]
+            (stats.name, cutoff),
+        ).fetchall()
+        if lot_rows:
+            mid = len(lot_rows) // 2
+            stats.median_lot_size = lot_rows[mid]["lot_size_sqft"]
 
         # Property type breakdown
         type_rows = self.db.execute(
