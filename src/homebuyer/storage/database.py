@@ -388,7 +388,10 @@ def _adapt_sql(sql: str, backend: str) -> str:
     """
     if backend == "sqlite":
         return sql
-    # Replace ? placeholders with %s (but not inside strings)
+    # Escape existing % characters so psycopg2 doesn't treat them as
+    # format specifiers (e.g. LIKE 'R-1%' → LIKE 'R-1%%'), then
+    # replace ? placeholders with %s.
+    sql = sql.replace("%", "%%")
     sql = sql.replace("?", "%s")
     # Replace inline datetime('now') with a UTC text timestamp to match
     # the TEXT column format used by SQLite's datetime('now').
