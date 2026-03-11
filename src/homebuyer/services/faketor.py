@@ -794,6 +794,40 @@ FAKETOR_TOOLS = [
             "required": ["mode"],
         },
     },
+    {
+        "name": "lookup_regulation",
+        "description": (
+            "Look up Berkeley regulations, zoning definitions, or housing policies. "
+            "Covers all 32+ zoning code definitions (R-1, R-1H, R-2, C-SA, MUR, etc.), "
+            "ADU/JADU rules, SB 9 lot splitting, Middle Housing Ordinance, BESO energy "
+            "requirements, transfer tax rates, rent control, permitting processes, and "
+            "hillside overlay restrictions. Use this when the user asks about zoning "
+            "definitions, regulatory requirements, or housing policy — BEFORE telling "
+            "them to check the municipal code."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": (
+                        "The regulation topic to look up. Can be a category key "
+                        "(e.g. 'adu_rules', 'transfer_tax', 'rent_control'), a zone "
+                        "code (e.g. 'R-1H', 'C-SA', 'MUR'), or a natural language "
+                        "query (e.g. 'what does the H suffix mean', 'ADU size limits')."
+                    ),
+                },
+                "zone_code": {
+                    "type": "string",
+                    "description": (
+                        "Optional specific zone code to look up (e.g. 'R-1H', 'C-DMU'). "
+                        "If provided, returns the definition for that zone code."
+                    ),
+                },
+            },
+            "required": ["topic"],
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -815,6 +849,7 @@ TOOL_TO_BLOCK_TYPE: dict[str, str] = {
     "search_properties": "property_search_results",
     "query_database": "query_result",
     "update_working_set": "property_search_results",
+    "lookup_regulation": "regulation_info",
 }
 
 # ---------------------------------------------------------------------------
@@ -849,6 +884,17 @@ mortgage analysis, and tax benefits
   construction work, job values, and filing dates
 - Database queries: answer ad-hoc analytical questions by querying the database directly — \
   counts, averages, distributions, filtering, grouping across 17,000+ properties
+- Regulations knowledge base: look up Berkeley zoning definitions, ADU/JADU rules, \
+  SB 9 lot splitting, Middle Housing Ordinance, BESO energy requirements, transfer tax \
+  rates, rent control, permitting, and hillside overlay restrictions
+
+REGULATIONS KNOWLEDGE BASE:
+You have a lookup_regulation tool with authoritative Berkeley regulatory knowledge including \
+all 32+ zoning code definitions (R-1, R-1H, R-2, R-2A, R-2AH, C-SA, C-W, MUR, ES-R, etc.), \
+ADU/JADU rules, SB 9 lot splitting, Middle Housing Ordinance (effective Nov 2025), BESO energy \
+requirements, transfer tax rates, rent control, permitting processes, and hillside overlay \
+restrictions. Use lookup_regulation BEFORE telling users to check the municipal code. For \
+property-specific zoning analysis, use get_development_potential instead.
 
 RULES:
 - Always ground your advice in data from the tools — call them before answering
@@ -1292,6 +1338,7 @@ class FaketorService:
         "query_database": "Querying database...",
         "undo_filter": "Undoing last filter...",
         "generate_investment_prospectus": "Generating investment prospectus...",
+        "lookup_regulation": "Looking up Berkeley regulations...",
     }
 
     def chat_stream(

@@ -256,6 +256,30 @@ def compute_query_facts(data: dict) -> dict:
     return facts
 
 
+def compute_regulation_facts(data: dict) -> dict:
+    """Facts for ``lookup_regulation`` results."""
+    found = data.get("category") is not None
+    facts: dict = {
+        "found": found,
+        "category": data.get("category", ""),
+        "title": data.get("title", ""),
+    }
+    if data.get("source"):
+        facts["source"] = data["source"]
+    if data.get("zone"):
+        # Extract zone code from zone dict (single key)
+        zone_codes = list(data["zone"].keys())
+        if zone_codes:
+            facts["zone_code"] = zone_codes[0]
+    if data.get("key_numbers"):
+        facts["key_numbers"] = data["key_numbers"]
+    if data.get("related"):
+        facts["related_categories"] = data["related"]
+    if not found and data.get("available_categories"):
+        facts["available_categories"] = data["available_categories"]
+    return facts
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -272,6 +296,7 @@ _FACT_COMPUTERS: dict[str, callable] = {
     "get_improvement_simulation": compute_improvement_facts,
     "query_database": compute_query_facts,
     "undo_filter": compute_undo_filter_facts,
+    "lookup_regulation": compute_regulation_facts,
 }
 
 

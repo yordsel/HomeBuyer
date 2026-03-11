@@ -2630,6 +2630,14 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             "address": address,
         }, default=str)
 
+    elif tool_name == "lookup_regulation":
+        from homebuyer.services.berkeley_regulations import lookup_regulation
+        result = lookup_regulation(
+            tool_input.get("topic", ""),
+            tool_input.get("zone_code"),
+        )
+        return json.dumps(result, default=str)
+
     elif tool_name == "query_database":
         if not _state or not _state.db:
             return json.dumps({"error": "Database not available"})
