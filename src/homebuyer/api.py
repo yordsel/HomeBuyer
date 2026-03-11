@@ -3354,9 +3354,12 @@ def _neighborhood_stats_to_dict(stats) -> dict:
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-# Resolve the UI build directory relative to the project root.
-# In production, the build script places the built frontend at ui/dist/.
+# Resolve the UI build directory.  Try several locations:
+# 1. Relative to api.py source (works in dev where api.py is in src/homebuyer/)
+# 2. Relative to cwd (works on Render where cwd is the repo root)
 _UI_DIST = _Path(__file__).resolve().parents[2] / "ui" / "dist"
+if not _UI_DIST.is_dir():
+    _UI_DIST = _Path.cwd() / "ui" / "dist"
 
 if _UI_DIST.is_dir():
     # Serve static assets (JS, CSS, images) from the Vite build output.
