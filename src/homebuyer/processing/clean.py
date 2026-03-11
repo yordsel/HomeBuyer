@@ -29,14 +29,13 @@ def validate_sales(db: Database) -> dict[str, int]:
     outliers: dict[str, int] = {}
 
     for field, (low, high) in VALID_RANGES.items():
-        row = db.conn.execute(
+        count = db.fetchval(
             f"SELECT COUNT(*) FROM property_sales WHERE {field} IS NOT NULL "
             f"AND ({field} < ? OR {field} > ?)",
             (low, high),
-        ).fetchone()
+        )
 
-        count = row[0]
-        if count > 0:
+        if count and count > 0:
             outliers[field] = count
             logger.warning(
                 "Field '%s': %d values outside range [%s, %s]",

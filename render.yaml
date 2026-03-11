@@ -1,3 +1,9 @@
+databases:
+  - name: homebuyer-db
+    plan: free
+    databaseName: homebuyer
+    postgresMajorVersion: "16"
+
 services:
   - type: web
     name: homebuyer
@@ -12,5 +18,13 @@ services:
         value: "0.0.0.0"
       - key: PORT
         value: "10000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: homebuyer-db
+          property: connectionString
       - key: ATTOM_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RENTCAST_API_KEY
         sync: false

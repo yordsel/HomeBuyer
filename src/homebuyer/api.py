@@ -25,7 +25,7 @@ import json
 
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from homebuyer.config import DB_PATH, GEO_DIR
+from homebuyer.config import DATABASE_URL, DB_PATH, GEO_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -407,8 +407,9 @@ class AppState:
         from homebuyer.prediction.model import ModelArtifact
         from homebuyer.storage.database import Database
 
-        logger.info("Loading database from %s", DB_PATH)
-        self.db = Database(DB_PATH)
+        db_source = DATABASE_URL if DATABASE_URL else DB_PATH
+        logger.info("Loading database from %s", db_source if isinstance(db_source, str) else DB_PATH)
+        self.db = Database(db_source)
         self.db.connect(check_same_thread=False)
         self.db.initialize_schema()
 
@@ -1403,24 +1404,27 @@ def _execute_query_with_working_set(tool_input: dict, working_set) -> str:
 
     logger.info("query_database (session, %d props): %s", working_set.count, sql)
 
-    conn = _state.db.conn
+    db = _state.db
     try:
         # Create temp table with working set IDs
-        conn.execute(
+        db.execute(
             "CREATE TEMP TABLE IF NOT EXISTS _working_set "
             "(property_id INTEGER PRIMARY KEY)"
         )
-        conn.execute("DELETE FROM _working_set")
+        db.execute("DELETE FROM _working_set")
         property_ids = working_set.get_property_ids()
-        conn.executemany(
-            "INSERT OR IGNORE INTO _working_set (property_id) VALUES (?)",
+        db.executemany(
+            "INSERT INTO _working_set (property_id) VALUES (?) ON CONFLICT DO NOTHING",
             [(pid,) for pid in property_ids],
         )
 
-        cursor = conn.execute(sql)
+        cursor = db.execute(sql)
         columns = [desc[0] for desc in cursor.description] if cursor.description else []
         rows = cursor.fetchmany(100)
-        results = [dict(zip(columns, row)) for row in rows]
+        if db.is_postgres:
+            results = [dict(r) for r in rows]
+        else:
+            results = [dict(zip(columns, row)) for row in rows]
 
         return json.dumps({
             "query": sql,
@@ -1436,7 +1440,7 @@ def _execute_query_with_working_set(tool_input: dict, working_set) -> str:
         return json.dumps({"error": f"SQL error: {error_msg}", "query": sql})
     finally:
         try:
-            conn.execute("DROP TABLE IF EXISTS _working_set")
+            db.execute("DROP TABLE IF EXISTS _working_set")
         except Exception:
             pass
 
@@ -1465,24 +1469,27 @@ def _execute_update_working_set_with_temp_table(tool_input: dict, working_set) -
     logger.info("update_working_set (sql+temp, mode=%s, %d props): %s",
                 mode, working_set.count, sql)
 
-    conn = _state.db.conn
+    db = _state.db
     try:
         # Create temp table with working set IDs
-        conn.execute(
+        db.execute(
             "CREATE TEMP TABLE IF NOT EXISTS _working_set "
             "(property_id INTEGER PRIMARY KEY)"
         )
-        conn.execute("DELETE FROM _working_set")
+        db.execute("DELETE FROM _working_set")
         property_ids = working_set.get_property_ids()
-        conn.executemany(
-            "INSERT OR IGNORE INTO _working_set (property_id) VALUES (?)",
+        db.executemany(
+            "INSERT INTO _working_set (property_id) VALUES (?) ON CONFLICT DO NOTHING",
             [(pid,) for pid in property_ids],
         )
 
-        cursor = conn.execute(sql)
+        cursor = db.execute(sql)
         columns = [desc[0] for desc in cursor.description] if cursor.description else []
         rows = cursor.fetchall()
-        results = [dict(zip(columns, row)) for row in rows]
+        if db.is_postgres:
+            results = [dict(r) for r in rows]
+        else:
+            results = [dict(zip(columns, row)) for row in rows]
 
         return json.dumps({
             "mode": mode,
@@ -1497,7 +1504,7 @@ def _execute_update_working_set_with_temp_table(tool_input: dict, working_set) -
         return json.dumps({"error": f"SQL error: {error_msg}", "query": sql})
     finally:
         try:
-            conn.execute("DROP TABLE IF EXISTS _working_set")
+            db.execute("DROP TABLE IF EXISTS _working_set")
         except Exception:
             pass
 
@@ -1668,8 +1675,7 @@ def _expand_working_set_from_ids(
             batch = id_list[i : i + _SQLITE_VAR_LIMIT]
             placeholders = ",".join("?" * len(batch))
             sql = f"SELECT {_WS_FIELDS} FROM properties WHERE id IN ({placeholders})"
-            cursor = _state.db.conn.execute(sql, batch)
-            rows.extend(dict(row) for row in cursor.fetchall())
+            rows.extend(_state.db.fetchall(sql, batch))
         working_set.expand_properties(rows, description, source_tool)
     except Exception as e:
         logger.warning("Failed to expand working set from IDs: %s", e)
@@ -1692,13 +1698,12 @@ def _populate_working_set_from_ids(
     try:
         rows: list[dict] = []
         id_list = list(property_ids)
-        # Batch queries to avoid SQLite variable limit
+        # Batch queries to avoid variable limit
         for i in range(0, len(id_list), _SQLITE_VAR_LIMIT):
             batch = id_list[i : i + _SQLITE_VAR_LIMIT]
             placeholders = ",".join("?" * len(batch))
             sql = f"SELECT {_WS_FIELDS} FROM properties WHERE id IN ({placeholders})"
-            cursor = _state.db.conn.execute(sql, batch)
-            rows.extend(dict(row) for row in cursor.fetchall())
+            rows.extend(_state.db.fetchall(sql, batch))
         working_set.set_properties(rows, description, source_tool)
     except Exception as e:
         logger.warning("Failed to populate working set from IDs: %s", e)
@@ -1744,10 +1749,10 @@ def _execute_update_working_set(tool_input: dict) -> str:
 
         logger.info("update_working_set (sql, mode=%s): %s", mode, sql)
         try:
-            cursor = _state.db.conn.execute(sql)
+            cursor = _state.db.execute(sql)
             columns = [desc[0] for desc in cursor.description] if cursor.description else []
-            rows = cursor.fetchall()
-            results = [dict(zip(columns, row)) for row in rows]
+            raw_rows = cursor.fetchall()
+            results = [dict(r) if hasattr(r, "keys") else dict(zip(columns, r)) for r in raw_rows]
         except Exception as e:
             logger.warning("update_working_set SQL failed: %s", e, exc_info=True)
             return json.dumps({"error": f"SQL error: {str(e)}", "query": sql})
@@ -1989,13 +1994,13 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 if not address:
                     address = nearest.get("address")
             # Look up record_type and lot_group_key from properties table
-            prop_row = _state.db.conn.execute(
+            prop_row = _state.db.fetchone(
                 "SELECT record_type, lot_group_key, building_sqft, property_category "
                 "FROM properties "
                 "WHERE ABS(latitude - ?) < 0.0002 AND ABS(longitude - ?) < 0.0002 "
                 "LIMIT 1",
                 (lat, lon),
-            ).fetchone()
+            )
             if prop_row:
                 record_type = prop_row["record_type"]
                 lot_group_key = prop_row["lot_group_key"]
@@ -2288,11 +2293,11 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             try:
                 inv_lat, inv_lon = tool_input["latitude"], tool_input["longitude"]
                 _delta = 50 / 111_139.0
-                _pr = _state.db.conn.execute(
+                _pr = _state.db.fetchone(
                     "SELECT property_category FROM properties "
                     "WHERE latitude BETWEEN ? AND ? AND longitude BETWEEN ? AND ? LIMIT 1",
                     (inv_lat - _delta, inv_lat + _delta, inv_lon - _delta, inv_lon + _delta),
-                ).fetchone()
+                )
                 if _pr:
                     inv_property_category = _pr["property_category"]
             except Exception:
@@ -2642,11 +2647,10 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         logger.info("query_database: %s | explanation: %s", sql, explanation)
 
         try:
-            conn = _state.db.conn
-            cursor = conn.execute(sql)
+            cursor = _state.db.execute(sql)
             columns = [desc[0] for desc in cursor.description] if cursor.description else []
-            rows = cursor.fetchmany(100)  # Hard cap at 100 rows
-            results = [dict(zip(columns, row)) for row in rows]
+            raw_rows = cursor.fetchmany(100)  # Hard cap at 100 rows
+            results = [dict(r) if hasattr(r, "keys") else dict(zip(columns, r)) for r in raw_rows]
 
             return json.dumps({
                 "query": sql,
@@ -2690,7 +2694,7 @@ def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
     if not property_category and _state.db:
         try:
             delta = 50 / 111_139.0  # ~50m bounding box
-            row = _state.db.conn.execute(
+            row = _state.db.fetchone(
                 """SELECT property_category, record_type
                    FROM properties
                    WHERE latitude BETWEEN ? AND ?
@@ -2698,7 +2702,7 @@ def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
                    LIMIT 1""",
                 (req.latitude - delta, req.latitude + delta,
                  req.longitude - delta, req.longitude + delta),
-            ).fetchone()
+            )
             if row:
                 property_category = row["property_category"]
         except Exception:
@@ -3172,7 +3176,7 @@ def _reverse_geocode(lat: float, lon: float) -> str | None:
 def _estimate_zip_from_coords(lat: float, lon: float) -> str:
     """Estimate zip code from coordinates using nearby sales data."""
     delta = 0.003  # ~330 m
-    row = _state.db.conn.execute(
+    row = _state.db.fetchone(
         """
         SELECT zip_code, COUNT(*) AS cnt
         FROM property_sales
@@ -3183,7 +3187,7 @@ def _estimate_zip_from_coords(lat: float, lon: float) -> str:
         LIMIT 1
         """,
         (lat - delta, lat + delta, lon - delta, lon + delta),
-    ).fetchone()
+    )
     return dict(row)["zip_code"] if row else "94702"
 
 

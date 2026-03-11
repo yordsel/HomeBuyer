@@ -249,10 +249,10 @@ class AccelaPermitCollector:
         )
 
         # Get all unique addresses from property_sales
-        rows = self.db.conn.execute(
+        rows = self.db.fetchall(
             "SELECT DISTINCT address FROM property_sales WHERE address IS NOT NULL"
-        ).fetchall()
-        all_addresses = [row[0] for row in rows]
+        )
+        all_addresses = [dict(row)["address"] for row in rows]
 
         # Filter out already-collected addresses (unless force=True)
         if not force:

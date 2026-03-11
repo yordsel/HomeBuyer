@@ -101,7 +101,7 @@ def train_model(
     # cannot replicate the Python-side filters in SQL.  Instead, we query
     # the full set and then trim to match X's length by aligning on the
     # fact that both are ordered by sale_date.
-    rows = db.conn.execute(
+    rows = db.fetchall(
         """
         SELECT ps.sale_date, ps.neighborhood, ps.property_type
         FROM property_sales ps
@@ -116,7 +116,7 @@ def train_model(
         ORDER BY ps.sale_date
         """,
         (MIN_TRAINING_SALE_PRICE, MAX_TRAINING_SALE_PRICE, MIN_TRAINING_SALE_DATE),
-    ).fetchall()
+    )
 
     # The raw query returns more rows than X because build_training_data()
     # filters outliers.  We need to align: build_training_data() preserves

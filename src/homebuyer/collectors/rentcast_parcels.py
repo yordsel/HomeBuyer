@@ -244,7 +244,7 @@ class RentcastParcelEnricher:
             )
         if limit:
             sql += f" LIMIT {limit}"
-        rows = self.db.conn.execute(sql).fetchall()
+        rows = self.db.fetchall(sql)
         return [dict(r) for r in rows]
 
     def _enrich_single(

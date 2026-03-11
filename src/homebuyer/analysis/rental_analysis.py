@@ -315,28 +315,30 @@ class RentalAnalyzer:
         """
         try:
             # City-wide median price per sqft
-            city_row = self.db.conn.execute(
+            cutoff = Database.date_cutoff(years=2)
+            city_row = self.db.fetchone(
                 """
                 SELECT AVG(price_per_sqft) as city_ppsf
                 FROM property_sales
                 WHERE price_per_sqft IS NOT NULL
-                  AND sale_date >= date('now', '-2 years')
-                """
-            ).fetchone()
+                  AND sale_date >= ?
+                """,
+                (cutoff,),
+            )
             if not city_row or not city_row["city_ppsf"]:
                 return None
 
             # Neighborhood median price per sqft
-            nbr_row = self.db.conn.execute(
+            nbr_row = self.db.fetchone(
                 """
                 SELECT AVG(price_per_sqft) as nbr_ppsf
                 FROM property_sales
                 WHERE price_per_sqft IS NOT NULL
                   AND neighborhood = ?
-                  AND sale_date >= date('now', '-2 years')
+                  AND sale_date >= ?
                 """,
-                (neighborhood,),
-            ).fetchone()
+                (neighborhood, cutoff),
+            )
             if not nbr_row or not nbr_row["nbr_ppsf"]:
                 return None
 
@@ -1066,15 +1068,15 @@ class RentalAnalyzer:
     def _get_adu_construction_cost(self, adu_sqft: int) -> int:
         """Get ADU construction cost from permit data or use default."""
         try:
-            row = self.db.conn.execute(
+            row = self.db.fetchone(
                 """
                 SELECT AVG(job_value) as avg_cost, COUNT(*) as cnt
                 FROM building_permits
                 WHERE (LOWER(description) LIKE '%adu%'
                     OR LOWER(description) LIKE '%accessory dwelling%')
                   AND job_value > 10000
-                """
-            ).fetchone()
+                """,
+            )
             if row and row["cnt"] and row["cnt"] >= 5 and row["avg_cost"]:
                 return int(round(row["avg_cost"], -3))
         except Exception:

@@ -122,7 +122,7 @@ class MarketAnalyzer:
         """
         cutoff = date.today() - timedelta(days=lookback_years * 365)
 
-        row = self.db.conn.execute(
+        row = self.db.execute(
             """
             SELECT
                 COUNT(*) as cnt,
@@ -153,7 +153,7 @@ class MarketAnalyzer:
         stats.avg_year_built = row["avg_year_built"]
 
         # Calculate median via subquery
-        median_row = self.db.conn.execute(
+        median_row = self.db.execute(
             """
             SELECT sale_price FROM property_sales
             WHERE neighborhood = ? AND sale_date >= ? AND sale_price IS NOT NULL
@@ -169,7 +169,7 @@ class MarketAnalyzer:
             stats.median_price = median_row["sale_price"]
 
         # Median price per sqft
-        ppsf_median = self.db.conn.execute(
+        ppsf_median = self.db.execute(
             """
             SELECT price_per_sqft FROM property_sales
             WHERE neighborhood = ? AND sale_date >= ?
@@ -210,7 +210,7 @@ class MarketAnalyzer:
         """
         cutoff = date.today() - timedelta(days=lookback_years * 365)
 
-        neighborhoods = self.db.conn.execute(
+        neighborhoods = self.db.execute(
             """
             SELECT DISTINCT neighborhood
             FROM property_sales
@@ -249,7 +249,7 @@ class MarketAnalyzer:
         """
         cutoff = date.today() - timedelta(days=months * 30)
 
-        rows = self.db.conn.execute(
+        rows = self.db.execute(
             """
             SELECT
                 period_begin,
@@ -374,7 +374,7 @@ class MarketAnalyzer:
 
         query += " ORDER BY sale_date DESC LIMIT 50"
 
-        rows = self.db.conn.execute(query, params).fetchall()
+        rows = self.db.execute(query, params).fetchall()
 
         # Fallback: if property_type filter yielded too few results, retry without it
         if property_type and len(rows) < 3:
@@ -403,7 +403,7 @@ class MarketAnalyzer:
                 fallback_query += " AND sqft BETWEEN ? AND ?"
                 fb_params.extend([int(sqft * 0.7), int(sqft * 1.3)])
             fallback_query += " ORDER BY sale_date DESC LIMIT 50"
-            rows = self.db.conn.execute(fallback_query, fb_params).fetchall()
+            rows = self.db.execute(fallback_query, fb_params).fetchall()
 
         # Score comparables by similarity
         comps = []
@@ -590,7 +590,7 @@ class MarketAnalyzer:
         cutoff = date.today() - timedelta(days=months * 30)
 
         # Use market_metrics data for city-wide
-        city_row = self.db.conn.execute(
+        city_row = self.db.execute(
             """
             SELECT
                 AVG(avg_sale_to_list) as avg_ratio,
@@ -638,7 +638,7 @@ class MarketAnalyzer:
 
         if neighborhoods is None:
             # Get top 10 by sale count
-            top = self.db.conn.execute(
+            top = self.db.execute(
                 """
                 SELECT neighborhood, COUNT(*) as cnt
                 FROM property_sales
@@ -653,7 +653,7 @@ class MarketAnalyzer:
 
         result = {}
         for hood in neighborhoods:
-            quarters = self.db.conn.execute(
+            quarters = self.db.execute(
                 """
                 SELECT
                     SUBSTR(sale_date, 1, 4) || '-Q' ||
@@ -713,7 +713,7 @@ class MarketAnalyzer:
             Dict with affordable price range and neighborhood options.
         """
         # Get current mortgage rate
-        rate_row = self.db.conn.execute(
+        rate_row = self.db.execute(
             """
             SELECT rate_30yr FROM mortgage_rates
             WHERE rate_30yr IS NOT NULL
@@ -762,7 +762,8 @@ class MarketAnalyzer:
         is_jumbo = loan_at_max > jumbo_threshold
 
         # Find affordable neighborhoods
-        affordable_neighborhoods = self.db.conn.execute(
+        two_years_ago = Database.date_cutoff(years=2)
+        affordable_neighborhoods = self.db.execute(
             """
             SELECT
                 neighborhood,
@@ -772,27 +773,27 @@ class MarketAnalyzer:
             FROM property_sales
             WHERE neighborhood IS NOT NULL
               AND sale_price <= ?
-              AND sale_date >= date('now', '-2 years')
+              AND sale_date >= ?
             GROUP BY neighborhood
             HAVING COUNT(*) >= 3
             ORDER BY avg_price
             """,
-            (max_price,),
+            (max_price, two_years_ago),
         ).fetchall()
 
         # Enrich each neighborhood with property type and zoning breakdown
         enriched = []
         for r in affordable_neighborhoods:
             hood = r["neighborhood"]
-            ptypes = self.db.conn.execute(
+            ptypes = self.db.execute(
                 """
                 SELECT property_type, COUNT(*) as cnt FROM property_sales
                 WHERE neighborhood = ? AND sale_price <= ?
-                  AND sale_date >= date('now', '-2 years')
+                  AND sale_date >= ?
                   AND property_type IS NOT NULL
                 GROUP BY property_type ORDER BY cnt DESC
                 """,
-                (hood, max_price),
+                (hood, max_price, two_years_ago),
             ).fetchall()
             pt_total = sum(p["cnt"] for p in ptypes)
             pt_breakdown = {
@@ -800,15 +801,15 @@ class MarketAnalyzer:
                 for p in ptypes
             } if pt_total > 0 else {}
 
-            zones = self.db.conn.execute(
+            zones = self.db.execute(
                 """
                 SELECT zoning_class, COUNT(*) as cnt FROM property_sales
                 WHERE neighborhood = ? AND sale_price <= ?
-                  AND sale_date >= date('now', '-2 years')
+                  AND sale_date >= ?
                   AND zoning_class IS NOT NULL
                 GROUP BY zoning_class ORDER BY cnt DESC LIMIT 2
                 """,
-                (hood, max_price),
+                (hood, max_price, two_years_ago),
             ).fetchall()
 
             enriched.append({
@@ -845,19 +846,20 @@ class MarketAnalyzer:
         market = self.get_current_market_conditions()
 
         # Overall stats
-        total_sales = self.db.conn.execute(
+        total_sales = self.db.fetchval(
             "SELECT COUNT(*) FROM property_sales WHERE sale_price IS NOT NULL"
-        ).fetchone()[0]
+        )
 
-        date_range = self.db.conn.execute(
-            "SELECT MIN(sale_date), MAX(sale_date) FROM property_sales"
-        ).fetchone()
+        date_range = self.db.fetchone(
+            "SELECT MIN(sale_date) AS min_date, MAX(sale_date) AS max_date FROM property_sales"
+        )
 
         # Neighborhood rankings
         rankings = self.get_all_neighborhood_rankings(lookback_years=2, min_sales=10)
 
         # Price distribution
-        price_dist = self.db.conn.execute(
+        two_yr_cutoff = Database.date_cutoff(years=2)
+        price_dist = self.db.execute(
             """
             SELECT
                 CASE
@@ -872,18 +874,19 @@ class MarketAnalyzer:
                 END as price_bracket,
                 COUNT(*) as count
             FROM property_sales
-            WHERE sale_price IS NOT NULL AND sale_date >= date('now', '-2 years')
+            WHERE sale_price IS NOT NULL AND sale_date >= ?
             GROUP BY price_bracket
             ORDER BY MIN(sale_price)
             """,
+            (two_yr_cutoff,),
         ).fetchall()
 
         return {
             "data_coverage": {
                 "total_sales": total_sales,
                 "date_range": {
-                    "earliest": date_range[0],
-                    "latest": date_range[1],
+                    "earliest": date_range["min_date"] if date_range else None,
+                    "latest": date_range["max_date"] if date_range else None,
                 },
                 "neighborhoods_covered": len(rankings),
             },
@@ -925,7 +928,7 @@ class MarketAnalyzer:
         one_year_ago = today - timedelta(days=365)
         two_years_ago = today - timedelta(days=730)
 
-        current = self.db.conn.execute(
+        current = self.db.execute(
             """
             SELECT AVG(sale_price) as avg FROM property_sales
             WHERE neighborhood = ? AND sale_date >= ? AND sale_price IS NOT NULL
@@ -933,7 +936,7 @@ class MarketAnalyzer:
             (neighborhood, one_year_ago.isoformat()),
         ).fetchone()
 
-        previous = self.db.conn.execute(
+        previous = self.db.execute(
             """
             SELECT AVG(sale_price) as avg FROM property_sales
             WHERE neighborhood = ?
@@ -962,7 +965,7 @@ class MarketAnalyzer:
         cutoff = (date.today() - timedelta(days=lookback_years * 365)).isoformat()
 
         # Median lot size
-        lot_row = self.db.conn.execute(
+        lot_row = self.db.execute(
             """
             SELECT lot_size_sqft FROM property_sales
             WHERE neighborhood = ? AND sale_date >= ?
@@ -980,7 +983,7 @@ class MarketAnalyzer:
             stats.median_lot_size = lot_row["lot_size_sqft"]
 
         # Property type breakdown
-        type_rows = self.db.conn.execute(
+        type_rows = self.db.execute(
             """
             SELECT property_type, COUNT(*) as cnt
             FROM property_sales
@@ -998,7 +1001,7 @@ class MarketAnalyzer:
             }
 
         # Zoning breakdown and dominant zoning
-        zone_rows = self.db.conn.execute(
+        zone_rows = self.db.execute(
             """
             SELECT zoning_class, COUNT(*) as cnt
             FROM property_sales
@@ -1025,16 +1028,18 @@ class MarketAnalyzer:
 
     def _get_property_type_prices(self) -> list[dict]:
         """Average sale price by property type (last 2 years, min 5 sales)."""
-        rows = self.db.conn.execute(
+        cutoff = Database.date_cutoff(years=2)
+        rows = self.db.execute(
             """
             SELECT property_type, COUNT(*) as cnt,
                    CAST(AVG(sale_price) AS INTEGER) as avg_price
             FROM property_sales
             WHERE property_type IS NOT NULL AND sale_price IS NOT NULL
-              AND sale_date >= date('now', '-2 years')
+              AND sale_date >= ?
             GROUP BY property_type HAVING COUNT(*) >= 5
             ORDER BY avg_price DESC
             """,
+            (cutoff,),
         ).fetchall()
         return [
             {"type": r["property_type"], "count": r["cnt"], "avg_price": r["avg_price"]}
@@ -1043,7 +1048,8 @@ class MarketAnalyzer:
 
     def _get_zoning_price_insights(self) -> list[dict]:
         """Average price and $/sqft grouped by zone category (last 2 years)."""
-        rows = self.db.conn.execute(
+        cutoff = Database.date_cutoff(years=2)
+        rows = self.db.execute(
             """
             SELECT
                 CASE
@@ -1062,10 +1068,11 @@ class MarketAnalyzer:
                 AVG(price_per_sqft) as avg_ppsf
             FROM property_sales
             WHERE zoning_class IS NOT NULL AND sale_price IS NOT NULL
-              AND sale_date >= date('now', '-2 years')
+              AND sale_date >= ?
             GROUP BY zone_category HAVING COUNT(*) >= 3
             ORDER BY avg_price DESC
             """,
+            (cutoff,),
         ).fetchall()
         return [
             {
@@ -1079,9 +1086,9 @@ class MarketAnalyzer:
 
     def get_data_completeness(self) -> dict[str, dict]:
         """Return fill-rate stats for key API-enriched columns."""
-        total = self.db.conn.execute(
+        total = self.db.fetchval(
             "SELECT COUNT(*) FROM property_sales WHERE sale_price IS NOT NULL"
-        ).fetchone()[0]
+        )
         if total == 0:
             return {}
 
@@ -1097,9 +1104,9 @@ class MarketAnalyzer:
         ]
         result = {}
         for col, label in columns:
-            filled = self.db.conn.execute(
+            filled = self.db.fetchval(
                 f"SELECT COUNT(*) FROM property_sales WHERE {col} IS NOT NULL AND sale_price IS NOT NULL",  # noqa: S608
-            ).fetchone()[0]
+            )
             result[col] = {
                 "label": label,
                 "filled": filled,
@@ -1110,7 +1117,7 @@ class MarketAnalyzer:
 
     def _get_mortgage_rate_for_date(self, date_str: str) -> Optional[float]:
         """Find the closest mortgage rate to a given date."""
-        row = self.db.conn.execute(
+        row = self.db.execute(
             """
             SELECT rate_30yr FROM mortgage_rates
             WHERE observation_date <= ? AND rate_30yr IS NOT NULL
@@ -1199,7 +1206,7 @@ class MarketAnalyzer:
 
         query += " ORDER BY sale_date DESC LIMIT 10"
 
-        rows = self.db.conn.execute(query, params).fetchall()
+        rows = self.db.execute(query, params).fetchall()
 
         comps = []
         for row in rows:

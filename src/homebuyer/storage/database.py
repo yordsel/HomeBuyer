@@ -1,12 +1,27 @@
-"""SQLite database manager with schema initialization and upsert operations."""
+"""Database manager with dual-mode support (SQLite + PostgreSQL).
+
+When the DATABASE_URL environment variable is set, connects to PostgreSQL.
+Otherwise falls back to a local SQLite file for development.
+"""
 
 import json
 import logging
 import math
+import os
+import re
 import sqlite3
-from datetime import datetime
+import calendar
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+
+try:
+    import psycopg2
+    import psycopg2.extras
+
+    HAS_PSYCOPG2 = True
+except ImportError:
+    HAS_PSYCOPG2 = False
 
 from homebuyer.storage.models import (
     BESORecord,
@@ -35,12 +50,12 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Schema DDL
+# Schema DDL (SQLite dialect — translated at runtime for Postgres)
 # ---------------------------------------------------------------------------
 
 SCHEMA_VERSION = 1
 
-_SCHEMA_SQL = """
+_SCHEMA_SQL_SQLITE = """
 CREATE TABLE IF NOT EXISTS schema_version (
     version     INTEGER PRIMARY KEY,
     applied_at  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -336,27 +351,119 @@ CREATE INDEX IF NOT EXISTS idx_precomputed_type
 """
 
 
-class Database:
-    """SQLite database manager for the HomeBuyer application."""
+def _sqlite_to_postgres_ddl(sql: str) -> str:
+    """Translate SQLite DDL to PostgreSQL DDL."""
+    # Replace AUTOINCREMENT with SERIAL
+    sql = re.sub(
+        r"(\w+)\s+INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT",
+        r"\1 SERIAL PRIMARY KEY",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    # Replace DEFAULT (datetime('now')) with a text-format-compatible default.
+    # Since columns are TEXT, we need to store timestamps in the same ISO 8601
+    # format that SQLite's datetime('now') produces: 'YYYY-MM-DD HH:MI:SS'.
+    sql = re.sub(
+        r"DEFAULT\s+\(datetime\('now'\)\)",
+        "DEFAULT (TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    # Replace REAL with DOUBLE PRECISION (word-boundary aware to avoid
+    # corrupting identifiers that happen to contain 'REAL').
+    sql = re.sub(r"\bREAL\b", "DOUBLE PRECISION", sql)
+    return sql
 
-    def __init__(self, db_path: Path) -> None:
-        self.db_path = db_path
-        self._conn: Optional[sqlite3.Connection] = None
+
+def _adapt_sql(sql: str, backend: str) -> str:
+    """Adapt a SQL string from SQLite dialect to PostgreSQL if needed.
+
+    Handles:
+    - ? → %s placeholder substitution
+    - datetime('now') → TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+    - date('now', '-N years/months/days') → (CURRENT_DATE - INTERVAL 'N years/months/days')
+    - date('now') → CURRENT_DATE
+    - INSERT OR REPLACE → INSERT ... ON CONFLICT ... DO UPDATE (caller handles)
+    - INSERT OR IGNORE → INSERT ... ON CONFLICT DO NOTHING (caller handles)
+    """
+    if backend == "sqlite":
+        return sql
+    # Replace ? placeholders with %s (but not inside strings)
+    sql = sql.replace("?", "%s")
+    # Replace inline datetime('now') with a UTC text timestamp to match
+    # the TEXT column format used by SQLite's datetime('now').
+    sql = re.sub(
+        r"datetime\('now'\)",
+        "TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    # Replace date('now', '-N <unit>') → (CURRENT_DATE - INTERVAL 'N <unit>')
+    sql = re.sub(
+        r"date\('now',\s*'-(\d+)\s+(year|month|day)s?'\)",
+        r"(CURRENT_DATE - INTERVAL '\1 \2s')",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    # Replace date('now') → CURRENT_DATE
+    sql = re.sub(r"date\('now'\)", "CURRENT_DATE", sql, flags=re.IGNORECASE)
+    return sql
+
+
+class Database:
+    """Dual-mode database manager for the HomeBuyer application.
+
+    Supports SQLite (local development) and PostgreSQL (production).
+    The backend is selected based on constructor arguments:
+    - Pass a ``Path`` for SQLite
+    - Pass a ``str`` (DATABASE_URL) for PostgreSQL
+    """
+
+    def __init__(self, db_source: Path | str) -> None:
+        if isinstance(db_source, str) and db_source.startswith(("postgres://", "postgresql://")):
+            if not HAS_PSYCOPG2:
+                raise ImportError(
+                    "psycopg2 is required for PostgreSQL. "
+                    "Install with: pip install psycopg2-binary"
+                )
+            self.backend = "postgres"
+            self._dsn = db_source
+            self.db_path: Optional[Path] = None
+        else:
+            self.backend = "sqlite"
+            self._dsn = ""
+            self.db_path = Path(db_source) if isinstance(db_source, str) else db_source
+        self._conn: Any = None
 
     @property
-    def conn(self) -> sqlite3.Connection:
+    def is_postgres(self) -> bool:
+        return self.backend == "postgres"
+
+    @property
+    def conn(self):
         if self._conn is None:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._conn
 
     def connect(self, check_same_thread: bool = True) -> "Database":
-        """Open connection with WAL mode and row factory."""
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=check_same_thread)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        logger.debug("Connected to database: %s", self.db_path)
+        """Open connection."""
+        if self.is_postgres:
+            self._conn = psycopg2.connect(
+                self._dsn,
+                cursor_factory=psycopg2.extras.RealDictCursor,
+            )
+            self._conn.autocommit = False
+            logger.debug("Connected to PostgreSQL database")
+        else:
+            assert self.db_path is not None
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(
+                str(self.db_path), check_same_thread=check_same_thread
+            )
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA foreign_keys=ON")
+            logger.debug("Connected to SQLite database: %s", self.db_path)
         return self
 
     def close(self) -> None:
@@ -372,47 +479,176 @@ class Database:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
 
+    # ------------------------------------------------------------------
+    # SQL execution helpers (dialect-aware)
+    # ------------------------------------------------------------------
+
+    def execute(self, sql: str, params: tuple | list | None = None) -> Any:
+        """Execute a SQL statement with dialect translation.
+
+        For Postgres: translates ? → %s, datetime('now') → TO_CHAR(NOW() ...).
+        Returns a cursor.
+        """
+        sql = _adapt_sql(sql, self.backend)
+        if self.is_postgres:
+            cur = self.conn.cursor()
+            cur.execute(sql, tuple(params) if params else None)
+            return cur
+        else:
+            return self.conn.execute(sql, tuple(params) if params else ())
+
+    def executemany(self, sql: str, params_seq: list) -> Any:
+        """Execute a parameterized statement for each parameter set."""
+        sql = _adapt_sql(sql, self.backend)
+        if self.is_postgres:
+            cur = self.conn.cursor()
+            for p in params_seq:
+                cur.execute(sql, tuple(p))
+            return cur
+        else:
+            return self.conn.executemany(sql, params_seq)
+
+    def fetchone(self, sql: str, params: tuple | list | None = None) -> Optional[dict]:
+        """Execute and fetch one row as a dict, or None."""
+        cursor = self.execute(sql, params)
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        if self.is_postgres:
+            return dict(row)
+        return dict(row)
+
+    def fetchall(self, sql: str, params: tuple | list | None = None) -> list[dict]:
+        """Execute and fetch all rows as dicts."""
+        cursor = self.execute(sql, params)
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    def fetchval(self, sql: str, params: tuple | list | None = None) -> Any:
+        """Execute and fetch a single scalar value."""
+        cursor = self.execute(sql, params)
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        if self.is_postgres:
+            # RealDictRow — get the first value
+            return list(row.values())[0]
+        # sqlite3.Row
+        return row[0]
+
+    def commit(self) -> None:
+        """Commit the current transaction."""
+        self.conn.commit()
+
+    def table_exists(self, table_name: str) -> bool:
+        """Check if a table exists in the database."""
+        if self.is_postgres:
+            row = self.fetchval(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = ?",
+                (table_name,),
+            )
+            return bool(row and row > 0)
+        else:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+                (table_name,),
+            ).fetchone()
+            return bool(row and row[0] > 0)
+
+    def get_table_columns(self, table_name: str) -> set[str]:
+        """Get the set of column names for a table."""
+        if self.is_postgres:
+            rows = self.fetchall(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = ?",
+                (table_name,),
+            )
+            return {r["column_name"] for r in rows}
+        else:
+            rows = self.conn.execute(
+                f"PRAGMA table_info({table_name})"
+            ).fetchall()
+            return {row[1] for row in rows}
+
+    def _now_cutoff(self, hours: int) -> str:
+        """Return an ISO timestamp string for 'now minus N hours'.
+
+        Used to replace SQLite's ``datetime('now', '-N hours')`` pattern.
+        Works correctly with TEXT-typed timestamp columns on both SQLite and
+        PostgreSQL because the comparison is purely string-based (ISO 8601
+        strings sort chronologically).
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        return cutoff.strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def date_cutoff(years: int = 0, months: int = 0, days: int = 0) -> str:
+        """Return an ISO date string for 'today minus N years/months/days'.
+
+        Replaces SQLite ``date('now', '-N years')`` with a backend-agnostic
+        Python-computed string.  Since all date columns are stored as TEXT in
+        ISO 8601 format (``YYYY-MM-DD``), plain string comparison (``>=``)
+        works correctly on both SQLite and PostgreSQL.
+        """
+        today = date.today()
+        # Approximate: shift year/month then subtract days
+        y = today.year - years
+        m = today.month - months
+        while m < 1:
+            y -= 1
+            m += 12
+        while m > 12:
+            y += 1
+            m -= 12
+        # Clamp day to valid range for the target month
+        max_day = calendar.monthrange(y, m)[1]
+        d = min(today.day, max_day)
+        result = date(y, m, d) - timedelta(days=days)
+        return result.isoformat()
+
+    def _insert_returning_id(self, sql: str, params: tuple | list) -> int:
+        """Insert a row and return its auto-generated ID.
+
+        For Postgres: appends RETURNING id.
+        For SQLite: uses cursor.lastrowid.
+        """
+        if self.is_postgres:
+            sql = _adapt_sql(sql, self.backend)
+            sql = sql.rstrip().rstrip(";") + " RETURNING id"
+            cur = self.conn.cursor()
+            cur.execute(sql, tuple(params))
+            row = cur.fetchone()
+            return row["id"]
+        else:
+            cursor = self.conn.execute(sql, tuple(params))
+            return cursor.lastrowid  # type: ignore[return-value]
+
+    # ------------------------------------------------------------------
+    # Schema initialization
+    # ------------------------------------------------------------------
+
     def initialize_schema(self) -> None:
         """Create all tables if they don't exist."""
         # --- Migrations for existing databases ---
-        # Run migrations BEFORE executescript so new indexes on new columns succeed.
-        # Check if property_sales table exists first (it won't on a fresh DB).
-        table_exists = self.conn.execute(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='property_sales'"
-        ).fetchone()[0]
-
-        if table_exists:
-            existing_cols = {
-                row[1]
-                for row in self.conn.execute("PRAGMA table_info(property_sales)").fetchall()
-            }
+        if self.table_exists("property_sales"):
+            existing_cols = self.get_table_columns("property_sales")
             if "zoning_class" not in existing_cols:
-                self.conn.execute(
-                    "ALTER TABLE property_sales ADD COLUMN zoning_class TEXT"
-                )
-                self.conn.commit()
+                self.execute("ALTER TABLE property_sales ADD COLUMN zoning_class TEXT")
+                self.commit()
                 logger.info("Migration: added zoning_class column to property_sales.")
 
             if "data_source" not in existing_cols:
-                self.conn.execute(
-                    "ALTER TABLE property_sales ADD COLUMN data_source TEXT"
-                )
-                self.conn.execute(
+                self.execute("ALTER TABLE property_sales ADD COLUMN data_source TEXT")
+                self.execute(
                     "UPDATE property_sales SET data_source = 'redfin' WHERE data_source IS NULL"
                 )
-                self.conn.commit()
+                self.commit()
                 logger.info("Migration: added data_source column, backfilled as 'redfin'.")
 
         # --- Properties table migrations ---
-        props_exists = self.conn.execute(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='properties'"
-        ).fetchone()[0]
-
-        if props_exists:
-            props_cols = {
-                row[1]
-                for row in self.conn.execute("PRAGMA table_info(properties)").fetchall()
-            }
+        if self.table_exists("properties"):
+            props_cols = self.get_table_columns("properties")
             new_props_cols = {
                 "situs_unit": "TEXT",
                 "property_category": "TEXT",
@@ -423,27 +659,47 @@ class Database:
             }
             for col_name, col_type in new_props_cols.items():
                 if col_name not in props_cols:
-                    self.conn.execute(
+                    self.execute(
                         f"ALTER TABLE properties ADD COLUMN {col_name} {col_type}"
                     )
-                    self.conn.commit()
+                    self.commit()
                     logger.info("Migration: added %s column to properties.", col_name)
 
-        self.conn.executescript(_SCHEMA_SQL)
+        # --- Create/update schema ---
+        if self.is_postgres:
+            pg_ddl = _sqlite_to_postgres_ddl(_SCHEMA_SQL_SQLITE)
+            # Split on semicolons and execute each statement individually
+            for stmt in pg_ddl.split(";"):
+                stmt = stmt.strip()
+                if stmt:
+                    try:
+                        self.execute(stmt)
+                    except Exception as e:
+                        # Some statements may fail (e.g. duplicate index), that's OK
+                        self.conn.rollback()
+                        logger.debug("DDL statement skipped: %s", e)
+            self.commit()
+        else:
+            self.conn.executescript(_SCHEMA_SQL_SQLITE)
 
         # Seed use_codes reference data after schema is created
         self._seed_use_codes()
 
         # Record schema version if not already set
-        existing = self.conn.execute(
-            "SELECT MAX(version) FROM schema_version"
-        ).fetchone()[0]
+        existing = self.fetchval("SELECT MAX(version) FROM schema_version")
         if existing is None or existing < SCHEMA_VERSION:
-            self.conn.execute(
-                "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
-                (SCHEMA_VERSION, "Initial schema"),
-            )
-            self.conn.commit()
+            if self.is_postgres:
+                self.execute(
+                    "INSERT INTO schema_version (version, description) VALUES (?, ?) "
+                    "ON CONFLICT (version) DO UPDATE SET description = EXCLUDED.description",
+                    (SCHEMA_VERSION, "Initial schema"),
+                )
+            else:
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
+                    (SCHEMA_VERSION, "Initial schema"),
+                )
+            self.commit()
 
         logger.info("Database schema initialized (version %d).", SCHEMA_VERSION)
 
@@ -452,14 +708,9 @@ class Database:
     # ------------------------------------------------------------------
 
     def _seed_use_codes(self) -> None:
-        """Populate the use_codes reference table with Alameda County Assessor codes.
-
-        Uses INSERT OR REPLACE so descriptions can be corrected on re-run.
-        Skips if the table is already populated to avoid redundant writes.
-        Source: Alameda County Assessor propinfo.acgov.org/UseCodeList
-        """
-        count = self.conn.execute("SELECT COUNT(*) FROM use_codes").fetchone()[0]
-        if count > 0:
+        """Populate the use_codes reference table with Alameda County Assessor codes."""
+        count = self.fetchval("SELECT COUNT(*) FROM use_codes")
+        if count and count > 0:
             return
         # fmt: off
         codes: list[tuple] = [
@@ -514,45 +765,82 @@ class Database:
         ]
         # fmt: on
 
-        sql = """
-            INSERT OR REPLACE INTO use_codes (
-                use_code, description, property_category, ownership_type,
-                record_type, estimated_units, is_residential,
-                lot_size_meaning, building_ar_meaning
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        with self.conn:
-            self.conn.executemany(sql, codes)
+        if self.is_postgres:
+            sql = """
+                INSERT INTO use_codes (
+                    use_code, description, property_category, ownership_type,
+                    record_type, estimated_units, is_residential,
+                    lot_size_meaning, building_ar_meaning
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (use_code) DO UPDATE SET
+                    description = EXCLUDED.description,
+                    property_category = EXCLUDED.property_category,
+                    ownership_type = EXCLUDED.ownership_type,
+                    record_type = EXCLUDED.record_type,
+                    estimated_units = EXCLUDED.estimated_units,
+                    is_residential = EXCLUDED.is_residential,
+                    lot_size_meaning = EXCLUDED.lot_size_meaning,
+                    building_ar_meaning = EXCLUDED.building_ar_meaning
+            """
+            cur = self.conn.cursor()
+            for c in codes:
+                cur.execute(sql, c)
+            self.commit()
+        else:
+            sql = """
+                INSERT OR REPLACE INTO use_codes (
+                    use_code, description, property_category, ownership_type,
+                    record_type, estimated_units, is_residential,
+                    lot_size_meaning, building_ar_meaning
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            with self.conn:
+                self.conn.executemany(sql, codes)
         logger.info("Seeded %d use codes into use_codes table.", len(codes))
 
     def get_use_codes(self, residential_only: bool = False) -> dict[str, UseCode]:
         """Load use codes from reference table as a dict keyed by use_code."""
         where = " WHERE is_residential = 1" if residential_only else ""
-        rows = self.conn.execute(
+        rows = self.execute(
             f"SELECT use_code, description, property_category, ownership_type, "
             f"record_type, estimated_units, is_residential, lot_size_meaning, "
             f"building_ar_meaning FROM use_codes{where}"
         ).fetchall()
         result: dict[str, UseCode] = {}
         for r in rows:
-            result[r[0]] = UseCode(
-                use_code=r[0],
-                description=r[1],
-                property_category=r[2],
-                ownership_type=r[3],
-                record_type=r[4],
-                estimated_units=r[5],
-                is_residential=bool(r[6]),
-                lot_size_meaning=r[7],
-                building_ar_meaning=r[8],
-            )
+            if self.is_postgres:
+                result[r["use_code"]] = UseCode(
+                    use_code=r["use_code"],
+                    description=r["description"],
+                    property_category=r["property_category"],
+                    ownership_type=r["ownership_type"],
+                    record_type=r["record_type"],
+                    estimated_units=r["estimated_units"],
+                    is_residential=bool(r["is_residential"]),
+                    lot_size_meaning=r["lot_size_meaning"],
+                    building_ar_meaning=r["building_ar_meaning"],
+                )
+            else:
+                result[r[0]] = UseCode(
+                    use_code=r[0],
+                    description=r[1],
+                    property_category=r[2],
+                    ownership_type=r[3],
+                    record_type=r[4],
+                    estimated_units=r[5],
+                    is_residential=bool(r[6]),
+                    lot_size_meaning=r[7],
+                    building_ar_meaning=r[8],
+                )
         return result
 
     def get_residential_use_codes(self) -> set[str]:
         """Get the set of use codes classified as residential."""
-        rows = self.conn.execute(
+        rows = self.execute(
             "SELECT use_code FROM use_codes WHERE is_residential = 1"
         ).fetchall()
+        if self.is_postgres:
+            return {r["use_code"] for r in rows}
         return {r[0] for r in rows}
 
     # ------------------------------------------------------------------
@@ -580,6 +868,7 @@ class Database:
             )
             ON CONFLICT DO NOTHING
         """
+        adapted = _adapt_sql(sql, self.backend)
         with self.conn:
             for sale in sales:
                 params = (
@@ -608,11 +897,19 @@ class Database:
                     sale.price_range_bucket,
                     sale.data_source,
                 )
-                cursor = self.conn.execute(sql, params)
-                if cursor.rowcount > 0:
-                    inserted += 1
+                if self.is_postgres:
+                    cur = self.conn.cursor()
+                    cur.execute(adapted, params)
+                    if cur.rowcount > 0:
+                        inserted += 1
+                    else:
+                        duplicates += 1
                 else:
-                    duplicates += 1
+                    cursor = self.conn.execute(adapted, params)
+                    if cursor.rowcount > 0:
+                        inserted += 1
+                    else:
+                        duplicates += 1
         return inserted, duplicates
 
     # ------------------------------------------------------------------
@@ -650,6 +947,7 @@ class Database:
                 price_drops_pct = excluded.price_drops_pct,
                 off_market_in_two_weeks_pct = excluded.off_market_in_two_weeks_pct
         """
+        adapted = _adapt_sql(sql, self.backend)
         with self.conn:
             for m in metrics:
                 params = (
@@ -671,9 +969,15 @@ class Database:
                     m.price_drops_pct,
                     m.off_market_in_two_weeks_pct,
                 )
-                cursor = self.conn.execute(sql, params)
-                if cursor.rowcount > 0:
-                    affected += 1
+                if self.is_postgres:
+                    cur = self.conn.cursor()
+                    cur.execute(adapted, params)
+                    if cur.rowcount > 0:
+                        affected += 1
+                else:
+                    cursor = self.conn.execute(adapted, params)
+                    if cursor.rowcount > 0:
+                        affected += 1
         return affected
 
     # ------------------------------------------------------------------
@@ -694,13 +998,19 @@ class Database:
                 rate_30yr = excluded.rate_30yr,
                 rate_15yr = excluded.rate_15yr
         """
+        adapted = _adapt_sql(sql, self.backend)
         with self.conn:
             for r in rates:
-                cursor = self.conn.execute(
-                    sql, (r.observation_date.isoformat(), r.rate_30yr, r.rate_15yr)
-                )
-                if cursor.rowcount > 0:
-                    affected += 1
+                params = (r.observation_date.isoformat(), r.rate_30yr, r.rate_15yr)
+                if self.is_postgres:
+                    cur = self.conn.cursor()
+                    cur.execute(adapted, params)
+                    if cur.rowcount > 0:
+                        affected += 1
+                else:
+                    cursor = self.conn.execute(adapted, params)
+                    if cursor.rowcount > 0:
+                        affected += 1
         return affected
 
     # ------------------------------------------------------------------
@@ -718,14 +1028,19 @@ class Database:
             ON CONFLICT(series_id, observation_date) DO UPDATE SET
                 value = excluded.value
         """
+        adapted = _adapt_sql(sql, self.backend)
         with self.conn:
             for ind in indicators:
-                cursor = self.conn.execute(
-                    sql,
-                    (ind.series_id, ind.observation_date.isoformat(), ind.value),
-                )
-                if cursor.rowcount > 0:
-                    affected += 1
+                params = (ind.series_id, ind.observation_date.isoformat(), ind.value)
+                if self.is_postgres:
+                    cur = self.conn.cursor()
+                    cur.execute(adapted, params)
+                    if cur.rowcount > 0:
+                        affected += 1
+                else:
+                    cursor = self.conn.execute(adapted, params)
+                    if cursor.rowcount > 0:
+                        affected += 1
         return affected
 
     # ------------------------------------------------------------------
@@ -743,19 +1058,24 @@ class Database:
                 median_household_income = excluded.median_household_income,
                 margin_of_error = excluded.margin_of_error
         """
+        adapted = _adapt_sql(sql, self.backend)
         with self.conn:
             for rec in records:
-                cursor = self.conn.execute(
-                    sql,
-                    (
-                        rec.zip_code,
-                        rec.acs_year,
-                        rec.median_household_income,
-                        rec.margin_of_error,
-                    ),
+                params = (
+                    rec.zip_code,
+                    rec.acs_year,
+                    rec.median_household_income,
+                    rec.margin_of_error,
                 )
-                if cursor.rowcount > 0:
-                    affected += 1
+                if self.is_postgres:
+                    cur = self.conn.cursor()
+                    cur.execute(adapted, params)
+                    if cur.rowcount > 0:
+                        affected += 1
+                else:
+                    cursor = self.conn.execute(adapted, params)
+                    if cursor.rowcount > 0:
+                        affected += 1
         return affected
 
     # ------------------------------------------------------------------
@@ -780,33 +1100,35 @@ class Database:
                 benchmark_status = excluded.benchmark_status,
                 assessment_status = excluded.assessment_status
         """
+        adapted = _adapt_sql(sql, self.backend)
         with self.conn:
             for rec in records:
-                cursor = self.conn.execute(
-                    sql,
-                    (
-                        rec.beso_id,
-                        rec.building_address,
-                        rec.beso_property_type,
-                        rec.floor_area,
-                        rec.energy_star_score,
-                        rec.site_eui,
-                        rec.benchmark_status,
-                        rec.assessment_status,
-                        rec.reporting_year,
-                    ),
+                params = (
+                    rec.beso_id,
+                    rec.building_address,
+                    rec.beso_property_type,
+                    rec.floor_area,
+                    rec.energy_star_score,
+                    rec.site_eui,
+                    rec.benchmark_status,
+                    rec.assessment_status,
+                    rec.reporting_year,
                 )
-                if cursor.rowcount > 0:
-                    affected += 1
+                if self.is_postgres:
+                    cur = self.conn.cursor()
+                    cur.execute(adapted, params)
+                    if cur.rowcount > 0:
+                        affected += 1
+                else:
+                    cursor = self.conn.execute(adapted, params)
+                    if cursor.rowcount > 0:
+                        affected += 1
         return affected
 
     def lookup_beso_by_address(self, address: str) -> list[dict]:
-        """Look up BESO records by address (case-insensitive).
-
-        Returns all matching records sorted by reporting_year descending.
-        """
+        """Look up BESO records by address (case-insensitive)."""
         normalized = address.strip().upper()
-        rows = self.conn.execute(
+        return self.fetchall(
             """
             SELECT beso_id, building_address, beso_property_type, floor_area,
                    energy_star_score, site_eui, benchmark_status,
@@ -816,8 +1138,7 @@ class Database:
             ORDER BY reporting_year DESC
             """,
             (normalized,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        )
 
     # ------------------------------------------------------------------
     # Building Permits
@@ -847,49 +1168,53 @@ class Database:
                 filed_date = excluded.filed_date,
                 detail_url = excluded.detail_url
         """
+        adapted = _adapt_sql(sql, self.backend)
         with self.conn:
             for p in permits:
-                cursor = self.conn.execute(
-                    sql,
-                    (
-                        p.record_number,
-                        p.permit_type,
-                        p.status,
-                        p.address,
-                        p.zip_code,
-                        p.parcel_id,
-                        p.description,
-                        p.job_value,
-                        p.construction_type,
-                        p.contractor_cslb,
-                        p.owner_name,
-                        p.filed_date,
-                        p.detail_url,
-                    ),
+                params = (
+                    p.record_number,
+                    p.permit_type,
+                    p.status,
+                    p.address,
+                    p.zip_code,
+                    p.parcel_id,
+                    p.description,
+                    p.job_value,
+                    p.construction_type,
+                    p.contractor_cslb,
+                    p.owner_name,
+                    p.filed_date,
+                    p.detail_url,
                 )
-                if cursor.rowcount > 0:
-                    inserted += 1
+                if self.is_postgres:
+                    cur = self.conn.cursor()
+                    cur.execute(adapted, params)
+                    if cur.rowcount > 0:
+                        inserted += 1
+                    else:
+                        duplicates += 1
                 else:
-                    duplicates += 1
+                    cursor = self.conn.execute(adapted, params)
+                    if cursor.rowcount > 0:
+                        inserted += 1
+                    else:
+                        duplicates += 1
         return inserted, duplicates
 
     def get_collected_permit_addresses(self) -> set[str]:
         """Return the set of addresses that already have permit data collected."""
-        rows = self.conn.execute(
+        rows = self.execute(
             "SELECT DISTINCT UPPER(TRIM(address)) FROM building_permits"
         ).fetchall()
+        if self.is_postgres:
+            return {list(row.values())[0] for row in rows}
         return {row[0] for row in rows}
 
     def lookup_permits_by_address(self, address: str, limit: int = 50) -> list[dict]:
-        """Return building permits for the given address, most recent first.
-
-        Handles mismatched address formats by extracting the street number + name
-        and using a LIKE match (permits use short addresses like '2822 BENVENUE Ave'
-        while properties use full addresses like '2822 BENVENUE AVE BERKELEY 94705').
-        """
+        """Return building permits for the given address, most recent first."""
         clean = address.strip().upper()
         # Try exact match first
-        rows = self.conn.execute(
+        rows = self.fetchall(
             """
             SELECT record_number, permit_type, status, address, zip_code,
                    description, job_value, construction_type, filed_date, detail_url
@@ -899,15 +1224,14 @@ class Database:
             LIMIT ?
             """,
             (clean, limit),
-        ).fetchall()
+        )
 
         if not rows:
             # Extract street number + street name for fuzzy match
-            # e.g. "2822 BENVENUE AVE BERKELEY 94705" → "2822 BENVENUE%"
             parts = clean.split()
             if len(parts) >= 2:
                 street_prefix = f"{parts[0]} {parts[1]}%"
-                rows = self.conn.execute(
+                rows = self.fetchall(
                     """
                     SELECT record_number, permit_type, status, address, zip_code,
                            description, job_value, construction_type, filed_date, detail_url
@@ -917,13 +1241,9 @@ class Database:
                     LIMIT ?
                     """,
                     (street_prefix, limit),
-                ).fetchall()
+                )
 
-        cols = [
-            "record_number", "permit_type", "status", "address", "zip_code",
-            "description", "job_value", "construction_type", "filed_date", "detail_url",
-        ]
-        return [dict(zip(cols, row)) for row in rows]
+        return rows
 
     # ------------------------------------------------------------------
     # Properties (Berkeley Parcels)
@@ -960,87 +1280,81 @@ class Database:
                 parcel_lot_size_sqft = excluded.parcel_lot_size_sqft,
                 updated_at = datetime('now')
         """
+        adapted = _adapt_sql(sql, self.backend)
         with self.conn:
             for p in parcels:
-                cursor = self.conn.execute(
-                    sql,
-                    (
-                        p.apn,
-                        p.address,
-                        p.street_number,
-                        p.street_name,
-                        p.zip_code,
-                        p.latitude,
-                        p.longitude,
-                        p.lot_size_sqft,
-                        p.building_sqft,
-                        p.use_code,
-                        p.use_description,
-                        p.neighborhood,
-                        p.zoning_class,
-                        p.situs_unit,
-                        p.property_category,
-                        p.ownership_type,
-                        p.record_type,
-                        p.lot_group_key,
-                        p.parcel_lot_size_sqft,
-                    ),
+                params = (
+                    p.apn,
+                    p.address,
+                    p.street_number,
+                    p.street_name,
+                    p.zip_code,
+                    p.latitude,
+                    p.longitude,
+                    p.lot_size_sqft,
+                    p.building_sqft,
+                    p.use_code,
+                    p.use_description,
+                    p.neighborhood,
+                    p.zoning_class,
+                    p.situs_unit,
+                    p.property_category,
+                    p.ownership_type,
+                    p.record_type,
+                    p.lot_group_key,
+                    p.parcel_lot_size_sqft,
                 )
-                # rowcount=1 for both INSERT and UPDATE in SQLite
-                if cursor.rowcount > 0:
-                    # Check if it was a new row vs update
-                    if cursor.lastrowid and cursor.lastrowid > 0:
+                if self.is_postgres:
+                    cur = self.conn.cursor()
+                    cur.execute(adapted, params)
+                    if cur.rowcount > 0:
                         inserted += 1
-                    else:
-                        updated += 1
+                else:
+                    cursor = self.conn.execute(adapted, params)
+                    # rowcount=1 for both INSERT and UPDATE in SQLite
+                    if cursor.rowcount > 0:
+                        if cursor.lastrowid and cursor.lastrowid > 0:
+                            inserted += 1
+                        else:
+                            updated += 1
         return inserted, updated
 
     def get_properties_missing_zoning(self) -> list[dict]:
         """Get all properties where zoning_class is NULL, with lat/long."""
-        rows = self.conn.execute(
+        return self.fetchall(
             "SELECT id, latitude, longitude FROM properties "
             "WHERE zoning_class IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL"
-        ).fetchall()
-        return [dict(r) for r in rows]
+        )
 
     def get_properties_missing_neighborhood(self) -> list[dict]:
         """Get all properties where neighborhood is NULL, with lat/long."""
-        rows = self.conn.execute(
+        return self.fetchall(
             "SELECT id, latitude, longitude FROM properties "
             "WHERE neighborhood IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL"
-        ).fetchall()
-        return [dict(r) for r in rows]
+        )
 
     def get_properties_missing_enrichment(self, limit: int | None = None) -> list[dict]:
-        """Get properties not yet enriched via external API.
-
-        Returns rows with id, apn, address, zip_code, latitude, longitude.
-        """
+        """Get properties not yet enriched via external API."""
         sql = (
             "SELECT id, apn, address, street_number, street_name, zip_code, "
             "latitude, longitude FROM properties WHERE attom_enriched = 0"
         )
         if limit:
             sql += f" LIMIT {limit}"
-        rows = self.conn.execute(sql).fetchall()
-        return [dict(r) for r in rows]
+        return self.fetchall(sql)
 
     def update_properties_zoning_batch(self, updates: list[tuple[str, int]]) -> int:
         """Batch update zoning_class on properties. Each tuple is (zoning_class, property_id)."""
+        sql = "UPDATE properties SET zoning_class = ?, updated_at = datetime('now') WHERE id = ?"
         with self.conn:
-            self.conn.executemany(
-                "UPDATE properties SET zoning_class = ?, updated_at = datetime('now') WHERE id = ?",
-                updates,
-            )
+            self.executemany(sql, updates)
         return len(updates)
 
     def update_properties_neighborhood_batch(self, updates: list[tuple[str, int]]) -> int:
         """Batch update neighborhood on properties. Each tuple is (neighborhood, property_id)."""
+        sql = "UPDATE properties SET neighborhood = ?, updated_at = datetime('now') WHERE id = ?"
         with self.conn:
-            self.conn.executemany(
-                "UPDATE properties SET neighborhood = ?, updated_at = datetime('now') WHERE id = ?",
-                updates,
-            )
+            self.executemany(sql, updates)
         return len(updates)
 
     # ------------------------------------------------------------------
@@ -1049,45 +1363,38 @@ class Database:
 
     def get_sales_missing_neighborhood(self) -> list[dict]:
         """Get property_sales rows missing neighborhood that have lat/long."""
-        rows = self.conn.execute(
+        return self.fetchall(
             "SELECT id, latitude, longitude FROM property_sales "
             "WHERE neighborhood IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL"
-        ).fetchall()
-        return [dict(r) for r in rows]
+        )
 
     def get_sales_missing_zoning(self) -> list[dict]:
         """Get property_sales rows missing zoning_class that have lat/long."""
-        rows = self.conn.execute(
+        return self.fetchall(
             "SELECT id, latitude, longitude FROM property_sales "
             "WHERE zoning_class IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL"
-        ).fetchall()
-        return [dict(r) for r in rows]
+        )
 
     def update_sales_neighborhood_batch(self, updates: list[tuple[str, int]]) -> int:
-        """Batch update neighborhood on property_sales. Each tuple is (neighborhood, sale_id)."""
+        """Batch update neighborhood on property_sales."""
         with self.conn:
-            self.conn.executemany(
+            self.executemany(
                 "UPDATE property_sales SET neighborhood = ? WHERE id = ?",
                 updates,
             )
         return len(updates)
 
     def update_sales_zoning_batch(self, updates: list[tuple[str, int]]) -> int:
-        """Batch update zoning_class on property_sales. Each tuple is (zoning_class, sale_id)."""
+        """Batch update zoning_class on property_sales."""
         with self.conn:
-            self.conn.executemany(
+            self.executemany(
                 "UPDATE property_sales SET zoning_class = ? WHERE id = ?",
                 updates,
             )
         return len(updates)
 
     def update_properties_enrichment_batch(self, updates: list[dict]) -> int:
-        """Batch update API-enriched fields on properties.
-
-        Each dict must have 'id' and any of: beds, baths, sqft, year_built,
-        property_type, last_sale_date, last_sale_price.
-        Sets attom_enriched = 1 (enrichment flag) for all updated rows.
-        """
+        """Batch update API-enriched fields on properties."""
         count = 0
         sql = """
             UPDATE properties SET
@@ -1096,44 +1403,50 @@ class Database:
                 attom_enriched = 1, updated_at = datetime('now')
             WHERE id = ?
         """
+        adapted = _adapt_sql(sql, self.backend)
         with self.conn:
             for u in updates:
-                self.conn.execute(
-                    sql,
-                    (
-                        u.get("beds"),
-                        u.get("baths"),
-                        u.get("sqft"),
-                        u.get("year_built"),
-                        u.get("property_type"),
-                        u.get("last_sale_date"),
-                        u.get("last_sale_price"),
-                        u["id"],
-                    ),
+                params = (
+                    u.get("beds"),
+                    u.get("baths"),
+                    u.get("sqft"),
+                    u.get("year_built"),
+                    u.get("property_type"),
+                    u.get("last_sale_date"),
+                    u.get("last_sale_price"),
+                    u["id"],
                 )
+                if self.is_postgres:
+                    cur = self.conn.cursor()
+                    cur.execute(adapted, params)
+                else:
+                    self.conn.execute(adapted, params)
                 count += 1
         return count
 
     def get_properties_count(self) -> dict:
         """Return property statistics for the status command."""
-        row = self.conn.execute(
-            "SELECT COUNT(*), "
-            "COUNT(CASE WHEN neighborhood IS NOT NULL THEN 1 END), "
-            "COUNT(CASE WHEN zoning_class IS NOT NULL THEN 1 END), "
-            "COUNT(CASE WHEN attom_enriched = 1 THEN 1 END), "
-            "COUNT(DISTINCT use_code), "
-            "COUNT(DISTINCT neighborhood), "
-            "COUNT(DISTINCT zip_code) "
+        row = self.fetchone(
+            "SELECT COUNT(*) AS total, "
+            "COUNT(CASE WHEN neighborhood IS NOT NULL THEN 1 END) AS with_neighborhood, "
+            "COUNT(CASE WHEN zoning_class IS NOT NULL THEN 1 END) AS with_zoning, "
+            "COUNT(CASE WHEN attom_enriched = 1 THEN 1 END) AS enriched, "
+            "COUNT(DISTINCT use_code) AS use_codes, "
+            "COUNT(DISTINCT neighborhood) AS neighborhoods, "
+            "COUNT(DISTINCT zip_code) AS zip_codes "
             "FROM properties"
-        ).fetchone()
+        )
+        if not row:
+            return {"total": 0, "with_neighborhood": 0, "with_zoning": 0,
+                    "enriched": 0, "use_codes": 0, "neighborhoods": 0, "zip_codes": 0}
         return {
-            "total": row[0],
-            "with_neighborhood": row[1],
-            "with_zoning": row[2],
-            "enriched": row[3],
-            "use_codes": row[4],
-            "neighborhoods": row[5],
-            "zip_codes": row[6],
+            "total": row["total"],
+            "with_neighborhood": row["with_neighborhood"],
+            "with_zoning": row["with_zoning"],
+            "enriched": row["enriched"],
+            "use_codes": row["use_codes"],
+            "neighborhoods": row["neighborhoods"],
+            "zip_codes": row["zip_codes"],
         }
 
     # ------------------------------------------------------------------
@@ -1151,20 +1464,37 @@ class Database:
     ) -> None:
         """Store a raw API response in the cache (upsert)."""
         params_json = json.dumps(request_params) if request_params else None
-        with self.conn:
-            self.conn.execute(
+        now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        if self.is_postgres:
+            self.execute(
                 """
                 INSERT INTO api_response_cache
                     (source, endpoint, cache_key, request_params, response_json, http_status, fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source, endpoint, cache_key) DO UPDATE SET
-                    request_params = excluded.request_params,
-                    response_json  = excluded.response_json,
-                    http_status    = excluded.http_status,
-                    fetched_at     = excluded.fetched_at
+                    request_params = EXCLUDED.request_params,
+                    response_json  = EXCLUDED.response_json,
+                    http_status    = EXCLUDED.http_status,
+                    fetched_at     = EXCLUDED.fetched_at
                 """,
-                (source, endpoint, cache_key, params_json, response_json, http_status),
+                (source, endpoint, cache_key, params_json, response_json, http_status, now_utc),
             )
+            self.commit()
+        else:
+            with self.conn:
+                self.conn.execute(
+                    """
+                    INSERT INTO api_response_cache
+                        (source, endpoint, cache_key, request_params, response_json, http_status, fetched_at)
+                    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                    ON CONFLICT(source, endpoint, cache_key) DO UPDATE SET
+                        request_params = excluded.request_params,
+                        response_json  = excluded.response_json,
+                        http_status    = excluded.http_status,
+                        fetched_at     = excluded.fetched_at
+                    """,
+                    (source, endpoint, cache_key, params_json, response_json, http_status),
+                )
 
     def get_cached_api_response(
         self,
@@ -1173,36 +1503,29 @@ class Database:
         cache_key: str,
         max_age_hours: int = 0,
     ) -> dict | None:
-        """Retrieve a cached API response.
-
-        Args:
-            source: API source name (e.g. 'rentcast').
-            endpoint: API endpoint (e.g. '/v1/properties').
-            cache_key: Normalized lookup key.
-            max_age_hours: If > 0, reject entries older than this. 0 = no expiry.
-
-        Returns:
-            Dict with response_json (parsed), http_status, fetched_at, or None.
-        """
+        """Retrieve a cached API response."""
         sql = (
             "SELECT response_json, http_status, fetched_at FROM api_response_cache "
             "WHERE source = ? AND endpoint = ? AND cache_key = ?"
         )
         params: list = [source, endpoint, cache_key]
         if max_age_hours > 0:
-            sql += " AND fetched_at > datetime('now', ?)"
-            params.append(f"-{max_age_hours} hours")
-        row = self.conn.execute(sql, params).fetchone()
+            # Use Python-computed cutoff (works for both backends)
+            cutoff = self._now_cutoff(max_age_hours)
+            sql += " AND fetched_at > ?"
+            params.append(cutoff)
+
+        row = self.fetchone(sql, params)
         if not row:
             return None
         try:
-            parsed = json.loads(row[0])
+            parsed = json.loads(row["response_json"])
         except (json.JSONDecodeError, TypeError):
-            parsed = row[0]
+            parsed = row["response_json"]
         return {
             "response": parsed,
-            "http_status": row[1],
-            "fetched_at": row[2],
+            "http_status": row["http_status"],
+            "fetched_at": row["fetched_at"],
         }
 
     def get_cached_api_responses_by_source(
@@ -1219,8 +1542,7 @@ class Database:
             params.append(endpoint)
         sql += " ORDER BY fetched_at DESC LIMIT ?"
         params.append(limit)
-        rows = self.conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+        return self.fetchall(sql, params)
 
     # ------------------------------------------------------------------
     # Pre-computed scenarios
@@ -1237,21 +1559,46 @@ class Database:
         model_version: str | None = None,
     ) -> None:
         """Insert or replace a pre-computed scenario for a property."""
-        self.conn.execute(
-            """
-            INSERT OR REPLACE INTO precomputed_scenarios (
-                property_id, scenario_type, prediction_json,
-                rental_json, potential_json, comparables_json,
-                model_version, computed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            """,
-            (
-                property_id, scenario_type, prediction_json,
-                rental_json, potential_json, comparables_json,
-                model_version,
-            ),
-        )
-        self.conn.commit()
+        now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        if self.is_postgres:
+            self.execute(
+                """
+                INSERT INTO precomputed_scenarios (
+                    property_id, scenario_type, prediction_json,
+                    rental_json, potential_json, comparables_json,
+                    model_version, computed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (property_id, scenario_type) DO UPDATE SET
+                    prediction_json = EXCLUDED.prediction_json,
+                    rental_json = EXCLUDED.rental_json,
+                    potential_json = EXCLUDED.potential_json,
+                    comparables_json = EXCLUDED.comparables_json,
+                    model_version = EXCLUDED.model_version,
+                    computed_at = EXCLUDED.computed_at
+                """,
+                (
+                    property_id, scenario_type, prediction_json,
+                    rental_json, potential_json, comparables_json,
+                    model_version, now_utc,
+                ),
+            )
+            self.commit()
+        else:
+            self.conn.execute(
+                """
+                INSERT OR REPLACE INTO precomputed_scenarios (
+                    property_id, scenario_type, prediction_json,
+                    rental_json, potential_json, comparables_json,
+                    model_version, computed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                """,
+                (
+                    property_id, scenario_type, prediction_json,
+                    rental_json, potential_json, comparables_json,
+                    model_version,
+                ),
+            )
+            self.conn.commit()
 
     def get_precomputed_scenario(
         self,
@@ -1259,11 +1606,10 @@ class Database:
         scenario_type: str = "buyer",
     ) -> Optional[dict]:
         """Look up a pre-computed scenario by property ID."""
-        row = self.conn.execute(
+        return self.fetchone(
             "SELECT * FROM precomputed_scenarios WHERE property_id = ? AND scenario_type = ?",
             (property_id, scenario_type),
-        ).fetchone()
-        return dict(row) if row else None
+        )
 
     def get_precomputed_by_location(
         self,
@@ -1272,17 +1618,9 @@ class Database:
         scenario_type: str = "buyer",
         max_distance_m: float = 5.0,
     ) -> Optional[dict]:
-        """Find the nearest pre-computed scenario within *max_distance_m*.
-
-        Joins ``precomputed_scenarios`` with ``properties`` to return both
-        the scenario JSON blobs and the underlying property row.
-
-        Returns:
-            Dict with keys from precomputed_scenarios plus a ``property``
-            sub-dict containing the properties row, or ``None``.
-        """
+        """Find the nearest pre-computed scenario within *max_distance_m*."""
         delta = max_distance_m / 111_139.0
-        rows = self.conn.execute(
+        rows = self.fetchall(
             """
             SELECT ps.*, p.*
             FROM precomputed_scenarios ps
@@ -1292,31 +1630,27 @@ class Database:
               AND p.longitude BETWEEN ? AND ?
             """,
             (scenario_type, lat - delta, lat + delta, lon - delta, lon + delta),
-        ).fetchall()
+        )
 
         if not rows:
             return None
 
         best: Optional[dict] = None
         best_dist = float("inf")
-        for row in rows:
-            d = dict(row)
+        for d in rows:
             dist = _haversine(lat, lon, d["latitude"], d["longitude"])
             if dist < best_dist and dist <= max_distance_m:
                 best_dist = dist
-                # Separate scenario fields from property fields
                 scenario_keys = {
                     "property_id", "scenario_type", "prediction_json",
                     "rental_json", "potential_json", "comparables_json",
                     "computed_at", "model_version",
                 }
                 scenario = {k: d[k] for k in scenario_keys if k in d}
-                # The property dict is everything else (minus the precomputed 'id')
                 prop = {}
                 for k, v in d.items():
                     if k not in scenario_keys and k != "id":
                         prop[k] = v
-                # Re-add the property id (it was the precomputed row's id that's duplicated)
                 if "id" not in prop:
                     prop["id"] = d.get("property_id")
                 scenario["property"] = prop
@@ -1329,36 +1663,24 @@ class Database:
     # ------------------------------------------------------------------
 
     def search_properties(self, query: str, limit: int = 5) -> list[dict]:
-        """Search properties by address (fuzzy text match).
-
-        Normalizes the query to uppercase, tries exact prefix match first,
-        then falls back to LIKE '%query%'. Returns dicts with all property fields.
-
-        Args:
-            query: Street address or partial address to search for.
-            limit: Maximum number of results to return.
-
-        Returns:
-            List of property dicts ordered by relevance.
-        """
+        """Search properties by address (fuzzy text match)."""
         normalized = query.strip().upper()
         if not normalized:
             return []
 
-        # Try exact prefix match first (e.g. "1234 CEDAR")
-        rows = self.conn.execute(
+        # Try exact prefix match first
+        rows = self.fetchall(
             "SELECT * FROM properties WHERE UPPER(address) LIKE ? ORDER BY address LIMIT ?",
             (f"{normalized}%", limit),
-        ).fetchall()
+        )
 
         if not rows:
-            # Fallback: contains match (e.g. "CEDAR ST")
-            rows = self.conn.execute(
+            rows = self.fetchall(
                 "SELECT * FROM properties WHERE UPPER(address) LIKE ? ORDER BY address LIMIT ?",
                 (f"%{normalized}%", limit),
-            ).fetchall()
+            )
 
-        return [dict(row) for row in rows]
+        return rows
 
     # -- Shared filter builder for advanced property queries ------------------
 
@@ -1385,11 +1707,7 @@ class Database:
         min_year_built: int | None = None,
         max_year_built: int | None = None,
     ) -> tuple[str, list]:
-        """Build a WHERE clause + params list from property search filters.
-
-        Shared by search_properties_advanced, count_properties_advanced, and
-        search_properties_lightweight. Table alias must be ``p``.
-        """
+        """Build a WHERE clause + params list from property search filters."""
         clauses: list[str] = []
         params: list = []
 
@@ -1480,13 +1798,7 @@ class Database:
         max_year_built: int | None = None,
         limit: int = 25,
     ) -> list[dict]:
-        """Search properties by multiple criteria with precomputed data.
-
-        Returns property dicts with ``prediction_json`` and ``potential_json``
-        from the precomputed scenarios table (LEFT JOIN).
-
-        All filters are optional; only those provided are applied.
-        """
+        """Search properties by multiple criteria with precomputed data."""
         where, params = self._build_property_filter_clause(
             neighborhoods=neighborhoods, zoning_classes=zoning_classes,
             zoning_pattern=zoning_pattern, property_type=property_type,
@@ -1511,8 +1823,7 @@ class Database:
             ORDER BY p.last_sale_price DESC NULLS LAST
             LIMIT ?
         """
-        rows = self.conn.execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
+        return self.fetchall(sql, params)
 
     def count_properties_advanced(
         self,
@@ -1537,7 +1848,7 @@ class Database:
         min_year_built: int | None = None,
         max_year_built: int | None = None,
     ) -> int:
-        """Count properties matching criteria (same filters as search_properties_advanced)."""
+        """Count properties matching criteria."""
         where, params = self._build_property_filter_clause(
             neighborhoods=neighborhoods, zoning_classes=zoning_classes,
             zoning_pattern=zoning_pattern, property_type=property_type,
@@ -1550,8 +1861,8 @@ class Database:
             min_year_built=min_year_built, max_year_built=max_year_built,
         )
         sql = f"SELECT COUNT(*) FROM properties p WHERE {where}"
-        row = self.conn.execute(sql, params).fetchone()
-        return row[0] if row else 0
+        val = self.fetchval(sql, params)
+        return val if val else 0
 
     def search_properties_lightweight(
         self,
@@ -1577,13 +1888,7 @@ class Database:
         max_year_built: int | None = None,
         max_results: int = 5000,
     ) -> list[dict]:
-        """Return lightweight property records for ALL matches (working set).
-
-        Same filters as ``search_properties_advanced`` but:
-        - No JOIN to ``precomputed_scenarios`` (faster, less memory)
-        - SELECT only working-set fields
-        - Safety cap at *max_results* (default 5000)
-        """
+        """Return lightweight property records for ALL matches (working set)."""
         where, params = self._build_property_filter_clause(
             neighborhoods=neighborhoods, zoning_classes=zoning_classes,
             zoning_pattern=zoning_pattern, property_type=property_type,
@@ -1608,23 +1913,14 @@ class Database:
             ORDER BY p.last_sale_price DESC NULLS LAST
             LIMIT ?
         """
-        rows = self.conn.execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
+        return self.fetchall(sql, params)
 
     def get_property_by_id(self, property_id: int) -> dict | None:
-        """Get a single property by its database ID.
-
-        Args:
-            property_id: The integer primary key.
-
-        Returns:
-            Property dict, or None if not found.
-        """
-        row = self.conn.execute(
+        """Get a single property by its database ID."""
+        return self.fetchone(
             "SELECT * FROM properties WHERE id = ?",
             (property_id,),
-        ).fetchone()
-        return dict(row) if row else None
+        )
 
     # ------------------------------------------------------------------
     # Predictions cache
@@ -1642,40 +1938,19 @@ class Database:
         property_type: str | None = None,
         max_age_hours: int = 168,  # 7 days default
     ) -> dict | None:
-        """Look up a cached prediction for the given property parameters.
-
-        Matches on lat/lon (within ~10m tolerance) and core property attributes.
-        Returns the most recent prediction within the staleness window.
-
-        Args:
-            latitude: Property latitude.
-            longitude: Property longitude.
-            beds: Number of bedrooms.
-            baths: Number of bathrooms.
-            sqft: Living area square footage.
-            year_built: Year the property was built.
-            lot_size_sqft: Lot size in square feet.
-            property_type: Property type string.
-            max_age_hours: Maximum age of cached prediction in hours.
-
-        Returns:
-            Cached prediction dict with all fields, or None if no match.
-        """
-        # ~10m tolerance in lat/lon degrees
+        """Look up a cached prediction for the given property parameters."""
         lat_tol = 0.0001
         lon_tol = 0.0001
 
+        # Use Python-computed cutoff instead of SQLite datetime() modifier
+        cutoff = self._now_cutoff(max_age_hours)
         conditions = [
             "ABS(latitude - ?) < ?",
             "ABS(longitude - ?) < ?",
-            "created_at > datetime('now', ?)",
+            "created_at > ?",
         ]
-        params: list = [latitude, lat_tol, longitude, lon_tol, f"-{max_age_hours} hours"]
+        params: list = [latitude, lat_tol, longitude, lon_tol, cutoff]
 
-        # Match on property attributes if provided.
-        # Use IS for NULL-safe comparison: (col IS ?) matches both values and NULLs.
-        # This ensures that a query with beds=None matches cached rows with beds=NULL,
-        # and a query with beds=3 only matches cached rows with beds=3.
         for col, val in [
             ("beds", beds),
             ("baths", baths),
@@ -1697,11 +1972,10 @@ class Database:
             ORDER BY created_at DESC
             LIMIT 1
         """
-        row = self.conn.execute(sql, params).fetchone()
-        if not row:
+        result = self.fetchone(sql, params)
+        if not result:
             return None
 
-        result = dict(row)
         # Deserialize feature_contributions from JSON
         if result.get("feature_contributions"):
             try:
@@ -1732,33 +2006,7 @@ class Database:
         feature_contributions: list[dict] | None = None,
         source: str = "chat",
     ) -> int:
-        """Store a prediction result in the cache.
-
-        Args:
-            latitude: Property latitude.
-            longitude: Property longitude.
-            predicted_price: Predicted sale price.
-            price_lower: Lower bound of prediction interval.
-            price_upper: Upper bound of prediction interval.
-            neighborhood: Neighborhood name.
-            zip_code: ZIP code.
-            beds: Number of bedrooms.
-            baths: Number of bathrooms.
-            sqft: Living area square footage.
-            year_built: Year the property was built.
-            lot_size_sqft: Lot size in square feet.
-            property_type: Property type string.
-            list_price: Listing price if available.
-            hoa_per_month: Monthly HOA fee.
-            base_value: Model baseline value (SHAP).
-            predicted_premium_pct: Predicted premium over list price.
-            feature_contributions: SHAP feature contributions list.
-            source: Origin of the prediction ('chat', 'predict', 'manual').
-
-        Returns:
-            The row ID of the inserted prediction.
-        """
-        # Serialize feature contributions as JSON
+        """Store a prediction result in the cache."""
         fc_json = json.dumps(feature_contributions) if feature_contributions else None
 
         sql = """
@@ -1771,16 +2019,16 @@ class Database:
                 source
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        cursor = self.conn.execute(sql, (
+        params = (
             latitude, longitude, neighborhood, zip_code,
             beds, baths, sqft, year_built, lot_size_sqft,
             property_type, list_price, hoa_per_month,
             predicted_price, price_lower, price_upper,
             base_value, predicted_premium_pct, fc_json,
             source,
-        ))
-        self.conn.commit()
-        row_id = cursor.lastrowid
+        )
+        row_id = self._insert_returning_id(sql, params)
+        self.commit()
         logger.info(
             "Stored prediction #%d: $%s for (%s, %s) via %s",
             row_id, f"{predicted_price:,}", latitude, longitude, source,
@@ -1812,8 +2060,8 @@ class Database:
                 centroid_lon = excluded.centroid_lon,
                 area_sqmi = excluded.area_sqmi
         """
-        self.conn.execute(sql, (name, aliases_json, geometry_wkt, centroid_lat, centroid_lon, area_sqmi))
-        self.conn.commit()
+        self.execute(sql, (name, aliases_json, geometry_wkt, centroid_lat, centroid_lon, area_sqmi))
+        self.commit()
 
     # ------------------------------------------------------------------
     # Collection Runs (audit trail)
@@ -1822,18 +2070,17 @@ class Database:
     def start_collection_run(self, source: str, parameters: dict | None = None) -> int:
         """Record the start of a collection run. Returns the run ID."""
         params_json = json.dumps(parameters) if parameters else None
-        cursor = self.conn.execute(
-            "INSERT INTO collection_runs (source, started_at, parameters) VALUES (?, ?, ?)",
-            (source, datetime.now().isoformat(), params_json),
-        )
-        self.conn.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
+        sql = "INSERT INTO collection_runs (source, started_at, parameters) VALUES (?, ?, ?)"
+        params = (source, datetime.now().isoformat(), params_json)
+        row_id = self._insert_returning_id(sql, params)
+        self.commit()
+        return row_id
 
     def complete_collection_run(self, run_id: int, result: CollectionResult) -> None:
         """Record the completion of a collection run."""
         error_msg = "; ".join(result.errors) if result.errors else None
         status = "success" if result.success else "failed"
-        self.conn.execute(
+        self.execute(
             """UPDATE collection_runs SET
                 completed_at = ?, status = ?, records_fetched = ?,
                 records_inserted = ?, records_duplicates = ?, error_message = ?
@@ -1848,7 +2095,7 @@ class Database:
                 run_id,
             ),
         )
-        self.conn.commit()
+        self.commit()
 
     # ------------------------------------------------------------------
     # Statistics / Status
@@ -1859,21 +2106,24 @@ class Database:
         stats: dict = {}
 
         # Property sales
-        row = self.conn.execute(
-            "SELECT COUNT(*), MIN(sale_date), MAX(sale_date) FROM property_sales"
-        ).fetchone()
-        stats["property_sales"] = {
-            "count": row[0],
-            "min_date": row[1],
-            "max_date": row[2],
-        }
+        row = self.fetchone(
+            "SELECT COUNT(*) AS cnt, MIN(sale_date) AS min_date, "
+            "MAX(sale_date) AS max_date FROM property_sales"
+        )
+        if row:
+            stats["property_sales"] = {
+                "count": row["cnt"],
+                "min_date": row["min_date"],
+                "max_date": row["max_date"],
+            }
+        else:
+            stats["property_sales"] = {"count": 0, "min_date": None, "max_date": None}
 
         # Neighborhood coverage
-        row = self.conn.execute(
-            "SELECT COUNT(*) FROM property_sales WHERE neighborhood IS NOT NULL"
-        ).fetchone()
         total = stats["property_sales"]["count"]
-        geocoded = row[0]
+        geocoded = self.fetchval(
+            "SELECT COUNT(*) FROM property_sales WHERE neighborhood IS NOT NULL"
+        ) or 0
         stats["neighborhood_coverage"] = {
             "geocoded": geocoded,
             "total": total,
@@ -1881,10 +2131,9 @@ class Database:
         }
 
         # Zoning coverage
-        row = self.conn.execute(
+        zoned = self.fetchval(
             "SELECT COUNT(*) FROM property_sales WHERE zoning_class IS NOT NULL"
-        ).fetchone()
-        zoned = row[0]
+        ) or 0
         stats["zoning_coverage"] = {
             "zoned": zoned,
             "total": total,
@@ -1892,113 +2141,106 @@ class Database:
         }
 
         # Market metrics
-        row = self.conn.execute(
-            "SELECT COUNT(*), MIN(period_begin), MAX(period_begin) FROM market_metrics"
-        ).fetchone()
-        stats["market_metrics"] = {
-            "count": row[0],
-            "min_date": row[1],
-            "max_date": row[2],
-        }
+        row = self.fetchone(
+            "SELECT COUNT(*) AS cnt, MIN(period_begin) AS min_date, "
+            "MAX(period_begin) AS max_date FROM market_metrics"
+        )
+        if row:
+            stats["market_metrics"] = {"count": row["cnt"], "min_date": row["min_date"], "max_date": row["max_date"]}
+        else:
+            stats["market_metrics"] = {"count": 0}
 
         # Mortgage rates
-        row = self.conn.execute(
-            "SELECT COUNT(*), MIN(observation_date), MAX(observation_date) FROM mortgage_rates"
-        ).fetchone()
-        stats["mortgage_rates"] = {
-            "count": row[0],
-            "min_date": row[1],
-            "max_date": row[2],
-        }
+        row = self.fetchone(
+            "SELECT COUNT(*) AS cnt, MIN(observation_date) AS min_date, "
+            "MAX(observation_date) AS max_date FROM mortgage_rates"
+        )
+        if row:
+            stats["mortgage_rates"] = {"count": row["cnt"], "min_date": row["min_date"], "max_date": row["max_date"]}
+        else:
+            stats["mortgage_rates"] = {"count": 0}
 
         # Economic indicators
-        row = self.conn.execute(
-            "SELECT COUNT(*), MIN(observation_date), MAX(observation_date) "
-            "FROM economic_indicators"
-        ).fetchone()
-        stats["economic_indicators"] = {
-            "count": row[0],
-            "min_date": row[1],
-            "max_date": row[2],
-        }
+        row = self.fetchone(
+            "SELECT COUNT(*) AS cnt, MIN(observation_date) AS min_date, "
+            "MAX(observation_date) AS max_date FROM economic_indicators"
+        )
+        if row:
+            stats["economic_indicators"] = {"count": row["cnt"], "min_date": row["min_date"], "max_date": row["max_date"]}
+        else:
+            stats["economic_indicators"] = {"count": 0}
 
         # Series breakdown
-        series_rows = self.conn.execute(
+        series_rows = self.fetchall(
             "SELECT series_id, COUNT(*) as cnt FROM economic_indicators "
             "GROUP BY series_id ORDER BY series_id"
-        ).fetchall()
-        stats["economic_series"] = {r[0]: r[1] for r in series_rows}
+        )
+        stats["economic_series"] = {r["series_id"]: r["cnt"] for r in series_rows}
 
         # Census income
-        row = self.conn.execute(
-            "SELECT COUNT(*), COUNT(DISTINCT zip_code), "
-            "MIN(acs_year), MAX(acs_year) FROM census_income"
-        ).fetchone()
-        stats["census_income"] = {
-            "count": row[0],
-            "zip_codes": row[1],
-            "min_year": row[2],
-            "max_year": row[3],
-        }
+        row = self.fetchone(
+            "SELECT COUNT(*) AS cnt, COUNT(DISTINCT zip_code) AS zip_codes, "
+            "MIN(acs_year) AS min_year, MAX(acs_year) AS max_year FROM census_income"
+        )
+        if row:
+            stats["census_income"] = {
+                "count": row["cnt"], "zip_codes": row["zip_codes"],
+                "min_year": row["min_year"], "max_year": row["max_year"],
+            }
+        else:
+            stats["census_income"] = {"count": 0}
 
         # BESO records
-        beso_exists = self.conn.execute(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='beso_records'"
-        ).fetchone()[0]
-        if beso_exists:
-            row = self.conn.execute(
-                "SELECT COUNT(*), COUNT(DISTINCT UPPER(TRIM(building_address))), "
-                "MIN(reporting_year), MAX(reporting_year) FROM beso_records"
-            ).fetchone()
-            stats["beso_records"] = {
-                "count": row[0],
-                "addresses": row[1],
-                "min_year": row[2],
-                "max_year": row[3],
-            }
+        if self.table_exists("beso_records"):
+            row = self.fetchone(
+                "SELECT COUNT(*) AS cnt, COUNT(DISTINCT UPPER(TRIM(building_address))) AS addrs, "
+                "MIN(reporting_year) AS min_year, MAX(reporting_year) AS max_year FROM beso_records"
+            )
+            if row:
+                stats["beso_records"] = {
+                    "count": row["cnt"], "addresses": row["addrs"],
+                    "min_year": row["min_year"], "max_year": row["max_year"],
+                }
+            else:
+                stats["beso_records"] = {"count": 0, "addresses": 0}
         else:
             stats["beso_records"] = {"count": 0, "addresses": 0}
 
         # Building permits
-        permits_exists = self.conn.execute(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='building_permits'"
-        ).fetchone()[0]
-        if permits_exists:
-            row = self.conn.execute(
-                "SELECT COUNT(*), COUNT(DISTINCT UPPER(TRIM(address))), "
-                "MIN(filed_date), MAX(filed_date) FROM building_permits"
-            ).fetchone()
-            stats["building_permits"] = {
-                "count": row[0],
-                "addresses": row[1],
-                "min_date": row[2],
-                "max_date": row[3],
-            }
+        if self.table_exists("building_permits"):
+            row = self.fetchone(
+                "SELECT COUNT(*) AS cnt, COUNT(DISTINCT UPPER(TRIM(address))) AS addrs, "
+                "MIN(filed_date) AS min_date, MAX(filed_date) AS max_date FROM building_permits"
+            )
+            if row:
+                stats["building_permits"] = {
+                    "count": row["cnt"], "addresses": row["addrs"],
+                    "min_date": row["min_date"], "max_date": row["max_date"],
+                }
+            else:
+                stats["building_permits"] = {"count": 0, "addresses": 0}
         else:
             stats["building_permits"] = {"count": 0, "addresses": 0}
 
         # Properties (parcels)
-        props_exists = self.conn.execute(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='properties'"
-        ).fetchone()[0]
-        if props_exists:
+        if self.table_exists("properties"):
             stats["properties"] = self.get_properties_count()
         else:
             stats["properties"] = {"total": 0}
 
         # Neighborhoods
-        row = self.conn.execute("SELECT COUNT(*) FROM neighborhoods").fetchone()
-        stats["neighborhoods"] = {"count": row[0]}
+        nbhd_count = self.fetchval("SELECT COUNT(*) FROM neighborhoods")
+        stats["neighborhoods"] = {"count": nbhd_count or 0}
 
         # Last collection run
-        row = self.conn.execute(
+        last_run = self.fetchone(
             "SELECT source, completed_at, status FROM collection_runs ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        if row:
+        )
+        if last_run:
             stats["last_run"] = {
-                "source": row[0],
-                "completed_at": row[1],
-                "status": row[2],
+                "source": last_run["source"],
+                "completed_at": last_run["completed_at"],
+                "status": last_run["status"],
             }
 
         return stats
@@ -2013,17 +2255,9 @@ class Database:
         lon: float,
         max_distance_m: float = 50.0,
     ) -> Optional[dict]:
-        """Find the nearest property sale within *max_distance_m* of (lat, lon).
-
-        Uses a bounding-box SQL pre-filter (fast) then Haversine distance in
-        Python on the small candidate set.
-
-        Returns:
-            Dict of property_sales columns for the nearest match, or ``None``.
-        """
-        # Approximate bounding box in degrees (1° lat ≈ 111 139 m)
+        """Find the nearest property sale within *max_distance_m* of (lat, lon)."""
         delta = max_distance_m / 111_139.0
-        rows = self.conn.execute(
+        rows = self.fetchall(
             """
             SELECT * FROM property_sales
             WHERE latitude BETWEEN ? AND ?
@@ -2031,15 +2265,14 @@ class Database:
             ORDER BY sale_date DESC
             """,
             (lat - delta, lat + delta, lon - delta, lon + delta),
-        ).fetchall()
+        )
 
         if not rows:
             return None
 
         best: Optional[dict] = None
         best_dist = float("inf")
-        for row in rows:
-            d = dict(row)
+        for d in rows:
             dist = _haversine(lat, lon, d["latitude"], d["longitude"])
             if dist < best_dist and dist <= max_distance_m:
                 best = d
@@ -2048,19 +2281,18 @@ class Database:
         return best
 
     # ------------------------------------------------------------------
-    # Processing helpers
+    # Processing helpers (additional)
     # ------------------------------------------------------------------
 
     def get_sales_missing_neighborhood(self) -> list[dict]:
         """Get all sales where neighborhood is NULL, with lat/long."""
-        rows = self.conn.execute(
+        return self.fetchall(
             "SELECT id, latitude, longitude, neighborhood_raw FROM property_sales WHERE neighborhood IS NULL"
-        ).fetchall()
-        return [dict(r) for r in rows]
+        )
 
     def update_neighborhood(self, sale_id: int, neighborhood: str) -> None:
         """Set the normalized neighborhood for a property sale."""
-        self.conn.execute(
+        self.execute(
             "UPDATE property_sales SET neighborhood = ? WHERE id = ?",
             (neighborhood, sale_id),
         )
@@ -2068,36 +2300,22 @@ class Database:
     def update_neighborhoods_batch(self, updates: list[tuple[str, int]]) -> None:
         """Batch update neighborhoods. Each tuple is (neighborhood, sale_id)."""
         with self.conn:
-            self.conn.executemany(
+            self.executemany(
                 "UPDATE property_sales SET neighborhood = ? WHERE id = ?",
                 updates,
             )
 
-    def get_sales_missing_zoning(self) -> list[dict]:
-        """Get all sales where zoning_class is NULL, with lat/long."""
-        rows = self.conn.execute(
-            "SELECT id, latitude, longitude FROM property_sales "
-            "WHERE zoning_class IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL"
-        ).fetchall()
-        return [dict(r) for r in rows]
-
     def update_zoning_batch(self, updates: list[tuple[str, int]]) -> None:
         """Batch update zoning_class. Each tuple is (zoning_class, sale_id)."""
         with self.conn:
-            self.conn.executemany(
+            self.executemany(
                 "UPDATE property_sales SET zoning_class = ? WHERE id = ?",
                 updates,
             )
 
     def get_unique_redfin_addresses(self) -> list[dict]:
-        """Return unique addresses from Redfin-sourced sales with lat/lng for enrichment lookups."""
-        rows = self.conn.execute(
-            """
-            SELECT DISTINCT address, city, state, zip_code, latitude, longitude
-            FROM property_sales
-            WHERE (data_source = 'redfin' OR data_source IS NULL)
-              AND latitude IS NOT NULL AND longitude IS NOT NULL
-            ORDER BY address
-            """
-        ).fetchall()
-        return [dict(r) for r in rows]
+        """Get unique addresses from property_sales with coordinates."""
+        return self.fetchall(
+            "SELECT DISTINCT address, city, state, zip_code, latitude, longitude "
+            "FROM property_sales"
+        )

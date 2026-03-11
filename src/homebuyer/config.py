@@ -18,6 +18,9 @@ PROCESSED_DIR = DATA_DIR / "processed"
 GEO_DIR = DATA_DIR / "geo"
 DB_PATH = DATA_DIR / "berkeley_homebuyer.db"
 
+# PostgreSQL connection URL (when set, overrides SQLite file path)
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
 # ---------------------------------------------------------------------------
 # Redfin gis-csv API
 # ---------------------------------------------------------------------------

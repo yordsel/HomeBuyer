@@ -490,7 +490,7 @@ class DevelopmentPotentialCalculator:
         development potential analysis.
         """
         try:
-            rows = self.db.conn.execute(
+            rows = self.db.fetchall(
                 """
                 SELECT address, lot_size_sqft, building_sqft,
                        last_sale_price, record_type
@@ -499,7 +499,7 @@ class DevelopmentPotentialCalculator:
                 ORDER BY situs_unit
                 """,
                 (lot_group_key,),
-            ).fetchall()
+            )
 
             if not rows:
                 return None
@@ -545,7 +545,7 @@ class DevelopmentPotentialCalculator:
         if self._improvement_roi_cache is not None:
             return self._improvement_roi_cache
         try:
-            rows = self.db.conn.execute(
+            rows = self.db.fetchall(
                 """
                 WITH permit_cats AS (
                     SELECT
@@ -608,15 +608,15 @@ class DevelopmentPotentialCalculator:
                 FROM cat_stats cs
                 CROSS JOIN overall o
                 ORDER BY premium_pct DESC
-                """
-            ).fetchall()
+                """,
+            )
 
             result = [
                 ImprovementROI(
-                    category=r[0],
-                    avg_job_value=round(r[1], 0),
-                    avg_ppsf_premium_pct=round(r[2], 1),
-                    sample_count=r[3],
+                    category=dict(r)["category"],
+                    avg_job_value=round(dict(r)["avg_job_value"], 0),
+                    avg_ppsf_premium_pct=round(dict(r)["premium_pct"], 1),
+                    sample_count=dict(r)["sample_count"],
                 )
                 for r in rows
             ]

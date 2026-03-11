@@ -322,7 +322,7 @@ class FeatureBuilder:
         # Load property sales, enriched with assessor data (use_code,
         # building_sqft, record_type, lot_group_key) via LEFT JOIN
         # to the properties table.
-        rows = self.db.conn.execute(
+        rows = self.db.fetchall(
             """
             SELECT
                 ps.sale_date, ps.sale_price, ps.beds, ps.baths, ps.sqft,
@@ -346,7 +346,7 @@ class FeatureBuilder:
             ORDER BY ps.sale_date
             """,
             (min_sale_price, max_sale_price, min_sale_date),
-        ).fetchall()
+        )
 
         if not rows:
             raise ValueError("No qualifying sales found in database.")
@@ -607,13 +607,13 @@ class FeatureBuilder:
             unique_keys = lgk.dropna().unique().tolist()
             if unique_keys and self.db is not None:
                 placeholders = ",".join("?" * len(unique_keys))
-                rows = self.db.conn.execute(
-                    f"SELECT lot_group_key, COUNT(*) FROM properties "
+                rows = self.db.fetchall(
+                    f"SELECT lot_group_key, COUNT(*) AS cnt FROM properties "
                     f"WHERE lot_group_key IN ({placeholders}) "
                     f"GROUP BY lot_group_key",
                     unique_keys,
-                ).fetchall()
-                lgk_counts = {r[0]: r[1] for r in rows}
+                )
+                lgk_counts = {dict(r)["lot_group_key"]: dict(r)["cnt"] for r in rows}
                 features["units_on_lot"] = lgk.map(lgk_counts).astype(float)
             else:
                 features["units_on_lot"] = np.nan
@@ -796,7 +796,7 @@ class FeatureBuilder:
 
     def _load_market_cache(self) -> None:
         """Load market metrics into a DataFrame indexed by month."""
-        rows = self.db.conn.execute(
+        rows = self.db.fetchall(
             """
             SELECT
                 period_begin,
@@ -808,8 +808,8 @@ class FeatureBuilder:
             WHERE property_type = 'All Residential'
               AND period_duration = '30'
             ORDER BY period_begin
-            """
-        ).fetchall()
+            """,
+        )
 
         if rows:
             df = pd.DataFrame([dict(r) for r in rows])
@@ -858,14 +858,14 @@ class FeatureBuilder:
 
     def _load_rate_cache(self) -> None:
         """Load mortgage rates into a DataFrame indexed by date."""
-        rows = self.db.conn.execute(
+        rows = self.db.fetchall(
             """
             SELECT observation_date, rate_30yr, rate_15yr
             FROM mortgage_rates
             WHERE rate_30yr IS NOT NULL
             ORDER BY observation_date
-            """
-        ).fetchall()
+            """,
+        )
 
         if rows:
             df = pd.DataFrame([dict(r) for r in rows])
@@ -919,13 +919,13 @@ class FeatureBuilder:
         """Load economic indicators into DataFrames keyed by series_id."""
         self._econ_cache = {}
 
-        rows = self.db.conn.execute(
+        rows = self.db.fetchall(
             """
             SELECT series_id, observation_date, value
             FROM economic_indicators
             ORDER BY series_id, observation_date
-            """
-        ).fetchall()
+            """,
+        )
 
         if not rows:
             logger.warning("No economic indicators found in database.")
@@ -1013,13 +1013,13 @@ class FeatureBuilder:
 
     def _load_income_cache(self) -> None:
         """Load Census ACS income data into a DataFrame."""
-        rows = self.db.conn.execute(
+        rows = self.db.fetchall(
             """
             SELECT zip_code, acs_year, median_household_income
             FROM census_income
             ORDER BY zip_code, acs_year
-            """
-        ).fetchall()
+            """,
+        )
 
         if rows:
             self._income_cache = pd.DataFrame([dict(r) for r in rows])
@@ -1095,21 +1095,18 @@ class FeatureBuilder:
         self._permit_cache = {}
 
         # Check if the table exists
-        table_check = self.db.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='building_permits'"
-        ).fetchone()
-        if not table_check:
+        if not self.db.table_exists("building_permits"):
             logger.info("No building_permits table found — permit features will be NaN.")
             return
 
-        rows = self.db.conn.execute(
+        rows = self.db.fetchall(
             """
             SELECT address, record_number, permit_type, status,
                    description, job_value, filed_date
             FROM building_permits
             ORDER BY address, filed_date
-            """
-        ).fetchall()
+            """,
+        )
 
         if not rows:
             logger.info("No building permits in database — permit features will be NaN.")
