@@ -427,6 +427,48 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash);
+
+CREATE TABLE IF NOT EXISTS auth_activity_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER,
+    event_type      TEXT NOT NULL,
+    ip_address      TEXT,
+    user_agent      TEXT,
+    success         INTEGER NOT NULL DEFAULT 1,
+    detail          TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_activity_user ON auth_activity_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_activity_type ON auth_activity_log(event_type);
+CREATE INDEX IF NOT EXISTS idx_auth_activity_created ON auth_activity_log(created_at);
+
+CREATE TABLE IF NOT EXISTS email_verification_tokens (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    token_hash      TEXT NOT NULL,
+    expires_at      TEXT NOT NULL,
+    used            INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_verify_user ON email_verification_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_email_verify_hash ON email_verification_tokens(token_hash);
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    token_hash      TEXT NOT NULL,
+    expires_at      TEXT NOT NULL,
+    used            INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pw_reset_user ON password_reset_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_pw_reset_hash ON password_reset_tokens(token_hash);
 """
 
 
@@ -2327,6 +2369,144 @@ class Database:
         self.execute(
             "UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
             (password_hash, user_id),
+        )
+        self.commit()
+
+    def deactivate_user(self, user_id: int) -> None:
+        """Set is_active = 0 for a user."""
+        self.execute(
+            "UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ?",
+            (user_id,),
+        )
+        self.commit()
+
+    def delete_user_cascade(self, user_id: int) -> None:
+        """Permanently delete a user and all associated data."""
+        self.execute("DELETE FROM conversation_messages WHERE conversation_id IN "
+                     "(SELECT id FROM conversations WHERE user_id = ?)", (user_id,))
+        self.execute("DELETE FROM conversations WHERE user_id = ?", (user_id,))
+        self.execute("DELETE FROM tos_acceptances WHERE user_id = ?", (user_id,))
+        self.execute("DELETE FROM refresh_tokens WHERE user_id = ?", (user_id,))
+        self.execute("DELETE FROM auth_activity_log WHERE user_id = ?", (user_id,))
+        self.execute("DELETE FROM email_verification_tokens WHERE user_id = ?", (user_id,))
+        self.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
+        self.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        self.commit()
+
+    # ------------------------------------------------------------------
+    # Auth activity logging
+    # ------------------------------------------------------------------
+
+    def log_auth_event(
+        self,
+        event_type: str,
+        user_id: int | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        success: bool = True,
+        detail: str | None = None,
+    ) -> int:
+        """Record an authentication event. Returns the row id."""
+        row_id = self._insert_returning_id(
+            "INSERT INTO auth_activity_log "
+            "(user_id, event_type, ip_address, user_agent, success, detail) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, event_type, ip_address, user_agent, 1 if success else 0, detail),
+        )
+        self.commit()
+        return row_id
+
+    def get_auth_activity(
+        self, user_id: int, limit: int = 20, offset: int = 0
+    ) -> list[dict]:
+        """Return recent auth activity for a user, most recent first."""
+        return self.fetchall(
+            "SELECT id, event_type, ip_address, user_agent, success, detail, created_at "
+            "FROM auth_activity_log WHERE user_id = ? "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (user_id, limit, offset),
+        )
+
+    # ------------------------------------------------------------------
+    # Email verification tokens
+    # ------------------------------------------------------------------
+
+    def create_email_verification_token(
+        self, user_id: int, token_hash: str, expires_at: str
+    ) -> int:
+        """Store a hashed email verification token. Returns the row id."""
+        # Invalidate any existing unused tokens for this user
+        self.execute(
+            "UPDATE email_verification_tokens SET used = 1 "
+            "WHERE user_id = ? AND used = 0",
+            (user_id,),
+        )
+        row_id = self._insert_returning_id(
+            "INSERT INTO email_verification_tokens (user_id, token_hash, expires_at) "
+            "VALUES (?, ?, ?)",
+            (user_id, token_hash, expires_at),
+        )
+        self.commit()
+        return row_id
+
+    def get_email_verification_token_by_hash(self, token_hash: str) -> Optional[dict]:
+        """Look up an email verification token by its hash."""
+        return self.fetchone(
+            "SELECT id, user_id, token_hash, expires_at, used, created_at "
+            "FROM email_verification_tokens WHERE token_hash = ?",
+            (token_hash,),
+        )
+
+    def mark_email_verification_used(self, token_id: int) -> None:
+        """Mark an email verification token as used."""
+        self.execute(
+            "UPDATE email_verification_tokens SET used = 1 WHERE id = ?",
+            (token_id,),
+        )
+        self.commit()
+
+    def activate_user(self, user_id: int) -> None:
+        """Set is_active = 1 for a user (used after email verification)."""
+        self.execute(
+            "UPDATE users SET is_active = 1, updated_at = datetime('now') WHERE id = ?",
+            (user_id,),
+        )
+        self.commit()
+
+    # ------------------------------------------------------------------
+    # Password reset tokens
+    # ------------------------------------------------------------------
+
+    def create_password_reset_token(
+        self, user_id: int, token_hash: str, expires_at: str
+    ) -> int:
+        """Store a hashed password reset token. Invalidates existing tokens for the user."""
+        self.execute(
+            "UPDATE password_reset_tokens SET used = 1 "
+            "WHERE user_id = ? AND used = 0",
+            (user_id,),
+        )
+        row_id = self._insert_returning_id(
+            "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) "
+            "VALUES (?, ?, ?)",
+            (user_id, token_hash, expires_at),
+        )
+        self.commit()
+        return row_id
+
+    def get_password_reset_token_by_hash(self, token_hash: str) -> Optional[dict]:
+        """Look up a password reset token by its hash."""
+        return self.fetchone(
+            "SELECT id, user_id, token_hash, expires_at, used, created_at "
+            "FROM password_reset_tokens WHERE token_hash = ?",
+            (token_hash,),
+        )
+
+    def mark_password_reset_used(self, token_id: int) -> None:
+        """Mark a password reset token as used."""
+        self.execute(
+            "UPDATE password_reset_tokens SET used = 1 WHERE id = ?",
+            (token_id,),
         )
         self.commit()
 

@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
 import json
@@ -334,6 +335,19 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+class PasswordConfirmRequest(BaseModel):
+    password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
 class CreateConversationRequest(BaseModel):
     session_id: str
     title: Optional[str] = None
@@ -608,6 +622,8 @@ _cors_origins = [
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:1420",
+    "http://127.0.0.1:1420",
 ]
 # Allow custom frontend URL for staging/preview deployments
 _extra_origin = os.environ.get("FRONTEND_URL", "")
@@ -628,6 +644,7 @@ app.add_middleware(
 
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
 
 
 @app.exception_handler(RateLimitExceeded)
@@ -685,6 +702,13 @@ def random_fun_fact():
     return fact
 
 
+def _client_info(request: Request) -> tuple[str | None, str | None]:
+    """Extract client IP and user-agent from a request."""
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    return ip, ua
+
+
 # --- Authentication ---
 
 
@@ -735,6 +759,9 @@ def auth_register(req: AuthUserCreate, request: Request):
     response = JSONResponse(content=auth_resp.model_dump())
     from homebuyer.auth import set_access_cookie
     set_access_cookie(response, access_token)
+
+    ip, ua = _client_info(request)
+    _state.db.log_auth_event("register", user_id=user["id"], ip_address=ip, user_agent=ua)
     return response
 
 
@@ -750,11 +777,23 @@ def auth_login(req: AuthUserLogin, request: Request):
         verify_password,
     )
 
+    ip, ua = _client_info(request)
     user = _state.db.get_user_by_email(req.email)
     if not user or not verify_password(req.password, user["password_hash"]):
+        _state.db.log_auth_event(
+            "login_failure",
+            user_id=user["id"] if user else None,
+            ip_address=ip, user_agent=ua, success=False,
+            detail=f"email={req.email}",
+        )
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not user.get("is_active", True):
+        _state.db.log_auth_event(
+            "login_failure", user_id=user["id"],
+            ip_address=ip, user_agent=ua, success=False,
+            detail="account_deactivated",
+        )
         raise HTTPException(status_code=403, detail="Account is deactivated")
 
     # Check if user needs to re-accept TOS
@@ -774,6 +813,8 @@ def auth_login(req: AuthUserLogin, request: Request):
     response = JSONResponse(content=auth_resp.model_dump())
     from homebuyer.auth import set_access_cookie
     set_access_cookie(response, access_token)
+
+    _state.db.log_auth_event("login_success", user_id=user["id"], ip_address=ip, user_agent=ua)
     return response
 
 
@@ -829,22 +870,27 @@ def auth_refresh(req: RefreshTokenRequest, request: Request):
 
 
 @app.post("/api/auth/logout")
-def auth_logout(req: RefreshTokenRequest):
+def auth_logout(req: RefreshTokenRequest, request: Request):
     """Revoke a refresh token (server-side logout) and clear the access cookie."""
     from homebuyer.auth import _hash_token, clear_access_cookie
 
     token_hash = _hash_token(req.refresh_token)
     row = _state.db.get_refresh_token_by_hash(token_hash)
+    user_id = row["user_id"] if row else None
     if row:
         _state.db.revoke_refresh_token(row["id"])
     response = JSONResponse(content={"detail": "Logged out"})
     clear_access_cookie(response)
+
+    ip, ua = _client_info(request)
+    _state.db.log_auth_event("logout", user_id=user_id, ip_address=ip, user_agent=ua)
     return response
 
 
 @app.post("/api/auth/change-password")
 def auth_change_password(
     req: ChangePasswordRequest,
+    request: Request,
     user_id: int = Depends(get_current_user_id),
 ):
     """Change the authenticated user's password. Revokes all refresh tokens."""
@@ -854,7 +900,14 @@ def auth_change_password(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    ip, ua = _client_info(request)
+
     if not verify_password(req.current_password, user["password_hash"]):
+        _state.db.log_auth_event(
+            "password_change", user_id=user_id,
+            ip_address=ip, user_agent=ua, success=False,
+            detail="incorrect_current_password",
+        )
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
     password_errors = validate_password(req.new_password)
@@ -865,6 +918,8 @@ def auth_change_password(
     _state.db.update_user_password(user_id, new_hash)
     # Revoke all refresh tokens to force re-login on other devices
     _state.db.revoke_all_user_refresh_tokens(user_id)
+
+    _state.db.log_auth_event("password_change", user_id=user_id, ip_address=ip, user_agent=ua)
     return {"detail": "Password changed successfully"}
 
 
@@ -887,6 +942,220 @@ def accept_tos(request: Request, user_id: int = Depends(get_current_user_id)):
         ip_address=client_ip,
     )
     return {"detail": "Terms accepted", "version": CURRENT_TOS_VERSION}
+
+
+@app.get("/api/auth/activity")
+def auth_activity(
+    request: Request,
+    user_id: int = Depends(get_current_user_id),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """Return recent authentication activity for the current user."""
+    return _state.db.get_auth_activity(user_id, limit=limit, offset=offset)
+
+
+@app.post("/api/auth/deactivate")
+def auth_deactivate(
+    req: PasswordConfirmRequest,
+    request: Request,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Deactivate the user's account (reversible). Requires password confirmation."""
+    from homebuyer.auth import verify_password
+
+    user = _state.db.get_user_with_password_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Incorrect password")
+
+    _state.db.deactivate_user(user_id)
+    _state.db.revoke_all_user_refresh_tokens(user_id)
+
+    ip, ua = _client_info(request)
+    _state.db.log_auth_event("account_deactivate", user_id=user_id, ip_address=ip, user_agent=ua)
+
+    from homebuyer.auth import clear_access_cookie
+    response = JSONResponse(content={"detail": "Account deactivated"})
+    clear_access_cookie(response)
+    return response
+
+
+@app.delete("/api/auth/account")
+def auth_delete_account(
+    req: PasswordConfirmRequest,
+    request: Request,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Permanently delete the user's account and all associated data."""
+    from homebuyer.auth import verify_password
+
+    user = _state.db.get_user_with_password_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Incorrect password")
+
+    ip, ua = _client_info(request)
+    # Log before deletion since the user record will be gone
+    _state.db.log_auth_event(
+        "account_delete", user_id=user_id, ip_address=ip, user_agent=ua,
+        detail=f"email={user['email']}",
+    )
+
+    _state.db.delete_user_cascade(user_id)
+
+    from homebuyer.auth import clear_access_cookie
+    response = JSONResponse(content={"detail": "Account permanently deleted"})
+    clear_access_cookie(response)
+    return response
+
+
+@app.post("/api/auth/forgot-password")
+@limiter.limit("3/hour")
+def auth_forgot_password(req: ForgotPasswordRequest, request: Request):
+    """Generate a password reset token and log the event.
+
+    Always returns success to avoid email enumeration. In production,
+    this would send an email with the reset link.
+    """
+    import secrets
+    from datetime import datetime, timedelta, timezone
+    from homebuyer.auth import _hash_token
+
+    ip, ua = _client_info(request)
+    user = _state.db.get_user_by_email(req.email)
+
+    if user:
+        raw_token = secrets.token_urlsafe(48)
+        token_hash = _hash_token(raw_token)
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(hours=1)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        _state.db.create_password_reset_token(
+            user_id=user["id"], token_hash=token_hash, expires_at=expires_at,
+        )
+        _state.db.log_auth_event(
+            "password_reset_request", user_id=user["id"],
+            ip_address=ip, user_agent=ua,
+        )
+        # In production: send email with link containing raw_token
+        # For dev: log the token so it can be used for testing
+        logger.info("Password reset token for %s: %s", req.email, raw_token)
+    else:
+        _state.db.log_auth_event(
+            "password_reset_request", user_id=None,
+            ip_address=ip, user_agent=ua, success=False,
+            detail=f"unknown_email={req.email}",
+        )
+
+    # Always return success to prevent email enumeration
+    return {"detail": "If an account with that email exists, a reset link has been sent."}
+
+
+@app.post("/api/auth/reset-password")
+@limiter.limit("5/minute")
+def auth_reset_password(req: ResetPasswordRequest, request: Request):
+    """Reset a user's password using a valid reset token."""
+    from datetime import datetime, timezone
+    from homebuyer.auth import _hash_token, hash_password, validate_password
+
+    ip, ua = _client_info(request)
+    token_hash = _hash_token(req.token)
+    row = _state.db.get_password_reset_token_by_hash(token_hash)
+
+    if row is None or row.get("used"):
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+    # Check expiry
+    expires_at = datetime.strptime(row["expires_at"], "%Y-%m-%d %H:%M:%S").replace(
+        tzinfo=timezone.utc
+    )
+    if datetime.now(timezone.utc) > expires_at:
+        raise HTTPException(status_code=400, detail="Reset token has expired")
+
+    password_errors = validate_password(req.new_password)
+    if password_errors:
+        raise HTTPException(status_code=400, detail=password_errors[0])
+
+    user_id = row["user_id"]
+    new_hash = hash_password(req.new_password)
+    _state.db.update_user_password(user_id, new_hash)
+    _state.db.mark_password_reset_used(row["id"])
+    _state.db.revoke_all_user_refresh_tokens(user_id)
+
+    _state.db.log_auth_event(
+        "password_reset_complete", user_id=user_id,
+        ip_address=ip, user_agent=ua,
+    )
+    return {"detail": "Password has been reset successfully. Please sign in."}
+
+
+@app.post("/api/auth/resend-verification")
+@limiter.limit("1/minute")
+def auth_resend_verification(request: Request, user_id: int = Depends(get_current_user_id)):
+    """Resend email verification for the current user.
+
+    In production, this would send an email. For dev, the token is logged.
+    """
+    import secrets
+    from datetime import datetime, timedelta, timezone
+    from homebuyer.auth import _hash_token
+
+    user = _state.db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.get("is_active", True):
+        return {"detail": "Email is already verified"}
+
+    raw_token = secrets.token_urlsafe(48)
+    token_hash = _hash_token(raw_token)
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(hours=24)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+    _state.db.create_email_verification_token(
+        user_id=user_id, token_hash=token_hash, expires_at=expires_at,
+    )
+    # In production: send email with verification link
+    logger.info("Email verification token for user %d: %s", user_id, raw_token)
+
+    ip, ua = _client_info(request)
+    _state.db.log_auth_event(
+        "verification_resend", user_id=user_id,
+        ip_address=ip, user_agent=ua,
+    )
+    return {"detail": "Verification email sent"}
+
+
+@app.get("/api/auth/verify-email")
+def auth_verify_email(token: str, request: Request):
+    """Verify a user's email address using the token from their verification email."""
+    from datetime import datetime, timezone
+    from homebuyer.auth import _hash_token
+
+    token_hash = _hash_token(token)
+    row = _state.db.get_email_verification_token_by_hash(token_hash)
+
+    if row is None or row.get("used"):
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+
+    expires_at = datetime.strptime(row["expires_at"], "%Y-%m-%d %H:%M:%S").replace(
+        tzinfo=timezone.utc
+    )
+    if datetime.now(timezone.utc) > expires_at:
+        raise HTTPException(status_code=400, detail="Verification token has expired")
+
+    user_id = row["user_id"]
+    _state.db.activate_user(user_id)
+    _state.db.mark_email_verification_used(row["id"])
+
+    ip, ua = _client_info(request)
+    _state.db.log_auth_event(
+        "email_verified", user_id=user_id,
+        ip_address=ip, user_agent=ua,
+    )
+    return {"detail": "Email verified successfully. You can now sign in."}
 
 
 # --- Conversations ---

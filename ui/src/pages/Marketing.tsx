@@ -110,7 +110,14 @@ function AuthModal({ onClose, initialMode = 'login' }: { onClose: () => void; in
               placeholder="you@example.com" />
           </div>
           <div>
-            <label htmlFor="auth-password" className="mb-1 block text-sm font-medium text-gray-700">Password</label>
+            <div className="flex items-center justify-between mb-1">
+              <label htmlFor="auth-password" className="block text-sm font-medium text-gray-700">Password</label>
+              {mode === 'login' && (
+                <button type="button" onClick={onClose} className="text-xs text-amber-600 hover:text-amber-700 font-medium">
+                  Forgot password?
+                </button>
+              )}
+            </div>
             <input id="auth-password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               placeholder={mode === 'register' ? 'Create a strong password' : 'Enter your password'} />

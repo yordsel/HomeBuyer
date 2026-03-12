@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import { toast } from 'sonner';
-import { Home, LogIn, UserPlus, Check, X } from 'lucide-react';
+import { Home, LogIn, UserPlus, Check, X, ArrowLeft, Mail } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { authForgotPassword, authResetPassword } from '../lib/api';
 import { TOS_VERSION, TermsPage } from './Terms';
 
 interface PasswordRule {
@@ -28,13 +29,16 @@ function getPasswordStrength(pw: string): { score: number; label: string; color:
 
 export function LoginPage() {
   const { login, register } = useAuth();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [acceptedTos, setAcceptedTos] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resetToken, setResetToken] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [forgotSent, setForgotSent] = useState(false);
 
   const passwordStrength = useMemo(() => getPasswordStrength(password), [password]);
   const allRulesPassed = passwordStrength.score === PASSWORD_RULES.length;
@@ -68,6 +72,46 @@ export function LoginPage() {
     }
   }
 
+  async function handleForgotPassword(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await authForgotPassword(email);
+      setForgotSent(true);
+      toast.success('If an account exists, a reset link has been sent');
+    } catch {
+      toast.error('Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResetPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!allRulesPassed) {
+      toast.error('Password does not meet all requirements');
+      return;
+    }
+    setLoading(true);
+    try {
+      await authResetPassword(resetToken, newPassword);
+      toast.success('Password reset! Please sign in.');
+      setMode('login');
+      setResetToken('');
+      setNewPassword('');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reset password');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const newPasswordStrength = useMemo(
+    () => (newPassword ? getPasswordStrength(newPassword) : null),
+    [newPassword],
+  );
+  const newPasswordAllPassed = PASSWORD_RULES.every((r) => r.test(newPassword));
+
   if (showTerms) {
     return <TermsPage onBack={() => setShowTerms(false)} />;
   }
@@ -86,144 +130,296 @@ export function LoginPage() {
 
         {/* Card */}
         <div className="rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
-          <h2 className="mb-6 text-lg font-semibold text-gray-900">
-            {mode === 'login' ? 'Sign in to your account' : 'Create an account'}
-          </h2>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {mode === 'register' && (
-              <div>
-                <label htmlFor="fullName" className="mb-1 block text-sm font-medium text-gray-700">
-                  Full name
-                </label>
-                <input
-                  id="fullName"
-                  type="text"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  placeholder="John Doe"
-                />
-              </div>
-            )}
+          {/* --- Forgot Password View --- */}
+          {mode === 'forgot' && (
+            <>
+              <button
+                onClick={() => { setMode('login'); setForgotSent(false); }}
+                className="mb-4 flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
+              >
+                <ArrowLeft size={14} /> Back to sign in
+              </button>
 
-            <div>
-              <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
-                Email address
-              </label>
-              <input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder="you@example.com"
-              />
-            </div>
+              <h2 className="mb-2 text-lg font-semibold text-gray-900">Forgot password?</h2>
+              <p className="mb-6 text-sm text-gray-500">
+                Enter your email and we'll send you instructions to reset your password.
+              </p>
 
-            <div>
-              <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-700">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder={mode === 'register' ? 'Create a strong password' : 'Enter your password'}
-              />
-              {mode === 'register' && password.length > 0 && (
-                <div className="mt-2 space-y-2">
-                  {/* Strength bar */}
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${passwordStrength.color}`}
-                        style={{ width: `${(passwordStrength.score / PASSWORD_RULES.length) * 100}%` }}
-                      />
-                    </div>
-                    <span className="text-xs font-medium text-gray-500">{passwordStrength.label}</span>
-                  </div>
-                  {/* Rule checklist */}
-                  <ul className="space-y-0.5">
-                    {PASSWORD_RULES.map((rule) => {
-                      const passed = rule.test(password);
-                      return (
-                        <li key={rule.label} className={`flex items-center gap-1.5 text-xs ${passed ? 'text-green-600' : 'text-gray-400'}`}>
-                          {passed ? <Check size={12} /> : <X size={12} />}
-                          {rule.label}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
-            </div>
-
-            {mode === 'register' && (
-              <label className="flex items-start gap-2 text-sm text-gray-600">
-                <input
-                  type="checkbox"
-                  checked={acceptedTos}
-                  onChange={(e) => setAcceptedTos(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span>
-                  I agree to the{' '}
+              {forgotSent ? (
+                <div className="rounded-lg bg-green-50 border border-green-200 p-4 text-center">
+                  <Mail size={24} className="mx-auto mb-2 text-green-600" />
+                  <p className="text-sm font-medium text-green-800">Check your email</p>
+                  <p className="text-xs text-green-600 mt-1">
+                    If an account with that email exists, we've sent reset instructions.
+                  </p>
                   <button
-                    type="button"
-                    onClick={() => setShowTerms(true)}
-                    className="font-medium text-blue-600 hover:text-blue-700 underline"
+                    onClick={() => { setMode('reset'); setForgotSent(false); }}
+                    className="mt-4 text-sm font-medium text-blue-600 hover:text-blue-700"
                   >
-                    Terms and Conditions
+                    I have a reset token
                   </button>
-                </span>
-              </label>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading || (mode === 'register' && (!acceptedTos || !allRulesPassed))}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {loading ? (
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              ) : mode === 'login' ? (
-                <LogIn size={16} />
+                </div>
               ) : (
-                <UserPlus size={16} />
+                <form onSubmit={handleForgotPassword} className="space-y-4">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Email address</label>
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      placeholder="you@example.com"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    {loading ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    ) : (
+                      <Mail size={16} />
+                    )}
+                    Send Reset Link
+                  </button>
+                </form>
               )}
-              {mode === 'login' ? 'Sign In' : 'Create Account'}
-            </button>
-          </form>
+            </>
+          )}
 
-          {/* Toggle mode */}
-          <div className="mt-6 text-center text-sm text-gray-500">
-            {mode === 'login' ? (
-              <>
-                Don&apos;t have an account?{' '}
+          {/* --- Reset Password View --- */}
+          {mode === 'reset' && (
+            <>
+              <button
+                onClick={() => setMode('login')}
+                className="mb-4 flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
+              >
+                <ArrowLeft size={14} /> Back to sign in
+              </button>
+
+              <h2 className="mb-2 text-lg font-semibold text-gray-900">Reset your password</h2>
+              <p className="mb-6 text-sm text-gray-500">
+                Enter the reset token from your email and choose a new password.
+              </p>
+
+              <form onSubmit={handleResetPassword} className="space-y-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Reset token</label>
+                  <input
+                    type="text"
+                    required
+                    value={resetToken}
+                    onChange={(e) => setResetToken(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Paste token from your email"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">New password</label>
+                  <input
+                    type="password"
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Create a strong password"
+                  />
+                  {newPassword && newPasswordStrength && (
+                    <div className="mt-2 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${newPasswordStrength.color}`}
+                            style={{ width: `${(newPasswordStrength.score / PASSWORD_RULES.length) * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-medium text-gray-500">{newPasswordStrength.label}</span>
+                      </div>
+                      <ul className="space-y-0.5">
+                        {PASSWORD_RULES.map((rule) => {
+                          const passed = rule.test(newPassword);
+                          return (
+                            <li key={rule.label} className={`flex items-center gap-1.5 text-xs ${passed ? 'text-green-600' : 'text-gray-400'}`}>
+                              {passed ? <Check size={12} /> : <X size={12} />}
+                              {rule.label}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+                </div>
                 <button
-                  onClick={() => setMode('register')}
-                  className="font-medium text-blue-600 hover:text-blue-700"
+                  type="submit"
+                  disabled={loading || !newPasswordAllPassed || !resetToken}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
-                  Create one
+                  {loading && (
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  )}
+                  Reset Password
                 </button>
-              </>
-            ) : (
-              <>
-                Already have an account?{' '}
+              </form>
+            </>
+          )}
+
+          {/* --- Login / Register View --- */}
+          {(mode === 'login' || mode === 'register') && (
+            <>
+              <h2 className="mb-6 text-lg font-semibold text-gray-900">
+                {mode === 'login' ? 'Sign in to your account' : 'Create an account'}
+              </h2>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {mode === 'register' && (
+                  <div>
+                    <label htmlFor="fullName" className="mb-1 block text-sm font-medium text-gray-700">
+                      Full name
+                    </label>
+                    <input
+                      id="fullName"
+                      type="text"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      placeholder="John Doe"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
+                    Email address
+                  </label>
+                  <input
+                    id="email"
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="you@example.com"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+                      Password
+                    </label>
+                    {mode === 'login' && (
+                      <button
+                        type="button"
+                        onClick={() => setMode('forgot')}
+                        className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                      >
+                        Forgot password?
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    id="password"
+                    type="password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder={mode === 'register' ? 'Create a strong password' : 'Enter your password'}
+                  />
+                  {mode === 'register' && password.length > 0 && (
+                    <div className="mt-2 space-y-2">
+                      {/* Strength bar */}
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${passwordStrength.color}`}
+                            style={{ width: `${(passwordStrength.score / PASSWORD_RULES.length) * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-medium text-gray-500">{passwordStrength.label}</span>
+                      </div>
+                      {/* Rule checklist */}
+                      <ul className="space-y-0.5">
+                        {PASSWORD_RULES.map((rule) => {
+                          const passed = rule.test(password);
+                          return (
+                            <li key={rule.label} className={`flex items-center gap-1.5 text-xs ${passed ? 'text-green-600' : 'text-gray-400'}`}>
+                              {passed ? <Check size={12} /> : <X size={12} />}
+                              {rule.label}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                {mode === 'register' && (
+                  <label className="flex items-start gap-2 text-sm text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={acceptedTos}
+                      onChange={(e) => setAcceptedTos(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>
+                      I agree to the{' '}
+                      <button
+                        type="button"
+                        onClick={() => setShowTerms(true)}
+                        className="font-medium text-blue-600 hover:text-blue-700 underline"
+                      >
+                        Terms and Conditions
+                      </button>
+                    </span>
+                  </label>
+                )}
+
                 <button
-                  onClick={() => setMode('login')}
-                  className="font-medium text-blue-600 hover:text-blue-700"
+                  type="submit"
+                  disabled={loading || (mode === 'register' && (!acceptedTos || !allRulesPassed))}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  Sign in
+                  {loading ? (
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  ) : mode === 'login' ? (
+                    <LogIn size={16} />
+                  ) : (
+                    <UserPlus size={16} />
+                  )}
+                  {mode === 'login' ? 'Sign In' : 'Create Account'}
                 </button>
-              </>
-            )}
-          </div>
+              </form>
+
+              {/* Toggle mode */}
+              <div className="mt-6 text-center text-sm text-gray-500">
+                {mode === 'login' ? (
+                  <>
+                    Don&apos;t have an account?{' '}
+                    <button
+                      onClick={() => setMode('register')}
+                      className="font-medium text-blue-600 hover:text-blue-700"
+                    >
+                      Create one
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    Already have an account?{' '}
+                    <button
+                      onClick={() => setMode('login')}
+                      className="font-medium text-blue-600 hover:text-blue-700"
+                    >
+                      Sign in
+                    </button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

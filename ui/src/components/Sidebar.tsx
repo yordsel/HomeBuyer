@@ -12,6 +12,7 @@ import {
   LogOut,
   User,
   History,
+  Settings,
 } from 'lucide-react';
 import type { PageId } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -104,6 +105,13 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
                 )}
               </div>
             )}
+            <button
+              onClick={() => onNavigate('settings')}
+              title="Account settings"
+              className="shrink-0 p-1 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              <Settings size={14} />
+            </button>
             <button
               onClick={logout}
               title="Sign out"

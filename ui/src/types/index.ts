@@ -1103,11 +1103,21 @@ export interface AuthResponse {
   tos_update_required: boolean;
 }
 
+export interface AuthActivityEvent {
+  id: number;
+  event_type: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  success: number;
+  detail: string | null;
+  created_at: string;
+}
+
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
-export type PageId = 'chat' | 'predict' | 'neighborhoods' | 'market' | 'model' | 'afford' | 'potential' | 'history';
+export type PageId = 'chat' | 'predict' | 'neighborhoods' | 'market' | 'model' | 'afford' | 'potential' | 'history' | 'settings';
 
 // ---------------------------------------------------------------------------
 // Conversations

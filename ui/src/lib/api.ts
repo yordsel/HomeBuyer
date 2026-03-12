@@ -21,6 +21,7 @@ import type {
   ResponseBlock,
   WorkingSetMeta,
   AuthResponse,
+  AuthActivityEvent,
   User,
   Conversation,
   ConversationDetail,
@@ -617,6 +618,36 @@ export async function authChangePassword(
     current_password: currentPassword,
     new_password: newPassword,
   });
+}
+
+export async function authGetActivity(
+  limit = 20,
+  offset = 0,
+): Promise<AuthActivityEvent[]> {
+  return apiGet(`/api/auth/activity?limit=${limit}&offset=${offset}`);
+}
+
+export async function authDeactivateAccount(password: string): Promise<{ detail: string }> {
+  return apiPost('/api/auth/deactivate', { password });
+}
+
+export async function authDeleteAccount(password: string): Promise<{ detail: string }> {
+  return apiFetch('/api/auth/account', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+}
+
+export async function authForgotPassword(email: string): Promise<{ detail: string }> {
+  return apiPost('/api/auth/forgot-password', { email });
+}
+
+export async function authResetPassword(
+  token: string,
+  newPassword: string,
+): Promise<{ detail: string }> {
+  return apiPost('/api/auth/reset-password', { token, new_password: newPassword });
 }
 
 // ============================================================================

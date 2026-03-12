@@ -12,6 +12,7 @@ import { PotentialPage } from './pages/Potential';
 import { HistoryPage } from './pages/History';
 import { MarketingPage } from './pages/Marketing';
 import { TermsPage } from './pages/Terms';
+import { AccountSettingsPage } from './pages/AccountSettings';
 import { PropertyProvider } from './context/PropertyContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import type { PageId } from './types';
@@ -59,6 +60,8 @@ function AuthenticatedApp() {
         return <PotentialPage />;
       case 'history':
         return <HistoryPage onOpenConversation={handleOpenConversation} />;
+      case 'settings':
+        return <AccountSettingsPage />;
       default:
         return (
           <ChatPage
