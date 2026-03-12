@@ -109,8 +109,7 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 # ---------------------------------------------------------------------------
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 # "From" address for transactional emails.  Must be a verified domain in Resend.
-# Falls back to Resend's sandbox address for development.
-EMAIL_FROM = os.environ.get("EMAIL_FROM", "HomeBuyer <onboarding@resend.dev>")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "HomeBuyer <info@agentc.work>")
 # Base URL for links in emails (password reset, verification).
 # In production this should be the deployed frontend URL.
 APP_URL = os.environ.get("APP_URL", "http://localhost:1420")
