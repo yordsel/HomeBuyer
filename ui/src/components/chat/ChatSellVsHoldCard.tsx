@@ -75,7 +75,7 @@ export function ChatSellVsHoldCard({ data }: { data: SellVsHoldBlockData }) {
               Cap rate: <strong>{formatPct(d.rental_estimate.cap_rate_pct)}</strong>
             </span>
             <span className="text-gray-600">
-              P/R: <strong>{d.rental_estimate.price_to_rent_ratio?.toFixed(1) ?? '\u2014'}</strong>
+              P/R: <strong>{d.rental_estimate.price_to_rent_ratio != null ? Number(d.rental_estimate.price_to_rent_ratio).toFixed(1) : '\u2014'}</strong>
             </span>
           </div>
         </div>

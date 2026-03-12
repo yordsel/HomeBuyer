@@ -43,7 +43,7 @@ export function NeighborhoodCard({ stats, onClick }: NeighborhoodCardProps) {
         </div>
         <div className="text-gray-500">
           Lot: <span className="font-medium text-gray-700">
-            {stats.median_lot_size ? `${(stats.median_lot_size / 1000).toFixed(1)}K sqft` : '—'}
+            {stats.median_lot_size ? `${(Number(stats.median_lot_size) / 1000).toFixed(1)}K sqft` : '—'}
           </span>
         </div>
         <div className="text-gray-500">

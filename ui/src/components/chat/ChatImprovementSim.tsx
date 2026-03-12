@@ -32,7 +32,7 @@ export function ChatImprovementSim({ data }: { data: ImprovementBlockData }) {
           <div>
             <span className="text-gray-500">ROI: </span>
             <span className={`font-bold ${(d.roi ?? 0) >= 1 ? 'text-green-600' : 'text-red-600'}`}>
-              {d.roi != null ? `${d.roi.toFixed(1)}x` : '\u2014'}
+              {d.roi != null ? `${Number(d.roi).toFixed(1)}x` : '\u2014'}
             </span>
           </div>
         </div>
@@ -79,7 +79,7 @@ export function ChatImprovementSim({ data }: { data: ImprovementBlockData }) {
                         (c.roi ?? 0) >= 1 ? 'text-green-600' : 'text-red-600'
                       }`}
                     >
-                      {c.roi != null ? `${c.roi.toFixed(1)}x` : '\u2014'}
+                      {c.roi != null ? `${Number(c.roi).toFixed(1)}x` : '\u2014'}
                     </span>
                   </td>
                 </tr>

@@ -1,30 +1,36 @@
 /**
  * Format a number as USD currency.
  */
-export function formatCurrency(amount: number | null | undefined): string {
+export function formatCurrency(amount: number | string | null | undefined): string {
   if (amount == null) return '—';
+  const n = typeof amount === 'string' ? parseFloat(amount) : amount;
+  if (isNaN(n)) return '—';
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
     maximumFractionDigits: 0,
-  }).format(amount);
+  }).format(n);
 }
 
 /**
  * Format a number with commas.
  */
-export function formatNumber(n: number | null | undefined): string {
+export function formatNumber(n: number | string | null | undefined): string {
   if (n == null) return '—';
-  return new Intl.NumberFormat('en-US').format(n);
+  const num = typeof n === 'string' ? parseFloat(n) : n;
+  if (isNaN(num)) return '—';
+  return new Intl.NumberFormat('en-US').format(num);
 }
 
 /**
  * Format a percentage with one decimal place and a sign.
  */
-export function formatPct(pct: number | null | undefined, showSign = false): string {
+export function formatPct(pct: number | string | null | undefined, showSign = false): string {
   if (pct == null) return '—';
-  const prefix = showSign && pct > 0 ? '+' : '';
-  return `${prefix}${pct.toFixed(1)}%`;
+  const n = typeof pct === 'string' ? parseFloat(pct) : pct;
+  if (isNaN(n)) return '—';
+  const prefix = showSign && n > 0 ? '+' : '';
+  return `${prefix}${n.toFixed(1)}%`;
 }
 
 /**
@@ -50,11 +56,13 @@ export function getTodayString(): string {
 /**
  * Format a number as compact USD: $1.2M, $345K, or full currency for small values.
  */
-export function formatCompact(n: number | null | undefined): string {
+export function formatCompact(n: number | string | null | undefined): string {
   if (n == null) return '—';
-  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
-  return formatCurrency(n);
+  const num = typeof n === 'string' ? parseFloat(n) : n;
+  if (isNaN(num)) return '—';
+  if (Math.abs(num) >= 1_000_000) return `$${(num / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(num) >= 1_000) return `$${(num / 1_000).toFixed(0)}K`;
+  return formatCurrency(num);
 }
 
 /**

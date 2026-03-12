@@ -51,7 +51,7 @@ export function ChatRentalIncome({ data }: { data: RentalIncomeBlockData }) {
             <span className="text-gray-700 font-medium">
               {formatCurrency(d.expenses.total_annual)}
               {d.expenses.expense_ratio_pct != null &&
-                ` (${d.expenses.expense_ratio_pct.toFixed(0)}%)`}
+                ` (${Number(d.expenses.expense_ratio_pct).toFixed(0)}%)`}
             </span>
           </div>
         )}
@@ -60,7 +60,7 @@ export function ChatRentalIncome({ data }: { data: RentalIncomeBlockData }) {
             <span className="text-gray-500">Monthly PITI</span>
             <span className="text-gray-700 font-medium">
               {formatCurrency(d.mortgage.monthly_piti)}
-              {d.mortgage.rate_30yr != null && ` @ ${d.mortgage.rate_30yr.toFixed(2)}%`}
+              {d.mortgage.rate_30yr != null && ` @ ${Number(d.mortgage.rate_30yr).toFixed(2)}%`}
             </span>
           </div>
         )}

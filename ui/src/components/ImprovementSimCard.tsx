@@ -152,7 +152,7 @@ export function ImprovementSimCard(props: ImprovementSimCardProps) {
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide">ROI</p>
                 <p className={`text-lg font-bold ${selectedRoi > 1 ? 'text-green-600' : selectedRoi > 0 ? 'text-amber-600' : 'text-red-600'}`}>
-                  {selectedRoi.toFixed(1)}x
+                  {Number(selectedRoi).toFixed(1)}x
                 </p>
                 <p className="text-xs text-gray-400">
                   {selectedRoi > 1 ? 'Net positive' : selectedRoi > 0 ? 'Partial recovery' : 'Net loss'}
@@ -259,13 +259,13 @@ function CategoryRow({
           roiGood ? 'bg-green-50 text-green-700' : cat.ml_roi_ratio > 0 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'
         }`}>
           {roiGood && <CheckCircle2 size={10} />}
-          {cat.ml_roi_ratio.toFixed(1)}x
+          {Number(cat.ml_roi_ratio).toFixed(1)}x
         </span>
       </td>
       <td className="py-2.5 text-right text-xs text-gray-500">
         {cat.correlation_premium_pct != null ? (
           <span className={cat.correlation_premium_pct > 0 ? 'text-green-600' : 'text-red-600'}>
-            {cat.correlation_premium_pct > 0 ? '+' : ''}{cat.correlation_premium_pct.toFixed(1)}% $/sqft
+            {Number(cat.correlation_premium_pct) > 0 ? '+' : ''}{Number(cat.correlation_premium_pct).toFixed(1)}% $/sqft
           </span>
         ) : (
           '—'

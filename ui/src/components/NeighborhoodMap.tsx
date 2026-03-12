@@ -117,7 +117,7 @@ export function NeighborhoodMap({ neighborhoods, geojson }: NeighborhoodMapProps
                Median: <b>${formatCurrency(stats.median_price)}</b><br/>
                Sales: ${stats.sale_count}<br/>
                ${stats.median_ppsf != null ? `$/sqft: $${Math.round(stats.median_ppsf)}<br/>` : ''}
-               ${stats.yoy_price_change_pct != null ? `YoY: <span style="color:${stats.yoy_price_change_pct >= 0 ? '#059669' : '#dc2626'}">${stats.yoy_price_change_pct >= 0 ? '+' : ''}${stats.yoy_price_change_pct.toFixed(1)}%</span>` : ''}
+               ${stats.yoy_price_change_pct != null ? `YoY: <span style="color:${Number(stats.yoy_price_change_pct) >= 0 ? '#059669' : '#dc2626'}">${Number(stats.yoy_price_change_pct) >= 0 ? '+' : ''}${Number(stats.yoy_price_change_pct).toFixed(1)}%</span>` : ''}
              </div>
            </div>`
         : `<strong>${name}</strong><br/><span style="color:#999;">No sales data</span>`;

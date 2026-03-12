@@ -32,7 +32,7 @@ export function ChatMarketSummary({ data }: { data: MarketBlockData }) {
         <StatCell label="Median Price" value={formatCurrency(m.median_sale_price)} />
         <StatCell
           label="Sale/List"
-          value={typeof m.sale_to_list_ratio === 'number' ? `${(m.sale_to_list_ratio * 100).toFixed(1)}%` : '\u2014'}
+          value={m.sale_to_list_ratio != null ? `${(Number(m.sale_to_list_ratio) * 100).toFixed(1)}%` : '\u2014'}
         />
         <StatCell
           label="Days on Market"
@@ -40,7 +40,7 @@ export function ChatMarketSummary({ data }: { data: MarketBlockData }) {
         />
         <StatCell
           label="30yr Rate"
-          value={typeof m.mortgage_rate_30yr === 'number' ? `${m.mortgage_rate_30yr.toFixed(2)}%` : '\u2014'}
+          value={m.mortgage_rate_30yr != null ? `${Number(m.mortgage_rate_30yr).toFixed(2)}%` : '\u2014'}
         />
       </div>
 
@@ -56,14 +56,14 @@ export function ChatMarketSummary({ data }: { data: MarketBlockData }) {
                   <span className="font-medium text-gray-900">
                     {formatCurrency(n.median_price)}
                   </span>
-                  {typeof n.yoy_change === 'number' && !isNaN(n.yoy_change) && (
+                  {n.yoy_change != null && !isNaN(Number(n.yoy_change)) && (
                     <span
                       className={`flex items-center gap-0.5 ${
-                        n.yoy_change > 0 ? 'text-green-600' : n.yoy_change < 0 ? 'text-red-600' : 'text-gray-400'
+                        Number(n.yoy_change) > 0 ? 'text-green-600' : Number(n.yoy_change) < 0 ? 'text-red-600' : 'text-gray-400'
                       }`}
                     >
-                      {n.yoy_change > 0 ? <TrendingUp size={10} /> : n.yoy_change < 0 ? <TrendingDown size={10} /> : <Minus size={10} />}
-                      {n.yoy_change > 0 ? '+' : ''}{n.yoy_change.toFixed(1)}%
+                      {Number(n.yoy_change) > 0 ? <TrendingUp size={10} /> : Number(n.yoy_change) < 0 ? <TrendingDown size={10} /> : <Minus size={10} />}
+                      {Number(n.yoy_change) > 0 ? '+' : ''}{Number(n.yoy_change).toFixed(1)}%
                     </span>
                   )}
                 </div>
