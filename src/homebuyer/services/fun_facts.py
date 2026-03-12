@@ -123,38 +123,41 @@ def _gen_least_expensive(db: Database) -> dict | None:
 
 
 def _gen_biggest_anomaly(db: Database) -> dict | None:
-    """Most anomalous recent sale (biggest delta between prediction and sale)."""
-    pred = _json_val("ps.prediction_json", "predicted_price", db=db)
+    """Most anomalous recent sale (biggest delta vs neighborhood average)."""
     cutoff = _date_ago(2, db=db)
     row = db.fetchone(f"""
-        SELECT s.address, s.sale_price, {pred} as predicted,
-               s.sale_price - {pred} as delta
+        SELECT s.address, s.sale_price, s.neighborhood,
+               nm.avg_price,
+               s.sale_price - nm.avg_price as delta
         FROM property_sales s
-        JOIN properties p ON s.address = p.address
-        JOIN precomputed_scenarios ps ON p.id = ps.property_id
-            AND ps.scenario_type = 'buyer'
+        JOIN (
+            SELECT neighborhood, CAST(AVG(sale_price) AS INTEGER) as avg_price
+            FROM property_sales
+            WHERE sale_price IS NOT NULL AND neighborhood IS NOT NULL
+            GROUP BY neighborhood HAVING COUNT(*) >= 5
+        ) nm ON s.neighborhood = nm.neighborhood
         WHERE s.sale_price IS NOT NULL
-          AND {pred} IS NOT NULL AND {pred} > 0
           AND s.sale_date >= {cutoff}
-        ORDER BY ABS(s.sale_price - {pred}) DESC
+        ORDER BY ABS(s.sale_price - nm.avg_price) DESC
         LIMIT 1
     """)
     if not row or row["delta"] is None:
         return None
     addr = row["address"]
+    hood = row["neighborhood"]
     sale = _fmt_price(row["sale_price"])
-    predicted = _fmt_price(row["predicted"])
+    avg = _fmt_price(row["avg_price"])
     delta = int(row["delta"])
     if delta > 0:
         text = (
-            f"{addr} sold for {sale} but our model says it's worth "
-            f"{predicted}. Someone either got fleeced or knows something we don't."
+            f"{addr} sold for {sale} — that's {_fmt_price(abs(delta))} above "
+            f"the {hood} average of {avg}. Someone really wanted that house."
         )
         key = "biggest_overpay"
     else:
         text = (
-            f"{addr} sold for {sale} vs. our model's {predicted} estimate. "
-            f"Either a steal or our model needs therapy."
+            f"{addr} sold for {sale} vs. the {hood} average of {avg}. "
+            f"Either a steal or there's something the listing didn't mention."
         )
         key = "biggest_underpay"
     return {
@@ -162,8 +165,9 @@ def _gen_biggest_anomaly(db: Database) -> dict | None:
         "stat_key": key,
         "stat_value": str(abs(delta)),
         "display_text": text,
-        "detail_json": json.dumps({"address": addr, "sale_price": row["sale_price"],
-                                    "predicted": row["predicted"]}),
+        "detail_json": json.dumps({"address": addr, "neighborhood": hood,
+                                    "sale_price": row["sale_price"],
+                                    "avg_price": row["avg_price"]}),
     }
 
 
@@ -260,7 +264,7 @@ def _gen_median_price(db: Database) -> dict | None:
     row = db.fetchone("""
         SELECT median_sale_price, period_end
         FROM market_metrics
-        WHERE median_sale_price IS NOT NULL AND period_duration = 'month'
+        WHERE median_sale_price IS NOT NULL AND period_duration = '30'
         ORDER BY period_end DESC LIMIT 1
     """)
     if not row:
@@ -284,7 +288,7 @@ def _gen_median_dom(db: Database) -> dict | None:
     row = db.fetchone("""
         SELECT median_dom, period_end
         FROM market_metrics
-        WHERE median_dom IS NOT NULL AND period_duration = 'month'
+        WHERE median_dom IS NOT NULL AND period_duration = '30'
         ORDER BY period_end DESC LIMIT 1
     """)
     if not row:
@@ -307,7 +311,7 @@ def _gen_sale_to_list(db: Database) -> dict | None:
     row = db.fetchone("""
         SELECT avg_sale_to_list, period_end
         FROM market_metrics
-        WHERE avg_sale_to_list IS NOT NULL AND period_duration = 'month'
+        WHERE avg_sale_to_list IS NOT NULL AND period_duration = '30'
         ORDER BY period_end DESC LIMIT 1
     """)
     if not row or not row["avg_sale_to_list"]:
