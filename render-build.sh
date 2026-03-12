@@ -11,7 +11,4 @@ npm ci
 npm run build
 cd ..
 
-echo "=== Generating fun facts ==="
-homebuyer generate-facts || echo "Warning: generate-facts failed (non-fatal)"
-
 echo "=== Build complete ==="

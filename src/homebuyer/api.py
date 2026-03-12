@@ -545,6 +545,13 @@ async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logger.info("Starting HomeBuyer API server...")
     _state = AppState()
+    # Generate fun facts at startup (non-blocking, non-fatal)
+    try:
+        from homebuyer.services.fun_facts import generate_fun_facts
+        facts = generate_fun_facts(_state.db)
+        logger.info("Generated %d fun facts at startup", len(facts))
+    except Exception:
+        logger.warning("Fun fact generation failed at startup", exc_info=True)
     yield
     logger.info("Shutting down HomeBuyer API server...")
     _state.close()
