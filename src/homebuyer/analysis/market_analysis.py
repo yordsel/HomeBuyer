@@ -892,6 +892,10 @@ class MarketAnalyzer:
                 "homes_sold_monthly": market.homes_sold,
                 "median_days_on_market": market.median_dom,
                 "mortgage_rate_30yr": market.mortgage_rate_30yr,
+                "price_note": self._format_price_note(
+                    market.median_sale_price,
+                    market.median_list_price,
+                ),
             },
             "price_distribution_2yr": [
                 {"bracket": r["price_bracket"], "count": r["count"]}
@@ -914,6 +918,27 @@ class MarketAnalyzer:
     # -------------------------------------------------------------------
     # Private helpers
     # -------------------------------------------------------------------
+
+    @staticmethod
+    def _format_price_note(
+        median_sale: Optional[float], median_list: Optional[float]
+    ) -> Optional[str]:
+        """Human-readable note comparing sale vs list prices."""
+        if median_sale is None or median_list is None or median_list == 0:
+            return None
+        if median_sale > median_list:
+            pct = (median_sale - median_list) / median_list * 100
+            return (
+                f"Homes are selling above asking: median sale price "
+                f"is {pct:.0f}% above median list price"
+            )
+        if median_sale < median_list:
+            pct = (median_list - median_sale) / median_list * 100
+            return (
+                f"Homes are selling below asking: median sale price "
+                f"is {pct:.0f}% below median list price"
+            )
+        return "Homes are selling at asking price on average"
 
     def _calc_yoy_change(self, neighborhood: str) -> Optional[float]:
         """Calculate year-over-year median price change for a neighborhood."""

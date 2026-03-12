@@ -32,7 +32,7 @@ export function ChatMarketSummary({ data }: { data: MarketBlockData }) {
         <StatCell label="Median Price" value={formatCurrency(m.median_sale_price)} />
         <StatCell
           label="Sale/List"
-          value={m.sale_to_list_ratio ? `${(m.sale_to_list_ratio * 100).toFixed(1)}%` : '\u2014'}
+          value={typeof m.sale_to_list_ratio === 'number' ? `${(m.sale_to_list_ratio * 100).toFixed(1)}%` : '\u2014'}
         />
         <StatCell
           label="Days on Market"
@@ -40,7 +40,7 @@ export function ChatMarketSummary({ data }: { data: MarketBlockData }) {
         />
         <StatCell
           label="30yr Rate"
-          value={m.mortgage_rate_30yr ? `${m.mortgage_rate_30yr.toFixed(2)}%` : '\u2014'}
+          value={typeof m.mortgage_rate_30yr === 'number' ? `${m.mortgage_rate_30yr.toFixed(2)}%` : '\u2014'}
         />
       </div>
 
@@ -56,7 +56,7 @@ export function ChatMarketSummary({ data }: { data: MarketBlockData }) {
                   <span className="font-medium text-gray-900">
                     {formatCurrency(n.median_price)}
                   </span>
-                  {n.yoy_change != null && (
+                  {typeof n.yoy_change === 'number' && !isNaN(n.yoy_change) && (
                     <span
                       className={`flex items-center gap-0.5 ${
                         n.yoy_change > 0 ? 'text-green-600' : n.yoy_change < 0 ? 'text-red-600' : 'text-gray-400'

@@ -921,6 +921,8 @@ then use those details when calling other tools
   with filters and counting the results manually
 - Keep responses concise — 2-4 paragraphs max unless asked for detail
 - Use dollar amounts and percentages to make your points concrete
+- When the market summary includes a price_note field, use it to describe the sale vs \
+  list price relationship instead of computing it yourself
 - When discussing rental income, note that estimates use local price-to-rent ratios \
   and neighborhood data, but actual rents depend on condition, exact location, \
   and current market conditions
