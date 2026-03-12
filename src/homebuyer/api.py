@@ -3448,6 +3448,16 @@ _UI_DIST = _Path(__file__).resolve().parents[2] / "ui" / "dist"
 if not _UI_DIST.is_dir():
     _UI_DIST = _Path.cwd() / "ui" / "dist"
 
+_MARKETING_DIR = _Path(__file__).resolve().parents[2] / "marketing"
+if not _MARKETING_DIR.is_dir():
+    _MARKETING_DIR = _Path.cwd() / "marketing"
+
+if _MARKETING_DIR.is_dir():
+    @app.get("/welcome")
+    async def _serve_marketing():
+        """Serve the standalone marketing landing page."""
+        return FileResponse(_MARKETING_DIR / "index.html", media_type="text/html")
+
 if _UI_DIST.is_dir():
     # Serve static assets (JS, CSS, images) from the Vite build output.
     app.mount("/assets", StaticFiles(directory=_UI_DIST / "assets"), name="static-assets")

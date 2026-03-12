@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HomeBuyer - Berkeley Real Estate Analytics</title>
+  <meta name="description" content="AI-powered home price predictions for Berkeley, CA. Free. Honest. Slightly painful.">
+  <meta property="og:title" content="HomeBuyer - Berkeley Real Estate Analytics">
+  <meta property="og:description" content="AI-powered price predictions that tell you the truth about Berkeley housing.">
+  <meta property="og:type" content="website">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 400: '#fbbf24', 500: '#f59e0b', 600: '#d97706' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .gradient-text {
+      background: linear-gradient(135deg, #ffffff 0%, #fbbf24 50%, #f59e0b 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .faq-answer { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
+    .faq-answer.open { max-height: 500px; transition: max-height 0.5s ease-in; }
+    .faq-chevron { transition: transform 0.3s ease; }
+    .faq-chevron.open { transform: rotate(180deg); }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+    @keyframes float-in {
+      from { opacity: 0; transform: translateY(24px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .float-in { animation: float-in 0.6s ease-out forwards; }
+  </style>
+</head>
+<body class="bg-white text-gray-900 font-sans antialiased">
+
+  <!-- Sticky Nav -->
+  <nav class="fixed top-0 left-0 right-0 z-50 bg-slate-900/95 backdrop-blur-sm border-b border-slate-800">
+    <div class="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="text-xl font-bold text-white">HomeBuyer</span>
+        <span class="text-xs text-slate-400 hidden sm:inline">Berkeley, CA</span>
+      </div>
+      <a href="/" class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-semibold text-sm px-5 py-2 rounded-lg transition-colors">
+        Try It Free
+      </a>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="bg-slate-900 pt-32 pb-20 md:pt-40 md:pb-28 px-6">
+    <div class="max-w-4xl mx-auto text-center">
+      <h1 class="text-4xl sm:text-5xl md:text-7xl font-extrabold gradient-text leading-tight mb-6">
+        We built an AI that tells you your house is overpriced.
+      </h1>
+      <p class="text-xl text-white font-medium mb-2">You're welcome.</p>
+      <p class="text-lg text-slate-400 max-w-2xl mx-auto mb-10">
+        HomeBuyer is a Berkeley-specific real estate analytics tool that gives you price predictions, neighborhood data, and brutally honest market insights. It's like having a real estate agent who doesn't need your commission.
+      </p>
+      <div class="flex flex-col sm:flex-row gap-4 justify-center mb-6">
+        <a href="/predict" class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold text-lg px-8 py-3.5 rounded-lg transition-colors">
+          Get Your Reality Check
+        </a>
+        <a href="/chat" class="border-2 border-slate-500 hover:border-white text-white font-semibold text-lg px-8 py-3.5 rounded-lg transition-colors">
+          Talk to Faketor
+        </a>
+      </div>
+      <p class="text-sm text-slate-500 italic">
+        No signup required to browse. We only ask for your email when you want to save predictions, which, let's be honest, you won't love.
+      </p>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="py-20 md:py-28 px-6 bg-white">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-16">
+        <h2 class="text-3xl md:text-4xl font-bold mb-3">Features That Exist and Mostly Work</h2>
+        <p class="text-gray-500 text-lg">We tested them. Some of them. Recently-ish.</p>
+      </div>
+      <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <!-- Feature 1 -->
+        <div class="bg-gray-50 rounded-2xl p-7 hover:shadow-lg transition-shadow">
+          <div class="text-4xl mb-4">&#x1F52E;</div>
+          <h3 class="text-xl font-bold mb-2">Know What It's Worth (Approximately)</h3>
+          <p class="text-gray-600">Paste a Redfin URL or click anywhere on the map. Our ML model trained on 5 years of Berkeley sales data tells you what it should sell for. It's right about 85% of the time, which is better than your uncle's gut feeling.</p>
+        </div>
+        <!-- Feature 2 -->
+        <div class="bg-gray-50 rounded-2xl p-7 hover:shadow-lg transition-shadow">
+          <div class="text-4xl mb-4">&#x1F916;</div>
+          <h3 class="text-xl font-bold mb-2">An AI That Knows More Than Your Agent</h3>
+          <p class="text-gray-600">Ask Faketor anything about a Berkeley property. It has 14 tools at its disposal &mdash; comps, zoning, permits, rental estimates, sell-vs-hold analysis &mdash; and zero emotional attachment to closing the deal.</p>
+        </div>
+        <!-- Feature 3 -->
+        <div class="bg-gray-50 rounded-2xl p-7 hover:shadow-lg transition-shadow">
+          <div class="text-4xl mb-4">&#x1F4CD;</div>
+          <h3 class="text-xl font-bold mb-2">Neighborhood Data That Doesn't Sugarcoat</h3>
+          <p class="text-gray-600">Median prices, price trends, days on market, sale-to-list ratios. Every Berkeley neighborhood, laid bare. No "up-and-coming" euphemisms here.</p>
+        </div>
+        <!-- Feature 4 -->
+        <div class="bg-gray-50 rounded-2xl p-7 hover:shadow-lg transition-shadow">
+          <div class="text-4xl mb-4">&#x1F3D7;</div>
+          <h3 class="text-xl font-bold mb-2">Can You Build an ADU? Probably.</h3>
+          <p class="text-gray-600">Zoning analysis, ADU feasibility, SB 9 lot-split eligibility, Middle Housing rules. We read the Berkeley Municipal Code so you don't have to. And honestly, neither did your contractor.</p>
+        </div>
+        <!-- Feature 5 -->
+        <div class="bg-gray-50 rounded-2xl p-7 hover:shadow-lg transition-shadow">
+          <div class="text-4xl mb-4">&#x1F4C8;</div>
+          <h3 class="text-xl font-bold mb-2">Watch the Market Do Whatever It Wants</h3>
+          <p class="text-gray-600">Real-time Berkeley market analytics. Mortgage rates, median prices, inventory levels. Updated regularly, ignored frequently.</p>
+        </div>
+        <!-- Feature 6 -->
+        <div class="bg-gray-50 rounded-2xl p-7 hover:shadow-lg transition-shadow">
+          <div class="text-4xl mb-4">&#x1F4B0;</div>
+          <h3 class="text-xl font-bold mb-2">Math That Hurts Your Feelings</h3>
+          <p class="text-gray-600">Enter your budget. See what you can actually afford in Berkeley. Spoiler: it's smaller than you think. The calculator doesn't lie, even when you want it to.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Faketor Spotlight -->
+  <section class="py-20 md:py-28 px-6 bg-gray-50">
+    <div class="max-w-4xl mx-auto">
+      <div class="text-center mb-12">
+        <h2 class="text-3xl md:text-4xl font-bold mb-3">
+          Meet Faketor. <span class="inline-flex items-center"><span class="inline-block w-2.5 h-2.5 bg-green-500 rounded-full pulse-dot mr-1"></span></span>Your AI Agent Who Can't Be Bribed.
+        </h2>
+        <p class="text-gray-500 text-lg">Powered by Claude. Armed with 14 tools. Incapable of telling you what you want to hear.</p>
+      </div>
+      <!-- Fake chat -->
+      <div class="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden max-w-2xl mx-auto">
+        <div class="bg-slate-800 px-5 py-3 flex items-center gap-2">
+          <div class="w-3 h-3 rounded-full bg-red-400"></div>
+          <div class="w-3 h-3 rounded-full bg-yellow-400"></div>
+          <div class="w-3 h-3 rounded-full bg-green-400"></div>
+          <span class="text-slate-400 text-sm ml-2">Faketor Chat</span>
+        </div>
+        <div class="p-6 space-y-5">
+          <!-- User message -->
+          <div class="flex justify-end">
+            <div class="bg-blue-600 text-white px-4 py-2.5 rounded-2xl rounded-br-md max-w-sm text-sm">
+              Is 1200 Cedar St a good deal at $1.2M?
+            </div>
+          </div>
+          <!-- Bot response -->
+          <div class="flex justify-start">
+            <div class="bg-gray-100 px-4 py-3 rounded-2xl rounded-bl-md max-w-md text-sm space-y-2.5">
+              <p class="text-gray-800">Let me look into that...</p>
+              <div class="space-y-1">
+                <div class="flex items-center gap-2 text-xs text-gray-500">
+                  <span class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">tool</span>
+                  Looking up property...
+                </div>
+                <div class="flex items-center gap-2 text-xs text-gray-500">
+                  <span class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">tool</span>
+                  Getting comparable sales...
+                </div>
+                <div class="flex items-center gap-2 text-xs text-gray-500">
+                  <span class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">tool</span>
+                  Running price prediction...
+                </div>
+              </div>
+              <p class="text-gray-800 leading-relaxed">
+                Based on 8 comparable sales in the Northside neighborhood, the predicted fair value is <strong>$1,087,000</strong>.
+                At $1.2M, you'd be paying a <strong>10.4% premium</strong>. The house hasn't been updated since 1987,
+                the roof permit was 22 years ago, and the lot is too small for an ADU. But hey, it has "character."
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="text-center mt-8">
+        <a href="/chat" class="inline-block bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-8 py-3 rounded-lg transition-colors">
+          Ask Faketor Yourself
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Model Transparency -->
+  <section class="py-20 md:py-28 px-6 bg-white">
+    <div class="max-w-4xl mx-auto">
+      <div class="text-center mb-12">
+        <h2 class="text-3xl md:text-4xl font-bold mb-3">We Show Our Work. Unlike Some People.</h2>
+        <p class="text-gray-500 text-lg">Our ML model page shows you exactly how bad &mdash; or good &mdash; our predictions are.</p>
+      </div>
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="text-center bg-gray-50 rounded-2xl p-8">
+          <div class="text-4xl md:text-5xl font-extrabold text-slate-800 mb-2">~$95K</div>
+          <div class="text-sm font-semibold text-gray-700 mb-1">Median Absolute Error</div>
+          <p class="text-xs text-gray-500">Off by this much, on average. Could be worse.</p>
+        </div>
+        <div class="text-center bg-gray-50 rounded-2xl p-8">
+          <div class="text-4xl md:text-5xl font-extrabold text-slate-800 mb-2">0.82</div>
+          <div class="text-sm font-semibold text-gray-700 mb-1">R-squared</div>
+          <p class="text-xs text-gray-500">Explains this much of price variation. The rest is vibes.</p>
+        </div>
+        <div class="text-center bg-gray-50 rounded-2xl p-8">
+          <div class="text-4xl md:text-5xl font-extrabold text-slate-800 mb-2">30+</div>
+          <div class="text-sm font-semibold text-gray-700 mb-1">Features Used</div>
+          <p class="text-xs text-gray-500">Including things you'd never think of, like permit history from 1985.</p>
+        </div>
+      </div>
+      <p class="text-center mt-6">
+        <a href="/model" class="text-blue-600 hover:text-blue-800 text-sm font-medium underline underline-offset-4">See the full model breakdown &rarr;</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- Testimonials -->
+  <section class="py-20 md:py-28 px-6 bg-gray-50">
+    <div class="max-w-5xl mx-auto">
+      <div class="text-center mb-12">
+        <h2 class="text-3xl md:text-4xl font-bold mb-3">What People Definitely Said About Us</h2>
+        <p class="text-gray-500 text-lg">These are not real testimonials. We don't have users yet. But if we did, they'd probably say this.</p>
+      </div>
+      <div class="grid md:grid-cols-3 gap-8">
+        <!-- Testimonial 1 -->
+        <div class="bg-white rounded-2xl p-7 shadow-sm">
+          <div class="text-amber-400 text-lg mb-3">&#x2605;&#x2605;&#x2605;&#x2605;&#x2605;</div>
+          <p class="text-gray-700 italic mb-4">"It told me my dream home was overpriced by $200K. I bought it anyway. It was right."</p>
+          <div class="text-sm font-semibold text-gray-900">Sarah K.</div>
+          <div class="text-xs text-gray-500">Elmwood &middot; Bought in 2024</div>
+        </div>
+        <!-- Testimonial 2 -->
+        <div class="bg-white rounded-2xl p-7 shadow-sm">
+          <div class="text-amber-400 text-lg mb-3">&#x2605;&#x2605;&#x2605;&#x2605;<span class="text-gray-300">&#x2605;</span></div>
+          <p class="text-gray-700 italic mb-4">"I used HomeBuyer's affordability calculator and it ruined my weekend. 10/10 would recommend."</p>
+          <div class="text-sm font-semibold text-gray-900">Mike T.</div>
+          <div class="text-xs text-gray-500">North Berkeley &middot; Lost a star because the truth hurts</div>
+        </div>
+        <!-- Testimonial 3 -->
+        <div class="bg-white rounded-2xl p-7 shadow-sm">
+          <div class="text-amber-400 text-lg mb-3">&#x2605;&#x2605;&#x2605;&#x2605;&#x2605;</div>
+          <p class="text-gray-700 italic mb-4">"Faketor told me my lot wasn't eligible for SB 9 splitting. My contractor disagreed. Faketor was right."</p>
+          <div class="text-sm font-semibold text-gray-900">Anonymous</div>
+          <div class="text-xs text-gray-500">Contractor's Former Client</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section class="py-20 md:py-28 px-6 bg-white">
+    <div class="max-w-5xl mx-auto">
+      <div class="text-center mb-12">
+        <h2 class="text-3xl md:text-4xl font-bold mb-3">Pricing That Makes Sense for Once</h2>
+        <p class="text-gray-500 text-lg">Just kidding. It's free. We're not charging you to feel bad about housing prices.</p>
+      </div>
+      <div class="grid md:grid-cols-3 gap-8">
+        <!-- Tier 1 -->
+        <div class="bg-gray-50 rounded-2xl p-7 border border-gray-200">
+          <h3 class="text-xl font-bold mb-1">Denial</h3>
+          <div class="text-3xl font-extrabold mb-4">Free</div>
+          <ul class="text-gray-600 text-sm space-y-2.5 mb-8">
+            <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Browse neighborhoods</li>
+            <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> See median prices</li>
+            <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Pretend you can afford it</li>
+          </ul>
+          <a href="/" class="block text-center border-2 border-gray-300 hover:border-gray-400 text-gray-700 font-semibold py-2.5 rounded-lg transition-colors">
+            Stay in Denial
+          </a>
+        </div>
+        <!-- Tier 2 -->
+        <div class="bg-amber-50 rounded-2xl p-7 border-2 border-amber-400 relative">
+          <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-900 text-xs font-bold px-3 py-1 rounded-full">POPULAR</span>
+          <h3 class="text-xl font-bold mb-1">Acceptance</h3>
+          <div class="text-3xl font-extrabold mb-4">Also Free</div>
+          <ul class="text-gray-600 text-sm space-y-2.5 mb-8">
+            <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Everything in Denial</li>
+            <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Price predictions</li>
+            <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> AI chat with Faketor</li>
+            <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Development potential</li>
+            <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Affordability calculator</li>
+            <li class="flex items-start gap-2"><span class="text-amber-500 mt-0.5">&#x26A0;</span> Warning: contains math</li>
+          </ul>
+          <a href="/" class="block text-center bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-2.5 rounded-lg transition-colors">
+            Face Reality
+          </a>
+        </div>
+        <!-- Tier 3 -->
+        <div class="bg-gray-50 rounded-2xl p-7 border border-gray-200 opacity-75">
+          <h3 class="text-xl font-bold mb-1">Therapy</h3>
+          <div class="text-3xl font-extrabold mb-4">Not Included</div>
+          <ul class="text-gray-400 text-sm space-y-2.5 mb-8">
+            <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2713;</span> Everything in Acceptance</li>
+            <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2713;</span> Emotional support after seeing prices</li>
+            <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2713;</span> Someone to blame</li>
+            <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2713;</span> A time machine to 2012</li>
+          </ul>
+          <span class="block text-center bg-gray-200 text-gray-400 font-semibold py-2.5 rounded-lg cursor-not-allowed">
+            We Wish
+          </span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="py-20 md:py-28 px-6 bg-gray-50">
+    <div class="max-w-3xl mx-auto">
+      <div class="text-center mb-12">
+        <h2 class="text-3xl md:text-4xl font-bold mb-3">Questions We Wish People Would Ask</h2>
+      </div>
+      <div class="space-y-3">
+        <!-- FAQ 1 -->
+        <div class="bg-white rounded-xl border border-gray-200">
+          <button class="faq-toggle w-full text-left px-6 py-4 flex items-center justify-between" onclick="toggleFaq(this)">
+            <span class="font-semibold text-gray-900">Is this actually free?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div class="faq-answer">
+            <p class="px-6 pb-4 text-gray-600 text-sm leading-relaxed">
+              Yes. We're a side project built by one developer who wanted to understand Berkeley real estate and got slightly carried away. There's no catch. There's no monetization strategy. There's barely a business plan.
+            </p>
+          </div>
+        </div>
+        <!-- FAQ 2 -->
+        <div class="bg-white rounded-xl border border-gray-200">
+          <button class="faq-toggle w-full text-left px-6 py-4 flex items-center justify-between" onclick="toggleFaq(this)">
+            <span class="font-semibold text-gray-900">How accurate are the predictions?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div class="faq-answer">
+            <p class="px-6 pb-4 text-gray-600 text-sm leading-relaxed">
+              Our model has a median absolute error of about $95K on Berkeley sales. That's pretty good for a machine, but we'd never tell you to bet your life savings on it. Actually, we legally cannot tell you that. This is not financial advice.
+            </p>
+          </div>
+        </div>
+        <!-- FAQ 3 -->
+        <div class="bg-white rounded-xl border border-gray-200">
+          <button class="faq-toggle w-full text-left px-6 py-4 flex items-center justify-between" onclick="toggleFaq(this)">
+            <span class="font-semibold text-gray-900">Why only Berkeley?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div class="faq-answer">
+            <p class="px-6 pb-4 text-gray-600 text-sm leading-relaxed">
+              Because Berkeley is weird enough to be interesting and small enough that one person can build a model for it. Also, the developer lives here and has opinions about housing prices.
+            </p>
+          </div>
+        </div>
+        <!-- FAQ 4 -->
+        <div class="bg-white rounded-xl border border-gray-200">
+          <button class="faq-toggle w-full text-left px-6 py-4 flex items-center justify-between" onclick="toggleFaq(this)">
+            <span class="font-semibold text-gray-900">What is Faketor?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div class="faq-answer">
+            <p class="px-6 pb-4 text-gray-600 text-sm leading-relaxed">
+              Faketor is our AI chat agent powered by Claude. The name is a portmanteau of "fake" and "realtor." It has access to 14 different tools &mdash; property lookup, comps, zoning, permits, rental analysis, market data, and more. It's like a real estate agent except it won't ghost you after closing.
+            </p>
+          </div>
+        </div>
+        <!-- FAQ 5 -->
+        <div class="bg-white rounded-xl border border-gray-200">
+          <button class="faq-toggle w-full text-left px-6 py-4 flex items-center justify-between" onclick="toggleFaq(this)">
+            <span class="font-semibold text-gray-900">Can I use this to buy a house?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div class="faq-answer">
+            <p class="px-6 pb-4 text-gray-600 text-sm leading-relaxed">
+              You can use this to inform your house-buying decisions. You should not use this as your sole source of truth. We are a side project, not a licensed real estate brokerage. Please also consult a human who has passed an exam.
+            </p>
+          </div>
+        </div>
+        <!-- FAQ 6 -->
+        <div class="bg-white rounded-xl border border-gray-200">
+          <button class="faq-toggle w-full text-left px-6 py-4 flex items-center justify-between" onclick="toggleFaq(this)">
+            <span class="font-semibold text-gray-900">Why should I trust an AI for real estate?</span>
+            <svg class="faq-chevron w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div class="faq-answer">
+            <p class="px-6 pb-4 text-gray-600 text-sm leading-relaxed">
+              You probably shouldn't trust any single source for a $1.5M decision. But our model is transparent &mdash; you can see every feature it uses, its error metrics, and how it weights different factors. That's more than most agents will show you.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Final CTA -->
+  <section class="py-20 md:py-28 px-6 bg-slate-900">
+    <div class="max-w-3xl mx-auto text-center">
+      <h2 class="text-3xl sm:text-4xl md:text-5xl font-extrabold text-white mb-4">Ready to Find Out What You Can't Afford?</h2>
+      <p class="text-lg text-slate-400 mb-8">It's free, it's honest, and it only takes a minute to crush your dreams.</p>
+      <a href="/" class="inline-block bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold text-lg px-10 py-4 rounded-lg transition-colors">
+        Try HomeBuyer
+      </a>
+      <p class="text-sm text-slate-600 mt-4">No credit card required. No signup required. No feelings spared.</p>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="bg-slate-950 py-8 px-6">
+    <div class="max-w-6xl mx-auto text-center space-y-2">
+      <p class="text-slate-500 text-sm">Built with questionable judgment in Berkeley, CA</p>
+      <p class="text-slate-600 text-xs">
+        HomeBuyer is a side project. Not a real estate brokerage. Not financial advice. Not even a real company.
+      </p>
+      <p class="text-slate-700 text-xs">&copy; 2026 HomeBuyer</p>
+    </div>
+  </footer>
+
+  <script>
+    function toggleFaq(button) {
+      const answer = button.nextElementSibling;
+      const chevron = button.querySelector('.faq-chevron');
+      answer.classList.toggle('open');
+      chevron.classList.toggle('open');
+    }
+  </script>
+</body>
+</html>
