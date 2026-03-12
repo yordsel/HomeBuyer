@@ -9,10 +9,12 @@ import { MarketPage } from './pages/Market';
 import { ModelInfoPage } from './pages/ModelInfo';
 import { AffordPage } from './pages/Afford';
 import { PotentialPage } from './pages/Potential';
+import { LoginPage } from './pages/Login';
 import { PropertyProvider } from './context/PropertyContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import type { PageId } from './types';
 
-function App() {
+function AuthenticatedApp() {
   const [currentPage, setCurrentPage] = useState<PageId>('chat');
 
   function renderPage() {
@@ -49,10 +51,35 @@ function App() {
 
         {/* Right context panel — only visible on Chat page */}
         {currentPage === 'chat' && <ContextPanel />}
-
-        <Toaster position="bottom-right" richColors closeButton />
       </div>
     </PropertyProvider>
+  );
+}
+
+function AppContent() {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+
+  return <AuthenticatedApp />;
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+      <Toaster position="bottom-right" richColors closeButton />
+    </AuthProvider>
   );
 }
 

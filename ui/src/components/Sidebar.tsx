@@ -9,8 +9,11 @@ import {
   Layers,
   ChevronsLeft,
   ChevronsRight,
+  LogOut,
+  User,
 } from 'lucide-react';
 import type { PageId } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 interface SidebarProps {
   currentPage: PageId;
@@ -29,6 +32,7 @@ const NAV_ITEMS: { id: PageId; label: string; icon: typeof Search }[] = [
 
 export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const { user, logout } = useAuth();
 
   return (
     <aside
@@ -81,9 +85,32 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="px-3 py-4 border-t border-gray-200">
-        {!collapsed && <p className="text-xs text-gray-400 px-2">v0.1.0</p>}
+      {/* User menu */}
+      <div className="px-3 py-3 border-t border-gray-200">
+        {user && (
+          <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2 px-2'}`}>
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-700">
+              <User size={14} />
+            </div>
+            {!collapsed && (
+              <div className="flex-1 min-w-0">
+                <p className="truncate text-xs font-medium text-gray-700">
+                  {user.full_name || user.email}
+                </p>
+                {user.full_name && (
+                  <p className="truncate text-[10px] text-gray-400">{user.email}</p>
+                )}
+              </div>
+            )}
+            <button
+              onClick={logout}
+              title="Sign out"
+              className="shrink-0 p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+            >
+              <LogOut size={14} />
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   );

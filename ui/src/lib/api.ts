@@ -20,6 +20,8 @@ import type {
   WorkingSetPage,
   ResponseBlock,
   WorkingSetMeta,
+  AuthResponse,
+  User,
 } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -32,9 +34,37 @@ const isLocal =
   window.location.hostname === '127.0.0.1';
 const API_BASE = isLocal ? 'http://127.0.0.1:8787' : '';
 
+// ---------------------------------------------------------------------------
+// Auth token management
+// ---------------------------------------------------------------------------
+
+const TOKEN_KEY = 'homebuyer_token';
+
+export function getStoredToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setStoredToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearStoredToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getStoredToken();
+  if (token) {
+    return { Authorization: `Bearer ${token}` };
+  }
+  return {};
+}
+
 /** Simple GET helper. */
 async function apiGet<T>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`);
+  const resp = await fetch(`${API_BASE}${path}`, {
+    headers: { ...authHeaders() },
+  });
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
     throw new Error(body.detail ?? `HTTP ${resp.status}`);
@@ -46,7 +76,7 @@ async function apiGet<T>(path: string): Promise<T> {
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
@@ -315,7 +345,7 @@ export function streamFaketorMessage(
     try {
       const resp = await fetch(`${API_BASE}/api/faketor/chat/stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(payload),
         signal: controller.signal,
       });
@@ -413,4 +443,24 @@ export async function getWorkingSetProperties(params: {
   if (params.search) qs.set('search', params.search);
   const query = qs.toString();
   return apiGet(`/api/faketor/working-set/${params.session_id}${query ? `?${query}` : ''}`);
+}
+
+// ============================================================================
+// Authentication
+// ============================================================================
+
+export async function authRegister(
+  email: string,
+  password: string,
+  full_name?: string,
+): Promise<AuthResponse> {
+  return apiPost('/api/auth/register', { email, password, full_name: full_name ?? null });
+}
+
+export async function authLogin(email: string, password: string): Promise<AuthResponse> {
+  return apiPost('/api/auth/login', { email, password });
+}
+
+export async function authGetMe(): Promise<User> {
+  return apiGet('/api/auth/me');
 }

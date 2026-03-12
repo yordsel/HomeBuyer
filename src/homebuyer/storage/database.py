@@ -53,7 +53,7 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 # Schema DDL (SQLite dialect — translated at runtime for Postgres)
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA_SQL_SQLITE = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -348,6 +348,18 @@ CREATE INDEX IF NOT EXISTS idx_precomputed_property
     ON precomputed_scenarios(property_id);
 CREATE INDEX IF NOT EXISTS idx_precomputed_type
     ON precomputed_scenarios(scenario_type);
+
+CREATE TABLE IF NOT EXISTS users (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    email           TEXT NOT NULL UNIQUE,
+    password_hash   TEXT NOT NULL,
+    full_name       TEXT,
+    is_active       INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
 """
 
 
@@ -2103,6 +2115,35 @@ class Database:
     # ------------------------------------------------------------------
     # Statistics / Status
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # User management
+    # ------------------------------------------------------------------
+
+    def create_user(self, email: str, password_hash: str, full_name: str | None = None) -> dict:
+        """Create a new user and return the user row (without password_hash)."""
+        user_id = self._insert_returning_id(
+            "INSERT INTO users (email, password_hash, full_name) VALUES (?, ?, ?)",
+            (email, password_hash, full_name),
+        )
+        self.commit()
+        return {"id": user_id, "email": email, "full_name": full_name, "is_active": 1}
+
+    def get_user_by_email(self, email: str) -> Optional[dict]:
+        """Fetch a user by email address, or None if not found."""
+        return self.fetchone(
+            "SELECT id, email, password_hash, full_name, is_active, created_at "
+            "FROM users WHERE email = ?",
+            (email,),
+        )
+
+    def get_user_by_id(self, user_id: int) -> Optional[dict]:
+        """Fetch a user by ID, or None if not found."""
+        return self.fetchone(
+            "SELECT id, email, full_name, is_active, created_at "
+            "FROM users WHERE id = ?",
+            (user_id,),
+        )
 
     def get_statistics(self) -> dict:
         """Return row counts and date ranges for all tables."""

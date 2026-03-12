@@ -17,14 +17,15 @@ from dataclasses import asdict
 from pathlib import Path as _Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 import json
 
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from homebuyer.auth import get_current_user_id
 from homebuyer.config import DATABASE_URL, DB_PATH, GEO_DIR
 
 logger = logging.getLogger(__name__)
@@ -308,6 +309,17 @@ def _track_discussed_property(
 # ---------------------------------------------------------------------------
 
 
+class AuthUserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: Optional[str] = None
+
+
+class AuthUserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
 class ListingPredictRequest(BaseModel):
     url: str
 
@@ -584,6 +596,73 @@ def health():
 def status():
     """Database statistics and data freshness."""
     return _state.db.get_statistics()
+
+
+# --- Authentication ---
+
+
+@app.post("/api/auth/register")
+def auth_register(req: AuthUserCreate):
+    """Create a new user account and return a JWT token."""
+    from homebuyer.auth import (
+        AuthResponse,
+        UserResponse,
+        create_access_token,
+        hash_password,
+    )
+
+    if len(req.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    existing = _state.db.get_user_by_email(req.email)
+    if existing:
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+
+    password_hash = hash_password(req.password)
+    user = _state.db.create_user(
+        email=req.email, password_hash=password_hash, full_name=req.full_name
+    )
+
+    token = create_access_token(data={"sub": str(user["id"])})
+    return AuthResponse(
+        access_token=token,
+        user=UserResponse(id=user["id"], email=user["email"], full_name=user["full_name"]),
+    )
+
+
+@app.post("/api/auth/login")
+def auth_login(req: AuthUserLogin):
+    """Authenticate a user and return a JWT token."""
+    from homebuyer.auth import (
+        AuthResponse,
+        UserResponse,
+        create_access_token,
+        verify_password,
+    )
+
+    user = _state.db.get_user_by_email(req.email)
+    if not user or not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="Account is deactivated")
+
+    token = create_access_token(data={"sub": str(user["id"])})
+    return AuthResponse(
+        access_token=token,
+        user=UserResponse(id=user["id"], email=user["email"], full_name=user.get("full_name")),
+    )
+
+
+@app.get("/api/auth/me")
+def auth_me(user_id: int = Depends(get_current_user_id)):
+    """Return the profile of the currently authenticated user."""
+    from homebuyer.auth import UserResponse
+
+    user = _state.db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserResponse(id=user["id"], email=user["email"], full_name=user.get("full_name"))
 
 
 # --- Prediction ---
