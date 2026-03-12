@@ -10,15 +10,16 @@ import type { TrackedProperty } from '../../context/PropertyContext';
 
 /** Compact currency for header display: $2.8M, $850K, etc. */
 export function formatCompactCurrency(amount: number): string {
-  if (amount >= 1_000_000) {
-    const m = amount / 1_000_000;
+  const n = Number(amount);
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
     return `$${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}M`;
   }
-  if (amount >= 1_000) {
-    const k = Math.round(amount / 1_000);
+  if (n >= 1_000) {
+    const k = Math.round(n / 1_000);
     return `$${k}K`;
   }
-  return `$${Math.round(amount)}`;
+  return `$${Math.round(n)}`;
 }
 
 /** Extract predicted price from blocks first, then property summary data. */

@@ -66,6 +66,19 @@ export function formatCompact(n: number | string | null | undefined): string {
 }
 
 /**
+ * Safely coerce a value to a number.
+ * Returns the numeric value, or `fallback` (default 0) when the input is
+ * null, undefined, NaN, or a non-numeric string.  This is the primary
+ * defence against `json.dumps(…, default=str)` serialising Python Decimal
+ * or other exotic numerics as strings.
+ */
+export function toNum(v: unknown, fallback = 0): number {
+  if (v == null) return fallback;
+  const n = typeof v === 'string' ? parseFloat(v) : Number(v);
+  return isNaN(n) ? fallback : n;
+}
+
+/**
  * Format a backend tool name for display: strip common prefixes, replace
  * underscores with spaces, and title-case each word.
  */

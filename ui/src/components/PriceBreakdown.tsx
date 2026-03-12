@@ -187,8 +187,9 @@ function CustomTooltip({ active, payload }: any) {
 
 /** Format a dollar value as shorthand: $1.2M, $350K, -$50K */
 function shortDollar(value: number): string {
-  const abs = Math.abs(value);
-  const sign = value < 0 ? '-' : '';
+  const v = Number(value);
+  const abs = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
   if (abs >= 1_000_000) {
     return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
   }

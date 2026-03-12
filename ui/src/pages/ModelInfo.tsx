@@ -124,7 +124,7 @@ export function ModelInfoPage() {
         />
         <StatCard
           label="R-Squared"
-          value={m.r2.toFixed(4)}
+          value={Number(m.r2).toFixed(4)}
           subtitle="Variance explained"
         />
         <StatCard
@@ -171,7 +171,7 @@ export function ModelInfoPage() {
               width={110}
             />
             <Tooltip
-              formatter={(value: number) => [`${value.toFixed(2)}%`, 'Importance']}
+              formatter={(value: number) => [`${Number(value).toFixed(2)}%`, 'Importance']}
               contentStyle={{
                 borderRadius: '8px',
                 border: '1px solid #e5e7eb',
@@ -214,9 +214,9 @@ export function ModelInfoPage() {
                     <tr key={n.neighborhood} className="hover:bg-gray-50">
                       <td className="px-6 py-3 font-medium text-gray-900">{n.neighborhood}</td>
                       <td className="px-4 py-3 text-right text-gray-600">{n.test_count}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{n.mape.toFixed(1)}%</td>
+                      <td className="px-4 py-3 text-right text-gray-600">{Number(n.mape).toFixed(1)}%</td>
                       <td className="px-4 py-3 text-right text-gray-600">{formatCurrency(n.mae)}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{n.within_10pct.toFixed(1)}%</td>
+                      <td className="px-4 py-3 text-right text-gray-600">{Number(n.within_10pct).toFixed(1)}%</td>
                     </tr>
                   ))}
               </tbody>
@@ -260,7 +260,7 @@ export function ModelInfoPage() {
                       />
                     </div>
                     <span className="text-xs font-medium text-gray-700 w-10 text-right">
-                      {pct.toFixed(0)}%
+                      {Number(pct).toFixed(0)}%
                     </span>
                   </div>
                   <p className="text-[10px] text-gray-400 mt-0.5">

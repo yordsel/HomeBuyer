@@ -85,13 +85,13 @@ export function MarketPage() {
           />
           <StatCard
             label="Sale-to-List Ratio"
-            value={cm.sale_to_list_ratio ? `${(cm.sale_to_list_ratio * 100).toFixed(1)}%` : '—'}
-            subtitle={cm.sold_above_list_pct ? `${cm.sold_above_list_pct.toFixed(0)}% sold above list` : undefined}
+            value={cm.sale_to_list_ratio ? `${(Number(cm.sale_to_list_ratio) * 100).toFixed(1)}%` : '—'}
+            subtitle={cm.sold_above_list_pct ? `${Number(cm.sold_above_list_pct).toFixed(0)}% sold above list` : undefined}
             color={cm.sale_to_list_ratio && cm.sale_to_list_ratio > 1 ? 'red' : 'green'}
           />
           <StatCard
             label="30yr Mortgage Rate"
-            value={cm.mortgage_rate_30yr ? `${cm.mortgage_rate_30yr.toFixed(2)}%` : '—'}
+            value={cm.mortgage_rate_30yr ? `${Number(cm.mortgage_rate_30yr).toFixed(2)}%` : '—'}
             color="blue"
           />
           <StatCard
@@ -117,8 +117,8 @@ export function MarketPage() {
               dataKey="mortgage_rate_30yr"
               label="30yr Mortgage Rate"
               color="#dc2626"
-              formatValue={(v) => `${v.toFixed(2)}%`}
-              formatYAxis={(v) => `${v.toFixed(1)}%`}
+              formatValue={(v) => `${Number(v).toFixed(2)}%`}
+              formatYAxis={(v) => `${Number(v).toFixed(1)}%`}
             />
           </div>
 
@@ -174,12 +174,12 @@ export function MarketPage() {
                     </td>
                     <td className="px-4 py-3 text-right text-gray-600">
                       {row.sale_to_list_ratio != null
-                        ? `${(row.sale_to_list_ratio * 100).toFixed(1)}%`
+                        ? `${(Number(row.sale_to_list_ratio) * 100).toFixed(1)}%`
                         : '—'}
                     </td>
                     <td className="px-4 py-3 text-right text-gray-600">
                       {row.sold_above_list_pct != null
-                        ? `${row.sold_above_list_pct.toFixed(0)}%`
+                        ? `${Number(row.sold_above_list_pct).toFixed(0)}%`
                         : '—'}
                     </td>
                     <td className="px-4 py-3 text-right text-gray-600">
@@ -193,7 +193,7 @@ export function MarketPage() {
                     </td>
                     <td className="px-4 py-3 text-right text-gray-600">
                       {row.mortgage_rate_30yr != null
-                        ? `${row.mortgage_rate_30yr.toFixed(2)}%`
+                        ? `${Number(row.mortgage_rate_30yr).toFixed(2)}%`
                         : '—'}
                     </td>
                   </tr>

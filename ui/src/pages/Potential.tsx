@@ -517,7 +517,7 @@ function BESOCard({ result }: { result: DevelopmentPotentialResponse }) {
                 <div>
                   <p className="text-xs text-gray-500">Site EUI</p>
                   <p className="text-lg font-bold text-gray-900">
-                    {r.site_eui != null ? r.site_eui.toFixed(1) : '—'}
+                    {r.site_eui != null ? Number(r.site_eui).toFixed(1) : '—'}
                     {r.site_eui != null && (
                       <span className="text-xs text-gray-400 ml-1">kBTU/ft²</span>
                     )}

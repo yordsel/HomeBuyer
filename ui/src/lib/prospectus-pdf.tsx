@@ -148,7 +148,7 @@ function CoverPage({ p, disclaimer }: { p: PropertyProspectus; disclaimer: strin
               <KVRow label="Cash-on-Cash" value={fmtPct(p.cash_on_cash_pct)} />
               <KVRow
                 label="GRM"
-                value={p.gross_rent_multiplier ? p.gross_rent_multiplier.toFixed(1) : '\u2014'}
+                value={p.gross_rent_multiplier ? Number(p.gross_rent_multiplier).toFixed(1) : '\u2014'}
               />
               <KVRow label="Time Horizon" value={`${p.time_horizon_years} years`} />
             </View>
@@ -201,7 +201,7 @@ function PropertyDetailsPage({ p, disclaimer }: { p: PropertyProspectus; disclai
             <KVRow label="Low Estimate" value={fmtCurrency(p.value_range_low)} />
             <KVRow label="High Estimate" value={fmtCurrency(p.value_range_high)} />
             {p.value_per_sqft != null && (
-              <KVRow label="Value per Sqft" value={`$${p.value_per_sqft.toFixed(0)}`} />
+              <KVRow label="Value per Sqft" value={`$${Number(p.value_per_sqft).toFixed(0)}`} />
             )}
           </View>
         }
@@ -230,10 +230,10 @@ function PropertyDetailsPage({ p, disclaimer }: { p: PropertyProspectus; disclai
               <KVRow label="YoY Change" value={fmtPct(p.neighborhood_yoy_change_pct, true)} />
             )}
             {p.neighborhood_avg_ppsf != null && (
-              <KVRow label="Avg $/sqft" value={`$${p.neighborhood_avg_ppsf.toFixed(0)}`} />
+              <KVRow label="Avg $/sqft" value={`$${Number(p.neighborhood_avg_ppsf).toFixed(0)}`} />
             )}
             {p.mortgage_rate_30yr != null && (
-              <KVRow label="Mortgage Rate (30yr)" value={`${p.mortgage_rate_30yr.toFixed(2)}%`} />
+              <KVRow label="Mortgage Rate (30yr)" value={`${Number(p.mortgage_rate_30yr).toFixed(2)}%`} />
             )}
             {p.median_dom != null && (
               <KVRow label="Median Days on Market" value={`${p.median_dom} days`} />
@@ -436,7 +436,7 @@ function CompsAndRisksPage({
                 {c.beds != null ? String(c.beds) : '\u2014'}
               </Text>
               <Text style={[s.tableCell, { width: '14%', textAlign: 'right' }]}>
-                {c.price_per_sqft ? `$${c.price_per_sqft.toFixed(0)}` : '\u2014'}
+                {c.price_per_sqft ? `$${Number(c.price_per_sqft).toFixed(0)}` : '\u2014'}
               </Text>
               <Text style={[s.tableCell, { width: '16%', textAlign: 'right' }]}>
                 {fmtDate(c.sale_date)}
@@ -676,7 +676,7 @@ function CondensedPropertyPage2({
           <View>
             <KVRow label="Estimated Value" value={fmtCurrency(p.estimated_value)} />
             <KVRow label="Value Range" value={`${fmtCurrency(p.value_range_low)} – ${fmtCurrency(p.value_range_high)}`} />
-            {p.value_per_sqft != null && <KVRow label="$/sqft" value={`$${p.value_per_sqft.toFixed(0)}`} />}
+            {p.value_per_sqft != null && <KVRow label="$/sqft" value={`$${Number(p.value_per_sqft).toFixed(0)}`} />}
             {p.neighborhood_median_price != null && (
               <KVRow label={`${p.neighborhood} Median`} value={fmtCurrency(p.neighborhood_median_price)} />
             )}
@@ -720,7 +720,7 @@ function CondensedPropertyPage2({
             <View key={i} style={s.tableRow}>
               <Text style={[s.tableCell, { width: '40%' }]}>{c.address}</Text>
               <Text style={[s.tableCell, { width: '22%', textAlign: 'right' }]}>{fmtCurrency(c.sale_price)}</Text>
-              <Text style={[s.tableCell, { width: '18%', textAlign: 'right' }]}>{c.price_per_sqft ? `$${c.price_per_sqft.toFixed(0)}` : '\u2014'}</Text>
+              <Text style={[s.tableCell, { width: '18%', textAlign: 'right' }]}>{c.price_per_sqft ? `$${Number(c.price_per_sqft).toFixed(0)}` : '\u2014'}</Text>
               <Text style={[s.tableCell, { width: '20%', textAlign: 'right' }]}>{fmtDate(c.sale_date)}</Text>
             </View>
           ))}

@@ -180,7 +180,7 @@ export function NeighborhoodsPage() {
                         {n.avg_year_built != null ? Math.round(n.avg_year_built) : '—'}
                       </td>
                       <td className="px-4 py-3 text-right text-gray-600">
-                        {n.median_lot_size ? `${(n.median_lot_size / 1000).toFixed(1)}K` : '—'}
+                        {n.median_lot_size ? `${(Number(n.median_lot_size) / 1000).toFixed(1)}K` : '—'}
                       </td>
                       <td className="px-4 py-3 text-gray-600 text-xs">
                         {n.dominant_zoning?.length > 0 ? n.dominant_zoning.join(', ') : '—'}

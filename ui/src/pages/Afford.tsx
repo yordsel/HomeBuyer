@@ -132,7 +132,7 @@ export function AffordPage() {
             />
             <StatCard
               label="30yr Rate"
-              value={`${result.mortgage_rate_30yr.toFixed(2)}%`}
+              value={`${Number(result.mortgage_rate_30yr).toFixed(2)}%`}
             />
           </div>
 

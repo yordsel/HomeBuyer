@@ -251,7 +251,7 @@ export function DonutChart({
       ...d,
       startAngle: currentAngle,
       endAngle: currentAngle + sweepAngle,
-      pct: ((d.value / total) * 100).toFixed(0),
+      pct: ((Number(d.value) / total) * 100).toFixed(0),
     };
     currentAngle += sweepAngle;
     return seg;
