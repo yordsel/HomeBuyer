@@ -829,6 +829,50 @@ FAKETOR_TOOLS = [
             "required": ["topic"],
         },
     },
+    {
+        "name": "lookup_glossary_term",
+        "description": (
+            "Look up financial or real estate terminology definitions. "
+            "Covers 70+ terms across mortgage concepts (LTV, DTI, PITI, PMI, ARM vs fixed), "
+            "investment metrics (cap rate, NOI, GRM, cash-on-cash, IRR, DSCR), "
+            "tax concepts (Prop 13, 1031 exchange, Section 121, depreciation, capital gains), "
+            "loan programs (FHA, VA, conventional, CalHFA, conforming vs jumbo), "
+            "closing costs (title insurance, escrow, transfer tax), "
+            "property types (SFR, condo, TIC, PUD, duplex), "
+            "transaction terms (contingency, earnest money, due diligence, disclosures), "
+            "valuation (CMA, comps, price per sqft, appraisal gap), "
+            "construction (setback, FAR, lot coverage, easement), "
+            "and market terms (DOM, months of supply, absorption rate). "
+            "All terms include Berkeley-specific context. Use this when a user asks "
+            "'what is X' for any financial or real estate concept, or when you need "
+            "to explain jargon in your own tool results."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": (
+                        "The term to look up. Can be a term key "
+                        "(e.g. 'cap_rate', 'ltv', 'contingency'), a category "
+                        "(e.g. 'mortgage', 'investment_metrics', 'transaction'), "
+                        "or natural language (e.g. 'what is a cap rate', "
+                        "'explain debt to income ratio')."
+                    ),
+                },
+                "category": {
+                    "type": "string",
+                    "description": (
+                        "Optional category filter: 'mortgage', 'investment_metrics', "
+                        "'tax', 'loan_programs', 'closing_costs', 'berkeley_specific', "
+                        "'property_types', 'transaction', 'valuation', 'construction', "
+                        "'market'."
+                    ),
+                },
+            },
+            "required": ["topic"],
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -851,6 +895,7 @@ TOOL_TO_BLOCK_TYPE: dict[str, str] = {
     "query_database": "query_result",
     "update_working_set": "property_search_results",
     "lookup_regulation": "regulation_info",
+    "lookup_glossary_term": "glossary_info",
 }
 
 # ---------------------------------------------------------------------------
@@ -888,6 +933,10 @@ mortgage analysis, and tax benefits
 - Regulations knowledge base: look up Berkeley zoning definitions, ADU/JADU rules, \
   SB 9 lot splitting, Middle Housing Ordinance, BESO energy requirements, transfer tax \
   rates, rent control, permitting, and hillside overlay restrictions
+- Glossary knowledge base: look up definitions of financial terms (LTV, DTI, cap rate, \
+  NOI, 1031 exchange, Prop 13, etc.), real estate terms (contingency, comps, CMA, DOM, \
+  escrow, etc.), loan programs (FHA, VA, CalHFA), and construction terms (setback, FAR, \
+  lot coverage) — all with Berkeley-specific context
 
 REGULATIONS KNOWLEDGE BASE:
 You have a lookup_regulation tool with authoritative Berkeley regulatory knowledge including \
@@ -896,6 +945,20 @@ ADU/JADU rules, SB 9 lot splitting, Middle Housing Ordinance (effective Nov 2025
 requirements, transfer tax rates, rent control, permitting processes, and hillside overlay \
 restrictions. Use lookup_regulation BEFORE telling users to check the municipal code. For \
 property-specific zoning analysis, use get_development_potential instead.
+
+GLOSSARY KNOWLEDGE BASE:
+You have a lookup_glossary_term tool with 70+ financial and real estate term definitions, \
+all with Berkeley-specific context. Categories: mortgage (LTV, DTI, PITI, PMI, ARM), \
+investment_metrics (cap rate, NOI, GRM, cash-on-cash, IRR, DSCR), tax (Prop 13, 1031, \
+Section 121, depreciation, capital gains), loan_programs (FHA, VA, conventional, CalHFA), \
+closing_costs (title insurance, escrow, transfer tax), property_types (SFR, condo, TIC, \
+duplex), transaction (contingency, earnest money, disclosures, offer review), valuation \
+(CMA, comps, price per sqft, appraisal gap), construction (setback, FAR, lot coverage), \
+and market (DOM, months of supply, absorption rate). Use lookup_glossary_term when:
+- A user asks "what is X" for any financial or real estate concept
+- You use jargon in your response that the user might not understand
+- Your tool results contain metrics (cap rate, cash-on-cash, GRM) and the user seems unfamiliar
+- A user asks about loan programs, closing costs, or tax implications
 
 RULES:
 - Always ground your advice in data from the tools — call them before answering

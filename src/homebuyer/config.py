@@ -23,6 +23,21 @@ REGULATIONS_DIR = DATA_DIR / "regulations"
 REGULATIONS_SEED_DIR = REGULATIONS_DIR / "seed"
 REGULATIONS_SOURCES_DIR = REGULATIONS_DIR / "sources"
 
+# Glossary data (JSON knowledge base — financial & real estate terms)
+GLOSSARY_DIR = DATA_DIR / "glossary"
+GLOSSARY_SEED_DIR = GLOSSARY_DIR / "seed"
+
+# FHFA conforming loan limits (annual XLSX — used by glossary collector)
+# URL pattern: replace year as needed. Published each November for next year.
+FHFA_LOAN_LIMITS_URL = (
+    "https://www.fhfa.gov/document/data/"
+    "fullcountyloanlimitlist2026_hera-based_final_flat.xlsx"
+)
+FHFA_LOAN_LIMITS_YEAR = 2026
+# Alameda County FIPS codes (state=06, county=001)
+ALAMEDA_FIPS_STATE = "06"
+ALAMEDA_FIPS_COUNTY = "001"
+
 # PostgreSQL connection URL (when set, overrides SQLite file path)
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 

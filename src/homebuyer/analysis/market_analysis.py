@@ -749,8 +749,9 @@ class MarketAnalyzer:
             else:
                 break
 
-        # Check jumbo loan threshold
-        jumbo_threshold = 766_550  # 2024 conforming loan limit for Alameda County
+        # Check jumbo loan threshold (from glossary KB, updated by FHFA collector)
+        from homebuyer.services.glossary import get_conforming_loan_limit
+        jumbo_threshold = get_conforming_loan_limit()
         loan_at_max = max_price * (1 - down_payment_pct / 100)
         is_jumbo = loan_at_max > jumbo_threshold
 

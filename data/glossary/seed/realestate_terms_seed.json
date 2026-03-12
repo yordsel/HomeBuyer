@@ -1,0 +1,661 @@
+{
+  "$meta": {
+    "schema_version": 1,
+    "description": "Real estate terms glossary for Berkeley home buyers",
+    "total_terms": 35,
+    "categories": [
+      "property_types",
+      "transaction",
+      "valuation",
+      "construction",
+      "market"
+    ]
+  },
+  "sfr": {
+    "term": "Single-Family Residence (SFR)",
+    "category": "property_types",
+    "definition": "A standalone residential building on its own lot, designed for one household. The most common property type in Berkeley's residential neighborhoods. Includes detached homes on lots ranging from 3,000 sqft to over 10,000 sqft.",
+    "berkeley_context": "Berkeley has roughly 11,000 SFR lots, primarily in R-1 and R-1H zones. SFRs have the broadest development potential — eligible for ADU, SB9 lot splitting, and improvement ROI analysis. Most Berkeley SFRs are older (pre-1940) craftsman, stucco, or brown shingle styles.",
+    "related": [
+      "duplex",
+      "condo",
+      "tic"
+    ],
+    "source": "NAR / California DRE",
+    "keywords": [
+      "sfr",
+      "single family",
+      "single-family",
+      "single family home",
+      "detached home",
+      "house"
+    ]
+  },
+  "duplex": {
+    "term": "Duplex / Triplex / Fourplex (2-4 Units)",
+    "category": "property_types",
+    "definition": "A residential building with 2 (duplex), 3 (triplex), or 4 (fourplex) separate living units on a single lot. Can be financed with residential mortgages (up to 4 units). Often called 'small multi-family.'",
+    "berkeley_context": "Berkeley has significant 2-4 unit housing stock, especially in R-2 and R-3 zones near commercial corridors. These are popular investment properties — live in one unit, rent the others. The Middle Housing Ordinance (2025) allows new construction of duplexes-fourplexes in formerly single-family zones.",
+    "related": [
+      "sfr",
+      "apartment",
+      "middle_housing_term"
+    ],
+    "source": "NAR / Fannie Mae",
+    "keywords": [
+      "duplex",
+      "triplex",
+      "fourplex",
+      "2-4 units",
+      "multi-family",
+      "multifamily",
+      "small multi"
+    ]
+  },
+  "apartment": {
+    "term": "Apartment Building (5+ Units)",
+    "category": "property_types",
+    "definition": "A residential building with 5 or more units. Financed with commercial loans (not residential mortgages). Valued primarily by income (cap rate / NOI), not comparable sales.",
+    "berkeley_context": "Berkeley has many older apartment buildings (5-20 units), especially along University Ave, Shattuck, and near campus. Most pre-1980 units are rent controlled. These properties trade at low cap rates (3-4%) due to controlled rents, with value upside from vacancy decontrol.",
+    "related": [
+      "duplex",
+      "cap_rate_term",
+      "noi_term"
+    ],
+    "source": "NAR",
+    "keywords": [
+      "apartment",
+      "apartment building",
+      "5+ units",
+      "multi-unit",
+      "multifamily"
+    ]
+  },
+  "condo": {
+    "term": "Condominium (Condo)",
+    "category": "property_types",
+    "definition": "A unit within a larger building where you own the interior space and share ownership of common areas (roof, walls, grounds) with other unit owners via an HOA. Each unit has its own deed and tax bill.",
+    "berkeley_context": "Berkeley condos are concentrated near downtown, along transit corridors, and in newer developments. Condo owners cannot independently develop the lot (no ADU/SB9). HOA fees typically $300-$800/month depending on amenities and building age.",
+    "related": [
+      "tic",
+      "hoa",
+      "pud"
+    ],
+    "source": "California DRE / Davis-Stirling Act",
+    "keywords": [
+      "condo",
+      "condominium",
+      "condo unit"
+    ]
+  },
+  "tic": {
+    "term": "Tenancy in Common (TIC)",
+    "category": "property_types",
+    "definition": "A form of co-ownership where multiple parties each own an undivided fractional interest in the entire property (not a specific unit). Each owner has exclusive use of a designated unit via a TIC agreement.",
+    "berkeley_context": "TICs are common in Berkeley as an alternative to condo conversion. They're typically 10-20% cheaper than equivalent condos but have financing challenges — most lenders offer group loans (all owners on one mortgage) rather than individual loans. TIC-to-condo conversion requires a subdivision map and city approval.",
+    "related": [
+      "condo",
+      "hoa"
+    ],
+    "source": "California Civil Code",
+    "keywords": [
+      "tic",
+      "tenancy in common",
+      "tenant in common",
+      "co-ownership"
+    ]
+  },
+  "pud": {
+    "term": "Planned Unit Development (PUD)",
+    "category": "property_types",
+    "definition": "A residential development where individual lots/homes are privately owned but common areas (streets, parks, amenities) are shared and maintained by an HOA. Unlike condos, you own the lot and structure.",
+    "berkeley_context": "PUDs are rare in Berkeley (more common in suburban developments). Some newer townhome developments may be structured as PUDs. Lending is similar to SFR but requires HOA documentation.",
+    "related": [
+      "condo",
+      "hoa",
+      "sfr"
+    ],
+    "source": "NAR / Fannie Mae",
+    "keywords": [
+      "pud",
+      "planned unit development",
+      "planned development"
+    ]
+  },
+  "hoa": {
+    "term": "Homeowners Association (HOA)",
+    "category": "property_types",
+    "definition": "An organization that governs a condominium, PUD, or planned community. Collects monthly dues for maintenance of common areas, insurance, reserves, and shared services. Has authority to enforce CC&Rs (covenants, conditions, and restrictions).",
+    "berkeley_context": "Berkeley HOA fees range from $200-$800+/month depending on building age, amenities, and reserve health. Always review the HOA financials, reserve study, and CC&Rs before purchasing. Under-funded reserves often lead to special assessments — sudden one-time fees that can be $10K-$50K+.",
+    "related": [
+      "condo",
+      "pud"
+    ],
+    "source": "Davis-Stirling Common Interest Development Act",
+    "keywords": [
+      "hoa",
+      "homeowners association",
+      "hoa fees",
+      "hoa dues",
+      "cc&r",
+      "condo fees"
+    ]
+  },
+  "contingency": {
+    "term": "Contingency (Purchase Contract)",
+    "category": "transaction",
+    "definition": "A condition in a purchase contract that must be met for the sale to proceed. If the contingency is not satisfied, the buyer can cancel without penalty and get their deposit back. Common contingencies: inspection, appraisal, loan, and title.",
+    "berkeley_context": "In Berkeley's competitive market, buyers often waive or shorten contingencies to strengthen their offer. Waiving inspection is risky on Berkeley's older homes (knob-and-tube wiring, foundation issues, lead paint). Most Berkeley agents recommend at minimum keeping a 7-day inspection contingency.",
+    "related": [
+      "earnest_money",
+      "due_diligence",
+      "appraisal_gap"
+    ],
+    "source": "California Association of Realtors (CAR)",
+    "keywords": [
+      "contingency",
+      "contingencies",
+      "inspection contingency",
+      "appraisal contingency",
+      "loan contingency",
+      "financing contingency"
+    ]
+  },
+  "earnest_money": {
+    "term": "Earnest Money Deposit (EMD)",
+    "category": "transaction",
+    "definition": "A good-faith deposit made by the buyer when the offer is accepted, held in escrow. Typically 1-3% of the purchase price. Applied to the purchase at closing. Refundable during contingency periods; at risk after contingencies are removed.",
+    "example": "On a $1.3M Berkeley purchase, a typical EMD is $13K-$39K (1-3%). The deposit is at risk once the buyer removes contingencies — if they back out after that, the seller may keep it.",
+    "berkeley_context": "Berkeley sellers often expect 3% EMD as a sign of seriousness. In competitive bidding situations, a larger EMD (even 5%) can signal commitment. The deposit is held by the escrow company, not the seller.",
+    "related": [
+      "contingency",
+      "due_diligence"
+    ],
+    "source": "California Association of Realtors (CAR)",
+    "keywords": [
+      "earnest money",
+      "emd",
+      "deposit",
+      "good faith deposit",
+      "earnest money deposit"
+    ]
+  },
+  "due_diligence": {
+    "term": "Due Diligence Period",
+    "category": "transaction",
+    "definition": "The time after an offer is accepted when the buyer investigates the property — inspections, title review, HOA document review, insurance quotes, etc. In California, the default is 17 days for physical inspection and 17 days for other contingencies.",
+    "berkeley_context": "Berkeley due diligence should include: general home inspection, pest/termite inspection (Section 1 report), sewer lateral inspection (Berkeley requires compliance), foundation evaluation on hillside properties, and checking for unpermitted work (common in older Berkeley homes).",
+    "related": [
+      "contingency",
+      "earnest_money",
+      "sewer_lateral"
+    ],
+    "source": "California Association of Realtors (CAR)",
+    "keywords": [
+      "due diligence",
+      "investigation period",
+      "inspection period"
+    ]
+  },
+  "dom": {
+    "term": "Days on Market (DOM)",
+    "category": "transaction",
+    "definition": "The number of days a property has been listed for sale on the MLS. Lower DOM indicates high demand. DOM resets if a listing is withdrawn and relisted (sometimes called 'DOM manipulation').",
+    "berkeley_context": "Berkeley's median DOM is typically 14-21 days, reflecting a competitive market. Properties that sit beyond 30 days may have pricing issues, condition problems, or location challenges. The most desirable neighborhoods (Elmwood, Rockridge-adjacent, North Berkeley) often see single-digit DOM.",
+    "related": [
+      "absorption_rate",
+      "months_of_supply"
+    ],
+    "source": "bridgeMLS / NAR",
+    "keywords": [
+      "dom",
+      "days on market",
+      "time on market",
+      "market time",
+      "how long listed"
+    ]
+  },
+  "pending_vs_contingent": {
+    "term": "Pending vs Contingent Status",
+    "category": "transaction",
+    "definition": "Contingent: an offer has been accepted but contingencies (inspection, loan, appraisal) have not yet been removed. Pending: all contingencies have been removed and the sale is expected to close. Both statuses mean the property is under contract.",
+    "berkeley_context": "In the Bay Area MLS, 'Active Under Contract' means contingent, and 'Pending' means all contingencies removed. A property showing as contingent may still fall out of contract (backup offers are accepted). Pending sales rarely fall through.",
+    "related": [
+      "contingency",
+      "dom"
+    ],
+    "source": "bridgeMLS",
+    "keywords": [
+      "pending",
+      "contingent",
+      "under contract",
+      "active under contract",
+      "in escrow"
+    ]
+  },
+  "cma": {
+    "term": "Comparative Market Analysis (CMA)",
+    "category": "valuation",
+    "definition": "An analysis of recently sold comparable properties (comps) to estimate a property's market value. Considers location, size, condition, lot size, and sale date. Used by agents to set listing prices and by buyers to evaluate offers.",
+    "berkeley_context": "Berkeley CMAs must account for significant micro-market differences — a home on the north side of a street may be in a different school zone or hillside overlay than the south side. Our get_comparable_sales tool provides data-driven comps within the same neighborhood.",
+    "related": [
+      "comp",
+      "price_per_sqft",
+      "appraisal_gap"
+    ],
+    "source": "NAR / California DRE",
+    "keywords": [
+      "cma",
+      "comparative market analysis",
+      "market analysis",
+      "comp analysis"
+    ]
+  },
+  "comp": {
+    "term": "Comparable Sale (Comp)",
+    "category": "valuation",
+    "definition": "A recently sold property similar to the subject property in location, size, condition, and features. Used to estimate market value. Ideal comps are within 0.5 miles, sold within 6 months, similar size (±20%), and in the same neighborhood.",
+    "berkeley_context": "Finding good Berkeley comps can be challenging due to the diversity of housing stock — a 1920s craftsman shouldn't be compared to a 1960s ranch even if they're on the same block. Our system uses neighborhood-level comps with price-per-sqft adjustments.",
+    "related": [
+      "cma",
+      "price_per_sqft",
+      "appraisal_gap"
+    ],
+    "source": "Appraisal Institute",
+    "keywords": [
+      "comp",
+      "comparable",
+      "comparable sale",
+      "comps",
+      "comparables"
+    ]
+  },
+  "price_per_sqft": {
+    "term": "Price Per Square Foot ($/sqft)",
+    "category": "valuation",
+    "definition": "The sale price or value divided by the living area square footage. A standardized metric for comparing properties of different sizes. Does NOT account for lot size, condition, or location quality.",
+    "formula": "Sale Price / Living Area (sqft)",
+    "berkeley_context": "Berkeley $/sqft ranges widely: $600-$800 in South/West Berkeley flats, $800-$1,100 in desirable flatland neighborhoods, $1,000-$1,500+ in the hills. Always consider lot size separately — a property with a large lot and small house may have low $/sqft but high total value.",
+    "related": [
+      "cma",
+      "comp"
+    ],
+    "source": "NAR / MLS",
+    "keywords": [
+      "price per sqft",
+      "price per square foot",
+      "cost per sqft",
+      "dollar per sqft",
+      "$/sqft"
+    ]
+  },
+  "assessed_vs_market": {
+    "term": "Assessed Value vs Market Value",
+    "category": "valuation",
+    "definition": "Assessed value is the value assigned by the county assessor for property tax purposes (in CA, set at purchase price and increased max 2%/year under Prop 13). Market value is what the property would sell for today. They can differ dramatically.",
+    "example": "A home purchased in 2000 for $400K might have an assessed value of $650K (2% annual increases) but a market value of $1.5M.",
+    "berkeley_context": "In Berkeley, long-term owners' assessed values are often 30-60% below market value due to Prop 13. New buyers pay taxes on the full purchase price. This is crucial for investment analysis — don't confuse assessed value with current worth.",
+    "related": [
+      "prop_13_term",
+      "appraisal_gap"
+    ],
+    "source": "Alameda County Assessor",
+    "keywords": [
+      "assessed value",
+      "market value",
+      "appraised value",
+      "tax assessment",
+      "assessor value"
+    ]
+  },
+  "appraisal_gap": {
+    "term": "Appraisal Gap",
+    "category": "valuation",
+    "definition": "The difference between the agreed purchase price and the appraiser's opinion of value. If the appraisal comes in low, the lender won't finance the full agreed price. The buyer must cover the gap with cash, renegotiate, or cancel.",
+    "example": "You offer $1.4M, but the appraisal comes in at $1.3M. You need $100K more in cash to close, or you renegotiate the price down to $1.3M.",
+    "berkeley_context": "Appraisal gaps are common in Berkeley's competitive market where bidding wars push prices above recent comps. Many successful Berkeley offers include an 'appraisal gap guarantee' — a commitment to cover some or all of the gap in cash. Waiving the appraisal contingency entirely is also common.",
+    "related": [
+      "cma",
+      "comp",
+      "contingency"
+    ],
+    "source": "Appraisal Institute / CFPB",
+    "keywords": [
+      "appraisal gap",
+      "low appraisal",
+      "appraisal shortfall",
+      "appraisal contingency"
+    ]
+  },
+  "setback": {
+    "term": "Setback",
+    "category": "construction",
+    "definition": "The minimum required distance between a structure and the property line (front, side, or rear). Set by zoning code. Limits where you can build on a lot.",
+    "berkeley_context": "Berkeley setbacks vary by zone: R-1 typically requires 20ft front, 4ft side, 20ft rear. ADUs have reduced setback requirements (4ft side and rear). Setbacks significantly affect buildable area, especially on Berkeley's narrower lots (25-40ft wide).",
+    "related": [
+      "far",
+      "lot_coverage",
+      "easement"
+    ],
+    "source": "Berkeley Municipal Code Title 23",
+    "keywords": [
+      "setback",
+      "setbacks",
+      "building setback",
+      "front setback",
+      "side setback",
+      "rear setback"
+    ]
+  },
+  "far": {
+    "term": "Floor Area Ratio (FAR)",
+    "category": "construction",
+    "definition": "The ratio of a building's total floor area to the lot area. A FAR of 0.5 on a 5,000 sqft lot means maximum building area of 2,500 sqft. Controls building bulk and density.",
+    "formula": "Total Building Floor Area / Lot Area",
+    "example": "A 5,000 sqft lot with 0.4 FAR allows 2,000 sqft of building. Adding a 500 sqft ADU would bring total to 2,500 sqft (0.5 FAR) — may need variance.",
+    "berkeley_context": "Berkeley's zoning code uses lot coverage percentage and height limits rather than explicit FAR in most residential zones. However, the effective FAR is important when evaluating development potential — our tools calculate the buildable envelope considering all constraints.",
+    "related": [
+      "lot_coverage",
+      "setback",
+      "height_limit"
+    ],
+    "source": "Berkeley Municipal Code Title 23",
+    "keywords": [
+      "far",
+      "floor area ratio",
+      "floor-area ratio",
+      "building ratio"
+    ]
+  },
+  "lot_coverage": {
+    "term": "Lot Coverage",
+    "category": "construction",
+    "definition": "The percentage of a lot covered by structures (buildings, garages, covered patios). Berkeley's zoning code sets maximum lot coverage by zone. Does NOT include uncovered decks, driveways, or landscaping.",
+    "key_numbers": {
+      "R-1": "40%",
+      "R-2": "40%",
+      "R-3": "55%",
+      "ES-R": "20%"
+    },
+    "berkeley_context": "Lot coverage is a key constraint for ADU construction in Berkeley. A 5,000 sqft lot in R-1 allows 2,000 sqft of coverage. If the existing house covers 1,500 sqft, only 500 sqft remains for a detached ADU.",
+    "related": [
+      "far",
+      "setback",
+      "height_limit"
+    ],
+    "source": "Berkeley Municipal Code Title 23",
+    "keywords": [
+      "lot coverage",
+      "building coverage",
+      "site coverage",
+      "coverage percentage"
+    ]
+  },
+  "height_limit": {
+    "term": "Height Limit",
+    "category": "construction",
+    "definition": "The maximum allowed building height in a zoning district, measured from average grade to the highest point of the roof. Berkeley has different height limits for flatland vs hillside zones.",
+    "key_numbers": {
+      "R-1_flatland": "28 ft (2.5 stories)",
+      "R-1H_hillside": "28 ft (but measured from downhill side)",
+      "ADU_max": "16 ft (1 story)",
+      "R-3": "35 ft"
+    },
+    "berkeley_context": "Hillside height measurement is from the downhill grade, which effectively limits buildings more than flatland measurement. The 16ft ADU height limit applies in all zones including hillside. View protection rules in hillside zones may further restrict height even below the maximum.",
+    "related": [
+      "far",
+      "lot_coverage",
+      "setback"
+    ],
+    "source": "Berkeley Municipal Code Title 23",
+    "keywords": [
+      "height limit",
+      "building height",
+      "max height",
+      "height restriction",
+      "story limit"
+    ]
+  },
+  "easement": {
+    "term": "Easement",
+    "category": "construction",
+    "definition": "A legal right for someone else to use a portion of your property for a specific purpose. Common types: utility easement (power/water lines), access easement (shared driveway), drainage easement. You still own the land but can't build on it.",
+    "berkeley_context": "Berkeley properties commonly have utility easements along rear property lines and shared driveway easements (especially in the hills where lots are narrow and steep). Easements can affect ADU placement and development potential. Always review the preliminary title report for easements before purchasing.",
+    "related": [
+      "encroachment",
+      "setback"
+    ],
+    "source": "California Civil Code",
+    "keywords": [
+      "easement",
+      "utility easement",
+      "access easement",
+      "right of way",
+      "easements"
+    ]
+  },
+  "encroachment": {
+    "term": "Encroachment",
+    "category": "construction",
+    "definition": "When a structure, fence, driveway, or improvement extends beyond the property boundary onto a neighboring property or public right-of-way. Can create legal disputes and title issues.",
+    "berkeley_context": "Encroachments are surprisingly common in Berkeley, especially in older neighborhoods where original surveys were imprecise. A fence, hedge, or retaining wall that's been in place for years may actually cross the property line. Always get a survey for properties with potential boundary issues.",
+    "related": [
+      "easement",
+      "setback"
+    ],
+    "source": "California Civil Code",
+    "keywords": [
+      "encroachment",
+      "boundary dispute",
+      "property line",
+      "boundary encroachment"
+    ]
+  },
+  "sewer_lateral": {
+    "term": "Sewer Lateral (Berkeley Private Sewer Lateral Ordinance)",
+    "category": "construction",
+    "definition": "The pipe connecting a building's plumbing to the public sewer main. Berkeley requires a sewer lateral compliance certificate upon sale — the lateral must be inspected and brought to current standards if deficient.",
+    "berkeley_context": "Berkeley's Private Sewer Lateral Ordinance (BMC 17.24) requires compliance upon property transfer. Inspection and repair can cost $2,000-$20,000+ depending on the condition and length of the lateral. This is typically a seller's obligation but can be negotiated. Budget for it in closing cost estimates.",
+    "related": [
+      "due_diligence",
+      "contingency"
+    ],
+    "source": "Berkeley Municipal Code 17.24",
+    "keywords": [
+      "sewer lateral",
+      "sewer inspection",
+      "lateral compliance",
+      "sewer ordinance",
+      "private sewer"
+    ]
+  },
+  "middle_housing_term": {
+    "term": "Middle Housing",
+    "category": "construction",
+    "definition": "Housing types between single-family homes and large apartment buildings: duplexes, triplexes, fourplexes, cottage courts, and townhouses. Berkeley's Middle Housing Ordinance (effective November 2025) allows these types in formerly single-family zones.",
+    "berkeley_context": "Berkeley's Middle Housing Ordinance permits up to 4 units on most residential lots, with higher density in transit-rich areas. Hillside zones (H suffix) are excluded due to fire hazard concerns. Use the lookup_regulation tool for zone-specific unit caps and requirements.",
+    "related": [
+      "duplex",
+      "sfr"
+    ],
+    "source": "Berkeley Middle Housing Ordinance / CA AB 2011",
+    "keywords": [
+      "middle housing",
+      "missing middle",
+      "gentle density",
+      "middle housing ordinance"
+    ]
+  },
+  "absorption_rate": {
+    "term": "Absorption Rate",
+    "category": "market",
+    "definition": "The rate at which available homes are sold in a market during a given time period. Calculated as the number of homes sold divided by the number of available homes. Used to determine months of supply.",
+    "formula": "Homes Sold Per Month / Total Active Listings",
+    "berkeley_context": "Berkeley's absorption rate is typically high (60-80% monthly), reflecting strong demand. When absorption exceeds 50%, it's a seller's market. The get_market_summary tool provides current Berkeley absorption metrics.",
+    "related": [
+      "months_of_supply",
+      "dom",
+      "sellers_vs_buyers"
+    ],
+    "source": "NAR / bridgeMLS",
+    "keywords": [
+      "absorption rate",
+      "absorption",
+      "market absorption"
+    ]
+  },
+  "months_of_supply": {
+    "term": "Months of Supply (Inventory)",
+    "category": "market",
+    "definition": "The number of months it would take to sell all current listings at the current sales pace. Less than 4 months = seller's market. 4-6 months = balanced. Over 6 months = buyer's market.",
+    "formula": "Active Listings / Monthly Sales Rate",
+    "berkeley_context": "Berkeley typically has 1-2 months of supply, firmly a seller's market. Limited inventory is driven by Prop 13 (owners hesitant to sell and lose low tax basis), desirable location, and constrained geography (hills to the east, bay to the west).",
+    "related": [
+      "absorption_rate",
+      "sellers_vs_buyers",
+      "dom"
+    ],
+    "source": "NAR / bridgeMLS",
+    "keywords": [
+      "months of supply",
+      "inventory",
+      "housing inventory",
+      "market inventory",
+      "supply"
+    ]
+  },
+  "sellers_vs_buyers": {
+    "term": "Seller's Market vs Buyer's Market",
+    "category": "market",
+    "definition": "Seller's market: demand exceeds supply (multiple offers, prices rising, short DOM). Buyer's market: supply exceeds demand (price reductions, longer DOM, fewer competing offers). Determined primarily by months of supply.",
+    "berkeley_context": "Berkeley has been predominantly a seller's market for the past decade, driven by limited supply, UC Berkeley demand, tech employment, and desirable quality of life. Brief buyer's market windows occur during rate spikes or economic uncertainty — but rarely last more than 2-3 months in Berkeley.",
+    "related": [
+      "months_of_supply",
+      "absorption_rate",
+      "dom"
+    ],
+    "source": "NAR",
+    "keywords": [
+      "seller's market",
+      "buyer's market",
+      "sellers market",
+      "buyers market",
+      "hot market",
+      "cold market"
+    ]
+  },
+  "sale_to_list": {
+    "term": "Sale-to-List Price Ratio",
+    "category": "market",
+    "definition": "The final sale price divided by the original listing price, expressed as a percentage. Over 100% means the property sold above asking; under 100% means it sold below. A key indicator of market competitiveness.",
+    "formula": "Sale Price / List Price × 100",
+    "example": "A home listed at $1.1M that sells for $1.32M has a 120% sale-to-list ratio.",
+    "berkeley_context": "Berkeley's sale-to-list ratio frequently exceeds 110% in hot neighborhoods, with some properties going 20-30% over asking. Note that Berkeley agents often price strategically below market value to attract multiple offers — so a high sale-to-list ratio doesn't always mean the buyer overpaid.",
+    "related": [
+      "cma",
+      "dom",
+      "sellers_vs_buyers"
+    ],
+    "source": "bridgeMLS / Redfin",
+    "keywords": [
+      "sale to list",
+      "sale-to-list",
+      "over asking",
+      "above asking",
+      "overbid",
+      "list price ratio"
+    ]
+  },
+  "offer_review_date": {
+    "term": "Offer Review Date",
+    "category": "transaction",
+    "definition": "A date set by the listing agent when all offers will be reviewed simultaneously (rather than reviewing offers as they come in). Common in competitive markets to generate multiple offers and bidding competition.",
+    "berkeley_context": "Nearly all competitive Berkeley listings use offer review dates, typically 7-10 days after listing. This creates a compressed timeline for buyers to tour, inspect, and submit offers. Pre-inspections (inspections done before submitting an offer) are standard practice in Berkeley.",
+    "related": [
+      "contingency",
+      "earnest_money",
+      "sellers_vs_buyers"
+    ],
+    "source": "California Association of Realtors (CAR)",
+    "keywords": [
+      "offer review",
+      "offer review date",
+      "offer date",
+      "review date",
+      "offer deadline"
+    ]
+  },
+  "disclosure": {
+    "term": "Seller Disclosures (TDS / SPQ)",
+    "category": "transaction",
+    "definition": "Legal documents where the seller discloses known material facts about the property. In California, this includes the Transfer Disclosure Statement (TDS), Seller Property Questionnaire (SPQ), and Natural Hazard Disclosure (NHD).",
+    "berkeley_context": "Berkeley disclosures should be reviewed carefully for: seismic retrofit status (soft-story), lead paint (pre-1978 homes), knob-and-tube wiring, unpermitted work (very common), foundation issues (especially hillside), and flood/fire hazard zones. The NHD report is particularly important for hillside properties in fire severity zones.",
+    "related": [
+      "due_diligence",
+      "contingency"
+    ],
+    "source": "California Civil Code 1102",
+    "keywords": [
+      "disclosure",
+      "seller disclosure",
+      "tds",
+      "spq",
+      "nhd",
+      "natural hazard",
+      "transfer disclosure"
+    ]
+  },
+  "pre_inspection": {
+    "term": "Pre-Inspection (Pre-Offer Inspection)",
+    "category": "transaction",
+    "definition": "A property inspection conducted by the buyer BEFORE submitting an offer, rather than during the contingency period. Allows buyers to submit offers with reduced or waived inspection contingencies.",
+    "berkeley_context": "Pre-inspections are standard practice in Berkeley's competitive market. Sellers typically make the property available for pre-inspections during the listing period. Cost: $500-$800 for general inspection, plus $200-$400 for pest. The cost is lost if you don't win the property, but it's the price of competing in Berkeley.",
+    "related": [
+      "contingency",
+      "offer_review_date",
+      "due_diligence"
+    ],
+    "source": "California Association of Realtors (CAR)",
+    "keywords": [
+      "pre-inspection",
+      "pre inspection",
+      "pre-offer inspection",
+      "buyer inspection"
+    ]
+  },
+  "backup_offer": {
+    "term": "Backup Offer",
+    "category": "transaction",
+    "definition": "An offer accepted by the seller in second position, behind the primary offer. If the primary buyer cancels (e.g., during contingency period), the backup offer automatically moves to first position without requiring the seller to go back on market.",
+    "berkeley_context": "In Berkeley's competitive market, submitting a strong backup offer can be a smart strategy — especially on properties that received many offers. About 5-10% of pending sales fall out during contingency periods, and the backup buyer has first right of refusal.",
+    "related": [
+      "contingency",
+      "earnest_money",
+      "pending_vs_contingent"
+    ],
+    "source": "California Association of Realtors (CAR)",
+    "keywords": [
+      "backup offer",
+      "backup position",
+      "second position",
+      "back-up offer"
+    ]
+  },
+  "escalation_clause": {
+    "term": "Escalation Clause",
+    "category": "transaction",
+    "definition": "A clause in a purchase offer that automatically increases the buyer's offer price up to a maximum amount if competing offers are received. Example: 'I offer $1.2M, but will beat any higher offer by $10K up to $1.4M.'",
+    "berkeley_context": "Escalation clauses are occasionally used in Berkeley but many listing agents dislike them — they reveal the buyer's maximum willingness to pay. Some Berkeley agents prefer clean offers at the buyer's best price rather than escalation clauses. Ask your agent about the listing agent's preference before including one.",
+    "related": [
+      "offer_review_date",
+      "contingency"
+    ],
+    "source": "California Association of Realtors (CAR)",
+    "keywords": [
+      "escalation clause",
+      "escalation",
+      "escalator clause",
+      "auto-escalation"
+    ]
+  }
+}

@@ -195,8 +195,13 @@ _ADU_COST_PER_SQFT = 400  # $400/sqft (Berkeley avg)
 _SB9_SPLIT_COST = 150_000  # approximate SB9 process + construction
 
 # Mortgage
-_JUMBO_THRESHOLD = 766_550  # 2025 conforming limit (Alameda County)
 _DEFAULT_RATE = 6.5  # fallback if no DB data
+
+
+def _get_jumbo_threshold() -> int:
+    """Get current conforming loan limit from glossary KB."""
+    from homebuyer.services.glossary import get_conforming_loan_limit
+    return get_conforming_loan_limit()
 
 
 # ---------------------------------------------------------------------------
@@ -400,7 +405,7 @@ class RentalAnalyzer:
         down_pct = down_payment_pct / 100.0
         down_amount = int(round(property_value * down_pct))
         loan_amount = property_value - down_amount
-        is_jumbo = loan_amount > _JUMBO_THRESHOLD
+        is_jumbo = loan_amount > _get_jumbo_threshold()
 
         # Monthly P&I (standard 30-year amortization)
         from homebuyer.utils.mortgage import calc_monthly_payment

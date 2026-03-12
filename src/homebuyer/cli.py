@@ -12,6 +12,7 @@ Usage:
     homebuyer collect permits-address ADDRESS  Permits for a single address
     homebuyer collect parcels     Download Berkeley parcel data from Open Data
     homebuyer collect regulations Build regulation JSON from seed + web sources
+    homebuyer collect glossary    Copy glossary seed JSON to live location
     homebuyer collect all         Run all collectors
     homebuyer process zoning      Assign zoning districts to properties
     homebuyer process parcels     Enrich parcels with zoning + neighborhood
@@ -335,51 +336,85 @@ def collect_regulations(
         sys.exit(1)
 
 
+@collect.command("glossary")
+@click.option("--seed-only", is_flag=True,
+              help="Copy seed files only (no FHFA fetch).")
+@click.pass_context
+def collect_glossary(ctx: click.Context, seed_only: bool) -> None:
+    """Build glossary JSON from seed + live data sources.
+
+    Copies curated seed files, then fetches current conforming loan limits
+    from FHFA and merges updated key_numbers into the live glossary.
+    """
+    from homebuyer.collectors.glossary import GlossaryCollector
+
+    collector = GlossaryCollector(data_dir=DATA_DIR)
+    result = collector.collect(seed_only=seed_only)
+
+    click.echo(f"Copied {result['copied']} seed file(s)")
+    if result.get("scraped"):
+        for source, data in result["scraped"].items():
+            if source == "fhfa" and data:
+                year = data["year"]
+                limit = data["alameda_county"]["one_unit_limit"]
+                click.echo(f"FHFA {year}: Alameda County 1-unit limit = ${limit:,}")
+    click.echo(
+        f"Total: {result.get('financial_terms', 0)} financial + "
+        f"{result.get('realestate_terms', 0)} real estate terms"
+    )
+
+
 @collect.command("all")
 @click.option("--days", default=1825, help="Number of days back for sales (default: 1825).")
 @click.pass_context
 def collect_all(ctx: click.Context, days: int) -> None:
     """Run all collectors in sequence."""
     click.echo("=" * 60)
-    click.echo("Step 1/7: Collecting property sales from Redfin...")
+    click.echo("Step 1/8: Collecting property sales from Redfin...")
     click.echo("=" * 60)
     ctx.invoke(collect_sales, days=days)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 2/7: Collecting market metrics from Redfin Data Center...")
+    click.echo("Step 2/8: Collecting market metrics from Redfin Data Center...")
     click.echo("=" * 60)
     ctx.invoke(collect_market)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 3/7: Collecting mortgage rates from FRED...")
+    click.echo("Step 3/8: Collecting mortgage rates from FRED...")
     click.echo("=" * 60)
     ctx.invoke(collect_rates)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 4/7: Collecting economic indicators from FRED...")
+    click.echo("Step 4/8: Collecting economic indicators from FRED...")
     click.echo("=" * 60)
     ctx.invoke(collect_indicators)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 5/7: Collecting Census ACS income data...")
+    click.echo("Step 5/8: Collecting Census ACS income data...")
     click.echo("=" * 60)
     ctx.invoke(collect_census)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 6/7: Collecting BESO energy benchmarking data...")
+    click.echo("Step 6/8: Collecting BESO energy benchmarking data...")
     click.echo("=" * 60)
     ctx.invoke(collect_beso)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 7/7: Collecting regulation data...")
+    click.echo("Step 7/8: Collecting regulation data...")
     click.echo("=" * 60)
     ctx.invoke(collect_regulations)
+
+    click.echo()
+    click.echo("=" * 60)
+    click.echo("Step 8/8: Copying glossary data...")
+    click.echo("=" * 60)
+    ctx.invoke(collect_glossary)
 
     click.echo()
     click.echo("All collections complete.")

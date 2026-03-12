@@ -2933,6 +2933,14 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         )
         return safe_json_dumps(result)
 
+    elif tool_name == "lookup_glossary_term":
+        from homebuyer.services.glossary import lookup_glossary_term
+        result = lookup_glossary_term(
+            tool_input.get("topic", ""),
+            tool_input.get("category"),
+        )
+        return safe_json_dumps(result)
+
     elif tool_name == "query_database":
         if not _state or not _state.db:
             return json.dumps({"error": "Database not available"})

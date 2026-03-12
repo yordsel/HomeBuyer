@@ -280,6 +280,34 @@ def compute_regulation_facts(data: dict) -> dict:
     return facts
 
 
+def compute_glossary_facts(data: dict) -> dict:
+    """Facts for ``lookup_glossary_term`` results."""
+    found = data.get("term_key") is not None
+    facts: dict = {
+        "found": found,
+        "term_key": data.get("term_key", ""),
+        "term": data.get("term", ""),
+        "category": data.get("category", ""),
+    }
+    if data.get("formula"):
+        facts["has_formula"] = True
+        facts["formula"] = data["formula"]
+    if data.get("key_numbers"):
+        facts["key_numbers"] = data["key_numbers"]
+    if data.get("related"):
+        facts["related_terms"] = data["related"]
+    if data.get("source"):
+        facts["source"] = data["source"]
+    # Category browsing result
+    if data.get("terms"):
+        facts["total_in_category"] = data.get("total", len(data["terms"]))
+        facts["term_keys"] = [t["term_key"] for t in data["terms"]]
+    # Not found hints
+    if not found and data.get("available_categories"):
+        facts["available_categories"] = data["available_categories"]
+    return facts
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -297,6 +325,7 @@ _FACT_COMPUTERS: dict[str, callable] = {
     "query_database": compute_query_facts,
     "undo_filter": compute_undo_filter_facts,
     "lookup_regulation": compute_regulation_facts,
+    "lookup_glossary_term": compute_glossary_facts,
 }
 
 

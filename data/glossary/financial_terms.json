@@ -1,0 +1,764 @@
+{
+  "$meta": {
+    "schema_version": 1,
+    "generated_at": "2026-03-12T20:34:02.346309+00:00",
+    "generator": "homebuyer collect glossary",
+    "total_terms": 34
+  },
+  "ltv": {
+    "term": "Loan-to-Value Ratio (LTV)",
+    "category": "mortgage",
+    "definition": "The ratio of the mortgage loan amount to the appraised value of the property. A $720K loan on a $900K property = 80% LTV.",
+    "formula": "Loan Amount / Appraised Property Value",
+    "example": "A buyer putting 20% down ($180K) on a $900K Berkeley home has an 80% LTV \u2014 the threshold where PMI is no longer required.",
+    "berkeley_context": "With Berkeley median home prices above $1.3M, many buyers face high LTV ratios unless they have substantial down payments. Jumbo loan LTV limits are typically stricter (max 80-90%) than conforming loans.",
+    "related": [
+      "pmi",
+      "dti",
+      "conforming_vs_jumbo"
+    ],
+    "source": "CFPB",
+    "keywords": [
+      "ltv",
+      "loan to value",
+      "loan-to-value"
+    ]
+  },
+  "dti": {
+    "term": "Debt-to-Income Ratio (DTI)",
+    "category": "mortgage",
+    "definition": "The percentage of gross monthly income that goes toward debt payments. Front-end DTI counts only housing costs; back-end DTI includes all debts (student loans, car payments, credit cards).",
+    "formula": "Total Monthly Debt Payments / Gross Monthly Income",
+    "example": "A buyer earning $15K/month with $6K in total debt payments (including the new mortgage) has a 40% back-end DTI.",
+    "berkeley_context": "Berkeley's high home prices often push DTI ratios to the upper limits. Most conventional loans cap at 43-45% back-end DTI, though some lenders allow up to 50% with strong compensating factors.",
+    "related": [
+      "ltv",
+      "piti",
+      "conforming_vs_jumbo"
+    ],
+    "source": "CFPB",
+    "keywords": [
+      "dti",
+      "debt to income",
+      "debt-to-income",
+      "income ratio"
+    ]
+  },
+  "piti": {
+    "term": "PITI (Principal, Interest, Taxes, Insurance)",
+    "category": "mortgage",
+    "definition": "The four components of a monthly mortgage payment. Principal reduces the loan balance, interest is the cost of borrowing, taxes are property taxes, and insurance includes homeowner's insurance (and PMI if applicable).",
+    "formula": "Monthly Principal + Monthly Interest + Monthly Property Tax + Monthly Insurance",
+    "example": "On a $1M Berkeley home with 20% down at 6.5%: roughly $5,050 P&I + $1,042 taxes + $200 insurance = ~$6,300/month PITI.",
+    "berkeley_context": "Berkeley property tax is about 1.25% of assessed value (Prop 13 base rate plus local bonds/assessments). New buyers pay based on purchase price; long-term owners benefit from Prop 13's 2% annual cap.",
+    "related": [
+      "ltv",
+      "dti",
+      "prop_13"
+    ],
+    "source": "CFPB",
+    "keywords": [
+      "piti",
+      "principal interest taxes insurance",
+      "monthly payment",
+      "mortgage payment"
+    ]
+  },
+  "points": {
+    "term": "Discount Points (Mortgage Points)",
+    "category": "mortgage",
+    "definition": "Prepaid interest paid at closing to buy down the mortgage rate. One point equals 1% of the loan amount and typically reduces the rate by 0.25%.",
+    "formula": "1 Point = 1% of Loan Amount",
+    "example": "On a $800K loan, 1 point costs $8,000 upfront and might reduce your rate from 6.75% to 6.50%, saving ~$110/month. Break-even: about 73 months (6 years).",
+    "berkeley_context": "With Berkeley's high loan amounts, each point is expensive. Calculate the break-even period carefully \u2014 if you plan to sell or refinance within 5 years, points may not pay off.",
+    "related": [
+      "arm_vs_fixed",
+      "piti"
+    ],
+    "source": "CFPB",
+    "keywords": [
+      "points",
+      "discount points",
+      "mortgage points",
+      "buy down",
+      "buydown",
+      "rate buydown"
+    ]
+  },
+  "arm_vs_fixed": {
+    "term": "ARM vs Fixed-Rate Mortgage",
+    "category": "mortgage",
+    "definition": "A fixed-rate mortgage locks the interest rate for the full term. An adjustable-rate mortgage (ARM) has an initial fixed period (typically 5, 7, or 10 years) then adjusts periodically based on a market index plus a margin.",
+    "example": "A 7/1 ARM starts with a lower rate (say 5.75%) for 7 years, then adjusts annually. A 30-year fixed might be 6.5% \u2014 higher initially but predictable for the full term.",
+    "berkeley_context": "ARMs can make sense in Berkeley if you plan to sell within the initial fixed period (common for starter homes). But given Berkeley's price volatility, the certainty of a fixed rate provides protection against being underwater when the adjustment hits.",
+    "related": [
+      "points",
+      "piti",
+      "conforming_vs_jumbo"
+    ],
+    "source": "CFPB",
+    "keywords": [
+      "arm",
+      "adjustable rate",
+      "fixed rate",
+      "variable rate",
+      "5/1 arm",
+      "7/1 arm",
+      "10/1 arm"
+    ]
+  },
+  "conforming_vs_jumbo": {
+    "term": "Conforming vs Jumbo Loan",
+    "category": "mortgage",
+    "definition": "Conforming loans meet Fannie Mae/Freddie Mac guidelines including loan limits. Jumbo loans exceed those limits. In high-cost areas like the Bay Area, conforming loan limits are higher than the national baseline.",
+    "key_numbers": {
+      "2025_conforming_limit_high_cost": "$1,209,750",
+      "2025_national_baseline": "$806,500",
+      "2026_conforming_limit_high_cost": "$1,249,125",
+      "2026_national_baseline": "$832,750",
+      "2026_2unit_limit_high_cost": "$1,599,375",
+      "2026_3unit_limit_high_cost": "$1,933,200",
+      "2026_4unit_limit_high_cost": "$2,402,625"
+    },
+    "example": "A $1M mortgage in Berkeley is conforming (under the $1,209,750 high-cost limit). A $1.3M mortgage is jumbo and typically requires a higher down payment, better credit, and carries a slightly higher rate.",
+    "berkeley_context": "Alameda County is a high-cost area with a 2025 conforming limit of $1,209,750. Many Berkeley purchases still require jumbo loans. Jumbo rates are typically 0.25-0.50% higher with stricter underwriting.",
+    "related": [
+      "ltv",
+      "dti",
+      "fha",
+      "conventional"
+    ],
+    "source": "FHFA (Federal Housing Finance Agency) \u2014 2026",
+    "keywords": [
+      "conforming",
+      "jumbo",
+      "jumbo loan",
+      "conforming limit",
+      "loan limit",
+      "fannie mae",
+      "freddie mac"
+    ],
+    "last_verified": "2026-03-12T20:34:02.346297+00:00",
+    "update_frequency": "annual"
+  },
+  "pmi": {
+    "term": "Private Mortgage Insurance (PMI)",
+    "category": "mortgage",
+    "definition": "Insurance required by lenders when the down payment is less than 20% (LTV > 80%). Protects the lender (not the buyer) against default. Can be removed once LTV reaches 78-80%.",
+    "formula": "Typically 0.5% - 1.5% of loan amount per year",
+    "example": "On a $900K loan, PMI might cost $375-$1,125/month. Once the home appreciates or you pay down to 80% LTV, you can request removal.",
+    "berkeley_context": "Berkeley's strong appreciation often lets buyers reach 80% LTV faster than expected, making PMI removal possible within a few years. Some lenders offer lender-paid PMI (LPMI) with a slightly higher rate \u2014 worth considering for Berkeley's high price points.",
+    "related": [
+      "ltv",
+      "fha"
+    ],
+    "source": "CFPB",
+    "keywords": [
+      "pmi",
+      "private mortgage insurance",
+      "mortgage insurance"
+    ],
+    "last_verified": "2026-03-12",
+    "update_frequency": "annual"
+  },
+  "escrow_impounds": {
+    "term": "Escrow Impound Account",
+    "category": "mortgage",
+    "definition": "An account held by the mortgage servicer to collect and pay property taxes and insurance on your behalf. Monthly impound amounts are added to your mortgage payment. Lenders often require impounds for LTV > 80%.",
+    "example": "Your $6,300/month PITI payment includes $1,242 in impounds ($1,042 taxes + $200 insurance) that the lender holds and pays when due.",
+    "berkeley_context": "Berkeley property tax bills come twice yearly (Dec and Apr). Impounds smooth this into monthly payments. Some buyers prefer to opt out and pay taxes directly \u2014 requires sufficient reserves.",
+    "related": [
+      "piti",
+      "prop_13"
+    ],
+    "source": "CFPB",
+    "keywords": [
+      "escrow",
+      "impound",
+      "impound account",
+      "tax impound",
+      "escrow account"
+    ]
+  },
+  "cap_rate": {
+    "term": "Capitalization Rate (Cap Rate)",
+    "category": "investment_metrics",
+    "definition": "The ratio of a property's net operating income (NOI) to its current market value. Measures the expected return on an investment property independent of financing. Higher cap rate = higher return but often higher risk.",
+    "formula": "Net Operating Income (NOI) / Current Market Value",
+    "example": "A Berkeley duplex valued at $1.2M generating $54K annual NOI has a 4.5% cap rate.",
+    "berkeley_context": "Berkeley cap rates are typically 3-5% due to high prices and rent control. Low cap rates are normal in high-appreciation markets \u2014 investors accept lower current income for price growth. Properties in rent-controlled areas may have even lower cap rates due to below-market rents.",
+    "related": [
+      "noi",
+      "grm",
+      "cash_on_cash",
+      "dscr"
+    ],
+    "source": "Investopedia / Appraisal Institute",
+    "keywords": [
+      "cap rate",
+      "capitalization rate",
+      "capitalization",
+      "yield"
+    ]
+  },
+  "noi": {
+    "term": "Net Operating Income (NOI)",
+    "category": "investment_metrics",
+    "definition": "Total rental income minus operating expenses (property tax, insurance, maintenance, management, vacancy allowance). Does NOT include mortgage payments or income tax \u2014 it measures property performance independent of financing.",
+    "formula": "Gross Rental Income - Vacancy Allowance - Operating Expenses",
+    "example": "A duplex collecting $6,000/month rent with $1,500/month in operating expenses has a $54K annual NOI.",
+    "berkeley_context": "Berkeley operating expenses tend to be higher than average due to high property taxes, mandatory BESO compliance costs, rent board registration fees ($234/unit/year), and aging building stock requiring more maintenance.",
+    "related": [
+      "cap_rate",
+      "cash_on_cash",
+      "dscr",
+      "grm"
+    ],
+    "source": "Investopedia / Appraisal Institute",
+    "keywords": [
+      "noi",
+      "net operating income",
+      "operating income"
+    ]
+  },
+  "grm": {
+    "term": "Gross Rent Multiplier (GRM)",
+    "category": "investment_metrics",
+    "definition": "The ratio of a property's price to its gross annual rental income. A quick screening metric \u2014 lower GRM means faster payback but doesn't account for expenses.",
+    "formula": "Property Price / Gross Annual Rent",
+    "example": "A $1.2M property renting for $72K/year has a GRM of 16.7. A 20 GRM property takes 20 years of gross rent to pay the purchase price.",
+    "berkeley_context": "Berkeley GRMs typically range 18-25 due to high prices relative to rent-controlled rents. GRMs below 18 may indicate a strong investment opportunity; above 25 suggests the property is priced for appreciation rather than income.",
+    "related": [
+      "cap_rate",
+      "noi",
+      "price_to_rent"
+    ],
+    "source": "Investopedia / Appraisal Institute",
+    "keywords": [
+      "grm",
+      "gross rent multiplier",
+      "rent multiplier"
+    ]
+  },
+  "cash_on_cash": {
+    "term": "Cash-on-Cash Return",
+    "category": "investment_metrics",
+    "definition": "The annual pre-tax cash flow divided by the total cash invested. Unlike cap rate, this accounts for financing \u2014 it measures the return on YOUR money, not the property's total return.",
+    "formula": "Annual Pre-Tax Cash Flow / Total Cash Invested",
+    "example": "You invest $300K (down payment + closing costs) on a property generating $12K/year cash flow after all expenses and mortgage. Cash-on-cash return = 4%.",
+    "berkeley_context": "Cash-on-cash returns in Berkeley are often 2-5% for buy-and-hold rentals. ADU additions can significantly boost this by adding rental income without proportional increase in cash invested.",
+    "related": [
+      "cap_rate",
+      "noi",
+      "irr"
+    ],
+    "source": "Investopedia",
+    "keywords": [
+      "cash on cash",
+      "cash-on-cash",
+      "coc",
+      "coc return",
+      "return on cash"
+    ]
+  },
+  "dscr": {
+    "term": "Debt Service Coverage Ratio (DSCR)",
+    "category": "investment_metrics",
+    "definition": "The ratio of NOI to annual debt service (mortgage payments). Measures whether a property's income can cover its debt obligations. Lenders typically require DSCR > 1.2 for investment property loans.",
+    "formula": "NOI / Annual Mortgage Payments (P&I)",
+    "example": "A property with $60K NOI and $48K annual mortgage payments has a 1.25 DSCR \u2014 the property income covers the debt 1.25x over.",
+    "berkeley_context": "DSCR loans are available for Berkeley investment properties without personal income verification \u2014 the property qualifies based on its own income. Useful for self-employed buyers or those with complex tax returns.",
+    "related": [
+      "noi",
+      "cap_rate",
+      "cash_on_cash"
+    ],
+    "source": "Investopedia",
+    "keywords": [
+      "dscr",
+      "debt service coverage",
+      "debt coverage ratio"
+    ]
+  },
+  "irr": {
+    "term": "Internal Rate of Return (IRR)",
+    "category": "investment_metrics",
+    "definition": "The annualized return rate that makes the net present value of all cash flows (both in and out) equal to zero. Accounts for the timing of cash flows, making it more comprehensive than simple ROI.",
+    "example": "You buy a Berkeley property for $1M, receive $30K/year cash flow for 10 years, then sell for $1.5M. The IRR might be 9-12% depending on the exact timing of cash flows.",
+    "berkeley_context": "Berkeley IRRs have historically been strong (8-15%) due to steady appreciation. The analyze_investment_scenarios tool projects IRR across different hold periods and development strategies.",
+    "related": [
+      "npv",
+      "cash_on_cash",
+      "cap_rate"
+    ],
+    "source": "Investopedia",
+    "keywords": [
+      "irr",
+      "internal rate of return"
+    ]
+  },
+  "npv": {
+    "term": "Net Present Value (NPV)",
+    "category": "investment_metrics",
+    "definition": "The difference between the present value of future cash inflows and the present value of cash outflows, discounted at a chosen rate. Positive NPV means the investment earns more than the discount rate.",
+    "formula": "Sum of [Cash Flow / (1 + discount_rate)^period] - Initial Investment",
+    "example": "If a Berkeley investment generates cash flows with an NPV of +$150K at a 7% discount rate, it outperforms a 7% alternative investment by $150K in today's dollars.",
+    "related": [
+      "irr",
+      "cash_on_cash"
+    ],
+    "source": "Investopedia",
+    "keywords": [
+      "npv",
+      "net present value",
+      "present value"
+    ]
+  },
+  "price_to_rent": {
+    "term": "Price-to-Rent Ratio",
+    "category": "investment_metrics",
+    "definition": "The ratio of a property's value to its annual rent. Used to evaluate whether buying or renting is more economical, and to gauge investment potential. Lower ratios favor buying; higher ratios favor renting.",
+    "formula": "Property Value / Annual Rent",
+    "example": "A $1.2M home renting for $4,500/month ($54K/year) has a price-to-rent ratio of 22.2.",
+    "berkeley_context": "Berkeley's price-to-rent ratio typically ranges 20-30, reflecting a market where buying is expensive relative to renting. Rent control keeps some rents below market, pushing this ratio higher for controlled units.",
+    "related": [
+      "grm",
+      "cap_rate"
+    ],
+    "source": "Investopedia / Zillow Research",
+    "keywords": [
+      "price to rent",
+      "price-to-rent",
+      "buy vs rent",
+      "rent ratio"
+    ]
+  },
+  "prop_13": {
+    "term": "Proposition 13 (Property Tax Assessment)",
+    "category": "tax",
+    "definition": "California's 1978 law that caps property tax at 1% of the assessed value at time of purchase, with annual increases limited to 2% (or CPI, whichever is lower). Reassessment occurs upon sale or new construction.",
+    "key_numbers": {
+      "base_tax_rate": "1%",
+      "max_annual_increase": "2%",
+      "reassessment_triggers": "sale, new construction, ownership transfer"
+    },
+    "example": "A home purchased in 2010 for $600K has a 2025 assessed value of roughly $800K (2% annual increases), paying ~$8K/year in base tax \u2014 even if market value is $1.5M. A new buyer at $1.5M pays ~$15K/year.",
+    "berkeley_context": "Prop 13 creates significant tax disparities in Berkeley. Long-term owners may pay 1/3 the taxes of new buyers for identical homes. This affects investment analysis \u2014 a new buyer's property tax is based on purchase price, not the seller's lower assessed value. Berkeley's effective tax rate (including bonds/assessments) is approximately 1.25%.",
+    "related": [
+      "supplemental_tax",
+      "prop_19",
+      "mello_roos"
+    ],
+    "source": "California Board of Equalization",
+    "keywords": [
+      "prop 13",
+      "proposition 13",
+      "property tax",
+      "assessed value",
+      "reassessment",
+      "tax assessment"
+    ]
+  },
+  "supplemental_tax": {
+    "term": "Supplemental Property Tax",
+    "category": "tax",
+    "definition": "A one-time additional property tax bill triggered when a property is reassessed (typically upon sale). Covers the gap between the old and new assessed value for the remainder of the fiscal year.",
+    "example": "You buy a home in October that was assessed at $800K but you paid $1.3M. The supplemental tax covers the $500K increase for the Oct-Jun period: roughly $3,750.",
+    "berkeley_context": "New Berkeley buyers often receive 1-2 supplemental tax bills within 6 months of closing. These are separate from the regular tax bill and can be a surprise. Budget for them at closing.",
+    "related": [
+      "prop_13",
+      "piti"
+    ],
+    "source": "Alameda County Assessor",
+    "keywords": [
+      "supplemental tax",
+      "supplemental property tax",
+      "supplemental bill"
+    ],
+    "last_verified": "2026-03-12",
+    "update_frequency": "annual"
+  },
+  "prop_19": {
+    "term": "Proposition 19 (Property Tax Transfer)",
+    "category": "tax",
+    "definition": "A 2021 California law allowing homeowners 55+ (or disabled, disaster victims) to transfer their Prop 13 tax base to a replacement home anywhere in CA, up to 3 times. Also limits parent-child exclusions to primary residences.",
+    "example": "A Berkeley retiree with a $400K tax base can buy a $1.5M home elsewhere in CA and keep the $400K base (paying additional tax only on the difference above original value if the new home costs more).",
+    "berkeley_context": "Prop 19 changed the game for Berkeley parents passing property to children. Investment/rental properties no longer qualify for the parent-child exclusion \u2014 only the family home, and only if the child uses it as their primary residence.",
+    "related": [
+      "prop_13",
+      "section_121",
+      "stepped_up_basis"
+    ],
+    "source": "California Board of Equalization",
+    "keywords": [
+      "prop 19",
+      "proposition 19",
+      "tax transfer",
+      "parent child exclusion",
+      "tax base transfer"
+    ]
+  },
+  "section_121": {
+    "term": "Section 121 Exclusion (Capital Gains on Home Sale)",
+    "category": "tax",
+    "definition": "IRS provision allowing homeowners to exclude up to $250K (single) or $500K (married filing jointly) of capital gains from the sale of their primary residence, if they lived there 2 of the last 5 years.",
+    "key_numbers": {
+      "single_exclusion": "$250,000",
+      "married_exclusion": "$500,000",
+      "residency_requirement": "2 of last 5 years"
+    },
+    "example": "A married couple buys a Berkeley home for $900K, lives in it 5 years, sells for $1.5M. The $600K gain is fully excluded ($500K exclusion). If the gain were $700K, they'd owe capital gains tax on $200K.",
+    "berkeley_context": "With Berkeley's strong appreciation, many homeowners exceed the exclusion amount on long-term holds. Strategic timing of sales or converting to rental before selling (with different tax treatment) are important planning considerations.",
+    "related": [
+      "1031_exchange",
+      "prop_13",
+      "capital_gains"
+    ],
+    "source": "IRS Publication 523",
+    "keywords": [
+      "section 121",
+      "capital gains exclusion",
+      "home sale exclusion",
+      "250k exclusion",
+      "500k exclusion"
+    ],
+    "last_verified": "2026-03-12",
+    "update_frequency": "annual"
+  },
+  "1031_exchange": {
+    "term": "1031 Exchange (Like-Kind Exchange)",
+    "category": "tax",
+    "definition": "An IRS provision allowing deferral of capital gains taxes when selling an investment property and reinvesting the proceeds into a 'like-kind' property. Strict timelines: 45 days to identify replacement properties, 180 days to close.",
+    "key_numbers": {
+      "identification_period": "45 days",
+      "closing_deadline": "180 days",
+      "applies_to": "Investment/rental property only (not primary residence)"
+    },
+    "example": "Sell a Berkeley rental for $1.5M with $400K gain. Use a 1031 exchange to buy a $1.8M property \u2014 the $400K gain is deferred, not taxed. You pay when you eventually sell without exchanging.",
+    "berkeley_context": "Popular among Berkeley investors upgrading from a single rental to multi-family, or from Berkeley to a higher-cash-flow market. Cannot be used for primary residence (use Section 121 instead). Many Berkeley owners do a 121 exclusion on the portion used as primary, then 1031 on the rental portion.",
+    "related": [
+      "section_121",
+      "capital_gains",
+      "depreciation"
+    ],
+    "source": "IRS Publication 544",
+    "keywords": [
+      "1031",
+      "1031 exchange",
+      "like kind exchange",
+      "like-kind",
+      "tax deferred exchange",
+      "starker exchange"
+    ],
+    "last_verified": "2026-03-12",
+    "update_frequency": "annual"
+  },
+  "capital_gains": {
+    "term": "Capital Gains Tax (Real Estate)",
+    "category": "tax",
+    "definition": "Tax on profit from selling a property. Short-term gains (held < 1 year) are taxed as ordinary income. Long-term gains (held > 1 year) are taxed at preferential rates: 0%, 15%, or 20% federal, plus CA state tax.",
+    "key_numbers": {
+      "long_term_federal_rates": "0% / 15% / 20%",
+      "niit_surcharge": "3.8% (above $200K single / $250K married)",
+      "california_rate": "Up to 13.3% (taxed as ordinary income)"
+    },
+    "example": "A Berkeley investor sells a rental with $300K long-term gain: ~$45K federal (15%) + $11.4K NIIT (3.8%) + ~$30K CA state (10%) = ~$86K total tax, or about 29% effective rate.",
+    "berkeley_context": "California does not have a preferential capital gains rate \u2014 it's taxed as ordinary income (up to 13.3%). Combined with federal rates and NIIT, Berkeley property sellers can face 30%+ effective capital gains tax rates. This makes 1031 exchanges and Section 121 exclusions especially valuable.",
+    "related": [
+      "section_121",
+      "1031_exchange",
+      "depreciation"
+    ],
+    "source": "IRS / Franchise Tax Board",
+    "keywords": [
+      "capital gains",
+      "capital gains tax",
+      "gains tax",
+      "profit tax"
+    ],
+    "last_verified": "2026-03-12",
+    "update_frequency": "annual"
+  },
+  "depreciation": {
+    "term": "Depreciation (Rental Property)",
+    "category": "tax",
+    "definition": "An annual tax deduction for rental property representing the theoretical wear and tear on the building (not land). Residential rental buildings are depreciated over 27.5 years using the straight-line method.",
+    "formula": "Building Value / 27.5 years",
+    "example": "A Berkeley rental purchased for $1.2M with $300K land value: ($1.2M - $300K) / 27.5 = $32,727/year depreciation deduction, reducing taxable rental income.",
+    "berkeley_context": "Berkeley's high land values mean a larger portion of purchase price is allocated to land (non-depreciable). A typical Berkeley allocation might be 30-40% land, 60-70% building \u2014 compared to 20% land in less expensive markets. Cost segregation studies can accelerate some depreciation.",
+    "related": [
+      "noi",
+      "1031_exchange",
+      "cost_segregation"
+    ],
+    "source": "IRS Publication 527",
+    "keywords": [
+      "depreciation",
+      "depreciation deduction",
+      "27.5 years",
+      "cost recovery"
+    ]
+  },
+  "cost_segregation": {
+    "term": "Cost Segregation Study",
+    "category": "tax",
+    "definition": "An engineering-based tax strategy that reclassifies building components (appliances, flooring, landscaping) into shorter depreciation schedules (5, 7, or 15 years vs 27.5 years), accelerating tax deductions.",
+    "example": "A $1M building might have $200K reclassified to 5-year property, giving $40K/year deductions for 5 years instead of $7,272/year for 27.5 years.",
+    "berkeley_context": "Most cost-effective for properties purchased above $500K with recent renovations. Berkeley's older housing stock often has significant personal property (built-in appliances, landscaping) that qualifies for accelerated depreciation.",
+    "related": [
+      "depreciation",
+      "1031_exchange"
+    ],
+    "source": "IRS / AICPA",
+    "keywords": [
+      "cost segregation",
+      "cost seg",
+      "accelerated depreciation",
+      "bonus depreciation"
+    ]
+  },
+  "mello_roos": {
+    "term": "Mello-Roos (Community Facilities District Tax)",
+    "category": "tax",
+    "definition": "A special tax levied on properties within a Community Facilities District (CFD) to fund public infrastructure and services. Added to the property tax bill and not deductible as property tax for federal purposes (post-2017).",
+    "example": "A property in a Mello-Roos district might pay an additional $2,000-$8,000/year on top of regular property taxes.",
+    "berkeley_context": "Mello-Roos is uncommon in Berkeley proper (more common in new developments in outer East Bay and suburbs). However, buyers should check for any special assessments on the tax bill \u2014 Berkeley has its own special taxes for parks, libraries, schools, and infrastructure bonds.",
+    "related": [
+      "prop_13",
+      "supplemental_tax"
+    ],
+    "source": "California Government Code Section 53311",
+    "keywords": [
+      "mello roos",
+      "mello-roos",
+      "cfd",
+      "community facilities district",
+      "special tax",
+      "special assessment"
+    ],
+    "last_verified": "2026-03-12",
+    "update_frequency": "annual"
+  },
+  "fha": {
+    "term": "FHA Loan (Federal Housing Administration)",
+    "category": "loan_programs",
+    "definition": "Government-backed mortgage with lower down payment (3.5%) and credit requirements than conventional loans. Requires mortgage insurance premium (MIP) for the life of the loan (unlike PMI which can be removed).",
+    "key_numbers": {
+      "min_down_payment": "3.5%",
+      "min_credit_score": "580 (3.5% down) / 500 (10% down)",
+      "2025_limit_alameda": "$1,209,750",
+      "upfront_mip": "1.75% of loan",
+      "annual_mip": "0.55% of loan",
+      "2026_limit_alameda": "$1,249,125"
+    },
+    "example": "A buyer with $50K can purchase a $1.2M Berkeley home with 3.5% down ($42K) on an FHA loan. But MIP adds ~$550/month to the payment.",
+    "berkeley_context": "FHA loans in Alameda County have the same limit as conforming ($1,209,750 in 2025). The lifetime MIP requirement makes FHA less attractive for long-term holds \u2014 many Berkeley buyers refinance to conventional once they have 20% equity.",
+    "related": [
+      "va",
+      "conventional",
+      "pmi",
+      "conforming_vs_jumbo"
+    ],
+    "source": "HUD / FHA",
+    "keywords": [
+      "fha",
+      "fha loan",
+      "federal housing administration"
+    ],
+    "last_verified": "2026-03-12T20:34:02.346297+00:00",
+    "update_frequency": "annual"
+  },
+  "va": {
+    "term": "VA Loan (Veterans Affairs)",
+    "category": "loan_programs",
+    "definition": "Mortgage benefit for eligible veterans, active-duty military, and surviving spouses. Zero down payment, no PMI, and competitive rates. Funded by a VA funding fee (which can be rolled into the loan).",
+    "key_numbers": {
+      "down_payment": "$0",
+      "pmi": "None",
+      "funding_fee": "1.25% - 3.3% (first use: 2.15%)",
+      "loan_limit": "No limit for full entitlement"
+    },
+    "example": "An eligible veteran can buy a $1.5M Berkeley home with $0 down and no monthly PMI. The 2.15% funding fee ($32,250) can be financed into the loan.",
+    "berkeley_context": "VA loans are exceptionally powerful in Berkeley's high-cost market \u2014 no down payment and no PMI on million-dollar+ purchases. Some Berkeley sellers are wary of VA offers (due to appraisal requirements), but well-structured VA offers are competitive.",
+    "related": [
+      "fha",
+      "conventional",
+      "conforming_vs_jumbo"
+    ],
+    "source": "Department of Veterans Affairs",
+    "keywords": [
+      "va",
+      "va loan",
+      "veterans",
+      "veteran loan",
+      "military loan"
+    ],
+    "last_verified": "2026-03-12T20:34:02.346297+00:00",
+    "update_frequency": "annual"
+  },
+  "conventional": {
+    "term": "Conventional Loan",
+    "category": "loan_programs",
+    "definition": "A mortgage not backed by a government agency (FHA, VA, USDA). Conforming conventional loans follow Fannie Mae/Freddie Mac guidelines. Typically requires higher credit scores and down payments than government-backed loans.",
+    "key_numbers": {
+      "min_down_payment": "3% (first-time) / 5% (typical) / 20% (no PMI)",
+      "min_credit_score": "620-680 (varies by lender)",
+      "max_dti": "43-50%"
+    },
+    "example": "Most Berkeley buyers use conventional loans. 20% down on a $1.3M home = $260K down payment. For those who can qualify, conventional offers the best combination of rate and flexibility.",
+    "berkeley_context": "Conventional loans are the most common in Berkeley. With median prices above $1.3M, many purchases exceed the conforming limit and require jumbo conventional loans, which have stricter underwriting.",
+    "related": [
+      "fha",
+      "va",
+      "conforming_vs_jumbo",
+      "pmi"
+    ],
+    "source": "Fannie Mae / Freddie Mac",
+    "keywords": [
+      "conventional",
+      "conventional loan",
+      "conventional mortgage"
+    ]
+  },
+  "calhfa": {
+    "term": "CalHFA Down Payment Assistance",
+    "category": "loan_programs",
+    "definition": "California Housing Finance Agency programs providing down payment and closing cost assistance to first-time homebuyers. Includes MyHome Assistance (up to 3.5% of purchase price as deferred-payment junior loan) and the ADU Grant Program.",
+    "key_numbers": {
+      "myhome_max": "3.5% of purchase price (or appraised value)",
+      "adu_grant_max": "$40,000",
+      "income_limits": "Vary by county and household size"
+    },
+    "example": "A first-time buyer purchasing a $900K Berkeley home could receive up to $31,500 in down payment assistance through MyHome, reducing their out-of-pocket from $31,500 (3.5% FHA) to near zero.",
+    "berkeley_context": "CalHFA income limits in Alameda County are relatively generous due to high area median income. The ADU Grant Program provides up to $40K for pre-development costs (permits, plans) for ADU construction \u2014 particularly relevant for Berkeley homeowners looking to build rental ADUs.",
+    "related": [
+      "fha",
+      "conventional"
+    ],
+    "source": "California Housing Finance Agency (CalHFA)",
+    "keywords": [
+      "calhfa",
+      "down payment assistance",
+      "dpa",
+      "first time buyer",
+      "myhome",
+      "adu grant"
+    ],
+    "last_verified": "2026-03-12",
+    "update_frequency": "annual"
+  },
+  "title_insurance": {
+    "term": "Title Insurance",
+    "category": "closing_costs",
+    "definition": "A one-time insurance policy protecting against defects in the property's title (unknown liens, forgery, recording errors, boundary disputes). Owner's policy protects the buyer; lender's policy protects the mortgage lender.",
+    "example": "On a $1.2M Berkeley purchase: lender's title policy ~$1,500, owner's title policy ~$3,000. In the Bay Area, the seller customarily pays for the owner's policy.",
+    "berkeley_context": "In Berkeley/East Bay, it's customary for the seller to pay for the owner's title insurance policy and the buyer to pay for the lender's policy. Title issues are relatively rare in Berkeley but not unheard of \u2014 especially with older properties that may have unrecorded easements or boundary discrepancies.",
+    "related": [
+      "escrow_fees",
+      "transfer_tax_closing"
+    ],
+    "source": "CFPB / ALTA",
+    "keywords": [
+      "title insurance",
+      "title policy",
+      "owner's title",
+      "lender's title"
+    ]
+  },
+  "escrow_fees": {
+    "term": "Escrow Fees",
+    "category": "closing_costs",
+    "definition": "Fees charged by the neutral third-party escrow company that handles the closing transaction \u2014 holding funds, coordinating document signing, recording the deed, and disbursing payments.",
+    "example": "Berkeley escrow fees typically run $2,000-$4,000 depending on the purchase price. Usually split 50/50 between buyer and seller.",
+    "berkeley_context": "In the East Bay, escrow fees are customarily split equally between buyer and seller. Common escrow companies for Berkeley transactions include Old Republic, Chicago Title, and First American. NorCal conventions differ from SoCal \u2014 here escrow and title are typically handled by the same company.",
+    "related": [
+      "title_insurance",
+      "transfer_tax_closing"
+    ],
+    "source": "California Department of Real Estate",
+    "keywords": [
+      "escrow fees",
+      "escrow costs",
+      "closing escrow",
+      "escrow company"
+    ]
+  },
+  "transfer_tax_closing": {
+    "term": "Transfer Tax (at Closing)",
+    "category": "closing_costs",
+    "definition": "Taxes levied when property ownership transfers. Includes county transfer tax and city transfer tax. Berkeley has its own city transfer tax with tiered rates based on the sale price.",
+    "key_numbers": {
+      "alameda_county_rate": "$1.10 per $1,000",
+      "berkeley_city_rate_tier1": "1.5% (up to $1,800,000)",
+      "berkeley_city_rate_tier2": "2.5% (above $1,800,000)"
+    },
+    "example": "On a $1.5M Berkeley sale: county tax = $1,650, city tax = $22,500 (1.5%), total transfer tax = ~$24,150. The seller customarily pays in Berkeley.",
+    "berkeley_context": "Berkeley's transfer tax (Measure UU, effective 2021) is among the highest in the Bay Area. The 2.5% rate on properties above $1.8M significantly impacts high-end transactions. Use the lookup_regulation tool with 'transfer_tax' for complete current rates. The seller customarily pays the city transfer tax; county tax is typically split.",
+    "related": [
+      "title_insurance",
+      "escrow_fees"
+    ],
+    "source": "City of Berkeley Finance Department",
+    "keywords": [
+      "transfer tax",
+      "city transfer tax",
+      "recording fee",
+      "documentary tax",
+      "closing tax"
+    ],
+    "last_verified": "2026-03-12",
+    "update_frequency": "annual"
+  },
+  "berkeley_transfer_tax_tiers": {
+    "term": "Berkeley Transfer Tax Tiers (Measure UU)",
+    "category": "berkeley_specific",
+    "definition": "Berkeley imposes a tiered real property transfer tax on sales: 1.5% on sales up to $1,800,000 and 2.5% on the amount above $1,800,000. This is one of the highest city transfer taxes in California.",
+    "key_numbers": {
+      "tier1_rate": "1.5%",
+      "tier1_threshold": "$1,800,000",
+      "tier2_rate": "2.5%"
+    },
+    "example": "On a $2.3M sale: 1.5% on first $1.8M = $27,000, plus 2.5% on remaining $500K = $12,500. Total city transfer tax = $39,500.",
+    "berkeley_context": "Measure UU passed in 2020 and took effect January 2021. It replaced the previous flat 1.5% rate. The tiered structure significantly increases costs on properties above $1.8M. Always factor this into net proceeds calculations for sellers and total cost calculations for buyers.",
+    "related": [
+      "transfer_tax_closing",
+      "prop_13"
+    ],
+    "source": "City of Berkeley / BMC 7.52",
+    "keywords": [
+      "measure uu",
+      "berkeley transfer tax",
+      "tiered transfer tax",
+      "city tax berkeley"
+    ],
+    "last_verified": "2026-03-12",
+    "update_frequency": "annual"
+  },
+  "rent_stabilization_financial": {
+    "term": "Rent Stabilization Impact on Investment",
+    "category": "berkeley_specific",
+    "definition": "Berkeley's Rent Stabilization Ordinance limits annual rent increases to 65% of CPI for qualifying units (built before June 1980). This directly impacts investment returns by capping income growth below market rates.",
+    "key_numbers": {
+      "annual_increase_limit": "65% of CPI",
+      "registration_fee_per_unit": "$234/year",
+      "qualifying_construction": "Before June 1980"
+    },
+    "example": "A Berkeley duplex with rent-controlled units at $2,000/month when market rent is $3,500 has significantly compressed cap rate. Vacancy decontrol allows reset to market rate when a tenant voluntarily vacates.",
+    "berkeley_context": "Most pre-1980 multi-family units in Berkeley are rent controlled. This creates a dual market: controlled units trade at lower cap rates (reflecting below-market rents), but vacancy decontrol provides upside when tenants leave. Investment analysis should model both controlled and decontrolled rent scenarios.",
+    "related": [
+      "cap_rate",
+      "noi",
+      "grm"
+    ],
+    "source": "Berkeley Rent Stabilization Board",
+    "keywords": [
+      "rent control investment",
+      "rent stabilization investment",
+      "controlled rent",
+      "vacancy decontrol",
+      "rent control cap rate"
+    ],
+    "last_verified": "2026-03-12",
+    "update_frequency": "annual"
+  }
+}
