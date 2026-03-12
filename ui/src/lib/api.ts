@@ -25,6 +25,7 @@ import type {
   Conversation,
   ConversationDetail,
 } from '../types';
+import { coerceBlockData } from './coerce';
 
 // ---------------------------------------------------------------------------
 // API base: in local dev hit the FastAPI server directly;
@@ -433,7 +434,10 @@ export function streamFaketorMessage(
           if (!eventType || !eventData) continue;
 
           try {
-            const data = JSON.parse(eventData);
+            // Parse and coerce string-encoded numerics at the boundary.
+            // This is the single point where backend JSON enters the frontend.
+            const raw = JSON.parse(eventData);
+            const data = coerceBlockData(raw);
 
             switch (eventType) {
               case 'text_delta':

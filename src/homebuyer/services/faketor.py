@@ -13,6 +13,7 @@ from typing import Optional
 from homebuyer.config import ANTHROPIC_API_KEY
 from homebuyer.services.accumulator import AnalysisAccumulator
 from homebuyer.services.facts import compute_facts_for_tool
+from homebuyer.utils.serialization import safe_json_dumps
 
 logger = logging.getLogger(__name__)
 
@@ -1280,7 +1281,7 @@ class FaketorService:
                                 accumulator.record(tool_block.name, tool_block.input, facts)
                                 if isinstance(result_data, dict):
                                     result_data["_facts"] = facts
-                                    result_str = json.dumps(result_data, default=str)
+                                    result_str = safe_json_dumps(result_data)
 
                     tool_results.append({
                         "type": "tool_result",
@@ -1471,7 +1472,7 @@ class FaketorService:
                                 accumulator.record(tool_block.name, tool_block.input, facts)
                                 if isinstance(result_data, dict):
                                     result_data["_facts"] = facts
-                                    result_str = json.dumps(result_data, default=str)
+                                    result_str = safe_json_dumps(result_data)
 
                     tool_results.append({
                         "type": "tool_result",

@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from homebuyer.auth import get_current_user_id
 from homebuyer.config import DATABASE_URL, DB_PATH, GEO_DIR
+from homebuyer.utils.serialization import safe_json_dumps
 
 logger = logging.getLogger(__name__)
 
@@ -1666,14 +1667,14 @@ def _execute_query_with_working_set(tool_input: dict, working_set) -> str:
         else:
             results = [dict(zip(columns, row)) for row in rows]
 
-        return json.dumps({
+        return safe_json_dumps({
             "query": sql,
             "columns": columns,
             "rows": results,
             "row_count": len(results),
             "explanation": explanation,
             "working_set_count": len(property_ids),
-        }, default=str)
+        })
     except Exception as e:
         error_msg = str(e)
         logger.warning("query_database (session) failed: %s", e, exc_info=True)
@@ -1740,13 +1741,13 @@ def _execute_update_working_set_with_temp_table(tool_input: dict, working_set) -
         else:
             results = [dict(zip(columns, row)) for row in rows]
 
-        return json.dumps({
+        return safe_json_dumps({
             "mode": mode,
             "source": "sql",
             "results": results[:requested_limit],
             "total_matching": len(results),
             "filters_applied": {"sql": sql, "explanation": explanation},
-        }, default=str)
+        })
     except Exception as e:
         error_msg = str(e)
         logger.warning("update_working_set (sql+temp) failed: %s", e, exc_info=True)
@@ -2034,13 +2035,13 @@ def _execute_update_working_set(tool_input: dict) -> str:
                 filtered.append(row)
             results = filtered
 
-        return json.dumps({
+        return safe_json_dumps({
             "mode": mode,
             "source": "sql",
             "results": results[:requested_limit],
             "total_matching": len(results),
             "filters_applied": {"sql": sql, "explanation": explanation},
-        }, default=str)
+        })
 
     else:
         # --- Structured mode ---
@@ -2204,14 +2205,14 @@ def _execute_update_working_set(tool_input: dict) -> str:
             if v is not None and k not in ("limit", "mode", "sql", "explanation")
         }
 
-        return json.dumps({
+        return safe_json_dumps({
             "mode": mode,
             "source": "structured",
             "results": results,
             "total_found": len(results),
             "total_matching": total_matching,
             "filters_applied": filters_applied,
-        }, default=str)
+        })
 
 
 def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
@@ -2276,7 +2277,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             lot_group_key=lot_group_key,
             property_category=property_category,
         )
-        return json.dumps(_development_potential_to_dict(result), default=str)
+        return safe_json_dumps(_development_potential_to_dict(result))
 
     elif tool_name == "get_improvement_simulation":
         model = _require_model()
@@ -2335,7 +2336,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             year_built=tool_input.get("year_built"),
             property_type=tool_input.get("property_type"),
         )
-        return json.dumps([_comp_to_dict(c) for c in comps[:7]], default=str)
+        return safe_json_dumps([_comp_to_dict(c) for c in comps[:7]])
 
     elif tool_name == "get_neighborhood_stats":
         neighborhood = tool_input["neighborhood"]
@@ -2344,31 +2345,30 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         cached = _state.cache_get(cache_key)
         if cached:
             logger.info("TTL cache HIT for %s", cache_key)
-            return json.dumps(cached, default=str)
+            return safe_json_dumps(cached)
         analyzer = _state.get_analyzer()
         from dataclasses import asdict
         stats = analyzer.get_neighborhood_stats(neighborhood, lookback_years=years)
         result_dict = _neighborhood_stats_to_dict(stats)
         _state.cache_set(cache_key, result_dict)
         logger.info("TTL cache MISS for %s — stored", cache_key)
-        return json.dumps(result_dict, default=str)
+        return safe_json_dumps(result_dict)
 
     elif tool_name == "get_market_summary":
         cache_key = "market_summary"
         cached = _state.cache_get(cache_key)
         if cached:
             logger.info("TTL cache HIT for %s", cache_key)
-            return json.dumps(cached, default=str)
+            return safe_json_dumps(cached)
         analyzer = _state.get_analyzer()
         result_dict = analyzer.generate_summary_report()
         _state.cache_set(cache_key, result_dict)
         logger.info("TTL cache MISS for %s — stored", cache_key)
-        return json.dumps(result_dict, default=str)
+        return safe_json_dumps(result_dict)
 
     elif tool_name == "get_price_prediction":
-        return json.dumps(
+        return safe_json_dumps(
             _get_or_compute_prediction(tool_input, source="chat"),
-            default=str,
         )
 
     elif tool_name == "estimate_sell_vs_hold":
@@ -2476,7 +2476,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         if purchase_date:
             result["purchase_date"] = purchase_date
 
-        return json.dumps(result, default=str)
+        return safe_json_dumps(result)
 
     elif tool_name == "estimate_rental_income":
         # Owner-context overrides
@@ -2496,7 +2496,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 scenarios = full_rental.get("scenarios", [])
                 as_is = next((s for s in scenarios if s.get("scenario_name") == "Rent As-Is"), None)
                 if as_is:
-                    return json.dumps(as_is, default=str)
+                    return safe_json_dumps(as_is)
 
         prop = {
             "latitude": tool_input["latitude"],
@@ -2523,7 +2523,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             down_payment_pct=tool_input.get("down_payment_pct", 20.0),
             rate_override=mortgage_rate_override,
         )
-        return json.dumps(_scenario_to_dict(scenario), default=str)
+        return safe_json_dumps(_scenario_to_dict(scenario))
 
     elif tool_name == "analyze_investment_scenarios":
         # Owner-context overrides
@@ -2583,7 +2583,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             rate_override=mortgage_rate_override,
             property_category=inv_property_category,
         )
-        return json.dumps(rental_analysis_to_dict(result), default=str)
+        return safe_json_dumps(rental_analysis_to_dict(result))
 
     elif tool_name == "generate_investment_prospectus":
         if not _state or not _state.db:
@@ -2628,7 +2628,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 investment_horizon_years=horizon,
                 mode=mode,
             )
-            return json.dumps(prospectus_to_dict(result), default=str)
+            return safe_json_dumps(prospectus_to_dict(result))
         except Exception as e:
             logger.error("Prospectus generation failed: %s", e, exc_info=True)
             return json.dumps({"error": f"Prospectus generation failed: {str(e)}"})
@@ -2679,7 +2679,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                     [k for k in _key_fields if best.get(k) is not None],
                 )
 
-        return json.dumps({
+        return safe_json_dumps({
             "id": best.get("id"),
             "address": best.get("address"),
             "apn": best.get("apn"),
@@ -2699,7 +2699,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             "last_sale_price": best.get("last_sale_price"),
             "last_sale_date": best.get("last_sale_date"),
             "enriched": bool(best.get("attom_enriched")),
-        }, default=str)
+        })
 
     elif tool_name == "search_properties":
         if not _state or not _state.db:
@@ -2873,12 +2873,12 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             if v is not None and k != "limit"
         }
 
-        return json.dumps({
+        return safe_json_dumps({
             "results": results,
             "total_found": len(results),
             "total_matching": total_matching,
             "filters_applied": filters_applied,
-        }, default=str)
+        })
 
     elif tool_name == "update_working_set":
         return _execute_update_working_set(tool_input)
@@ -2896,11 +2896,11 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 "address": address,
                 "note": "No building permits found for this address.",
             })
-        return json.dumps({
+        return safe_json_dumps({
             "permits": permits,
             "total": len(permits),
             "address": address,
-        }, default=str)
+        })
 
     elif tool_name == "lookup_regulation":
         from homebuyer.services.berkeley_regulations import lookup_regulation
@@ -2908,7 +2908,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             tool_input.get("topic", ""),
             tool_input.get("zone_code"),
         )
-        return json.dumps(result, default=str)
+        return safe_json_dumps(result)
 
     elif tool_name == "query_database":
         if not _state or not _state.db:
@@ -2932,13 +2932,13 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             raw_rows = cursor.fetchmany(100)  # Hard cap at 100 rows
             results = [dict(r) if hasattr(r, "keys") else dict(zip(columns, r)) for r in raw_rows]
 
-            return json.dumps({
+            return safe_json_dumps({
                 "query": sql,
                 "columns": columns,
                 "rows": results,
                 "row_count": len(results),
                 "explanation": explanation,
-            }, default=str)
+            })
         except Exception as e:
             error_msg = str(e)
             logger.warning("query_database failed: %s", e, exc_info=True)
@@ -3049,15 +3049,14 @@ def faketor_chat_stream(req: FaketorChatRequest):
             working_set_descriptor=working_set.get_descriptor() if working_set else "",
         ):
             event_type = event["event"]
-            data = json.dumps(event["data"], default=str)
+            data = safe_json_dumps(event["data"])
             yield f"event: {event_type}\ndata: {data}\n\n"
 
         # Emit working set metadata after the chat is done.
         # Always emit — even when count is 0 — so the frontend can sync.
         if working_set is not None:
-            ws_data = json.dumps(
+            ws_data = safe_json_dumps(
                 _build_working_set_metadata(working_set, req.session_id),
-                default=str,
             )
             yield f"event: working_set\ndata: {ws_data}\n\n"
 

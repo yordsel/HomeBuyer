@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from homebuyer.config import ANTHROPIC_API_KEY
+from homebuyer.utils.serialization import safe_json_dumps
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ PROPERTY CONTEXT:
 - Beds/Baths: {property_context.get('beds', '?')}/{property_context.get('baths', '?')}
 
 DEVELOPMENT POTENTIAL DATA:
-{json.dumps(potential, indent=2, default=str)}
+{safe_json_dumps(potential, indent=2)}
 
 Respond in valid JSON with exactly these fields:
 {{
