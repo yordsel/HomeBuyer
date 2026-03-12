@@ -20,13 +20,16 @@ from typing import Optional
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 import json
 
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from homebuyer.auth import get_current_user_id
-from homebuyer.config import DATABASE_URL, DB_PATH, GEO_DIR
+from homebuyer.config import CURRENT_TOS_VERSION, DATABASE_URL, DB_PATH, GEO_DIR
 from homebuyer.utils.serialization import safe_json_dumps
 
 logger = logging.getLogger(__name__)
@@ -322,6 +325,15 @@ class AuthUserLogin(BaseModel):
     password: str
 
 
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 class CreateConversationRequest(BaseModel):
     session_id: str
     title: Optional[str] = None
@@ -591,12 +603,42 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_cors_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+# Allow custom frontend URL for staging/preview deployments
+_extra_origin = os.environ.get("FRONTEND_URL", "")
+if _extra_origin:
+    _cors_origins.append(_extra_origin.rstrip("/"))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# Rate limiting (slowapi)
+# ---------------------------------------------------------------------------
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """Return 429 with Retry-After header when rate limit is exceeded."""
+    retry_after = getattr(exc, "retry_after", 60)
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Too many requests. Please try again later."},
+        headers={"Retry-After": str(retry_after)},
+    )
 
 def _require_model():
     """Raise 503 if model is not loaded."""
@@ -647,17 +689,21 @@ def random_fun_fact():
 
 
 @app.post("/api/auth/register")
+@limiter.limit("3/minute")
 def auth_register(req: AuthUserCreate, request: Request):
-    """Create a new user account and return a JWT token."""
+    """Create a new user account and return JWT + refresh tokens."""
     from homebuyer.auth import (
         AuthResponse,
         UserResponse,
         create_access_token,
+        create_refresh_token,
         hash_password,
+        validate_password,
     )
 
-    if len(req.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    password_errors = validate_password(req.password)
+    if password_errors:
+        raise HTTPException(status_code=400, detail=password_errors[0])
 
     if not req.accepted_tos_version:
         raise HTTPException(status_code=400, detail="You must accept the Terms and Conditions")
@@ -679,20 +725,28 @@ def auth_register(req: AuthUserCreate, request: Request):
         ip_address=client_ip,
     )
 
-    token = create_access_token(data={"sub": str(user["id"])})
-    return AuthResponse(
-        access_token=token,
+    access_token = create_access_token(data={"sub": str(user["id"])})
+    refresh_token = create_refresh_token(_state.db, user["id"])
+    auth_resp = AuthResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
         user=UserResponse(id=user["id"], email=user["email"], full_name=user["full_name"]),
     )
+    response = JSONResponse(content=auth_resp.model_dump())
+    from homebuyer.auth import set_access_cookie
+    set_access_cookie(response, access_token)
+    return response
 
 
 @app.post("/api/auth/login")
-def auth_login(req: AuthUserLogin):
-    """Authenticate a user and return a JWT token."""
+@limiter.limit("5/minute")
+def auth_login(req: AuthUserLogin, request: Request):
+    """Authenticate a user and return JWT + refresh tokens."""
     from homebuyer.auth import (
         AuthResponse,
         UserResponse,
         create_access_token,
+        create_refresh_token,
         verify_password,
     )
 
@@ -703,11 +757,24 @@ def auth_login(req: AuthUserLogin):
     if not user.get("is_active", True):
         raise HTTPException(status_code=403, detail="Account is deactivated")
 
-    token = create_access_token(data={"sub": str(user["id"])})
-    return AuthResponse(
-        access_token=token,
-        user=UserResponse(id=user["id"], email=user["email"], full_name=user.get("full_name")),
+    # Check if user needs to re-accept TOS
+    tos_acceptance = _state.db.get_latest_tos_acceptance(user["id"])
+    tos_update_required = (
+        tos_acceptance is None or tos_acceptance.get("tos_version") != CURRENT_TOS_VERSION
     )
+
+    access_token = create_access_token(data={"sub": str(user["id"])})
+    refresh_token = create_refresh_token(_state.db, user["id"])
+    auth_resp = AuthResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=UserResponse(id=user["id"], email=user["email"], full_name=user.get("full_name")),
+        tos_update_required=tos_update_required,
+    )
+    response = JSONResponse(content=auth_resp.model_dump())
+    from homebuyer.auth import set_access_cookie
+    set_access_cookie(response, access_token)
+    return response
 
 
 @app.get("/api/auth/me")
@@ -721,15 +788,105 @@ def auth_me(user_id: int = Depends(get_current_user_id)):
     return UserResponse(id=user["id"], email=user["email"], full_name=user.get("full_name"))
 
 
-# --- Terms of Service ---
+@app.post("/api/auth/refresh")
+@limiter.limit("10/minute")
+def auth_refresh(req: RefreshTokenRequest, request: Request):
+    """Exchange a valid refresh token for a new access + refresh token pair (rotation)."""
+    from homebuyer.auth import (
+        AuthResponse,
+        UserResponse,
+        create_access_token,
+        create_refresh_token,
+        validate_refresh_token,
+    )
 
-CURRENT_TOS_VERSION = "1.0"
+    # Validate the incoming refresh token
+    token_row = validate_refresh_token(_state.db, req.refresh_token)
+    user_id = token_row["user_id"]
+
+    # Revoke the old refresh token (rotation — single use)
+    _state.db.revoke_refresh_token(token_row["id"])
+
+    # Verify user still exists and is active
+    user = _state.db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="Account is deactivated")
+
+    # Issue new pair
+    new_access = create_access_token(data={"sub": str(user_id)})
+    new_refresh = create_refresh_token(_state.db, user_id)
+    auth_resp = AuthResponse(
+        access_token=new_access,
+        refresh_token=new_refresh,
+        user=UserResponse(id=user["id"], email=user["email"], full_name=user.get("full_name")),
+    )
+    response = JSONResponse(content=auth_resp.model_dump())
+    from homebuyer.auth import set_access_cookie
+    set_access_cookie(response, new_access)
+    return response
+
+
+@app.post("/api/auth/logout")
+def auth_logout(req: RefreshTokenRequest):
+    """Revoke a refresh token (server-side logout) and clear the access cookie."""
+    from homebuyer.auth import _hash_token, clear_access_cookie
+
+    token_hash = _hash_token(req.refresh_token)
+    row = _state.db.get_refresh_token_by_hash(token_hash)
+    if row:
+        _state.db.revoke_refresh_token(row["id"])
+    response = JSONResponse(content={"detail": "Logged out"})
+    clear_access_cookie(response)
+    return response
+
+
+@app.post("/api/auth/change-password")
+def auth_change_password(
+    req: ChangePasswordRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Change the authenticated user's password. Revokes all refresh tokens."""
+    from homebuyer.auth import hash_password, validate_password, verify_password
+
+    user = _state.db.get_user_with_password_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not verify_password(req.current_password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    password_errors = validate_password(req.new_password)
+    if password_errors:
+        raise HTTPException(status_code=400, detail=password_errors[0])
+
+    new_hash = hash_password(req.new_password)
+    _state.db.update_user_password(user_id, new_hash)
+    # Revoke all refresh tokens to force re-login on other devices
+    _state.db.revoke_all_user_refresh_tokens(user_id)
+    return {"detail": "Password changed successfully"}
+
+
+# --- Terms of Service ---
 
 
 @app.get("/api/terms/current")
 def get_current_tos_version():
     """Return the current Terms of Service version."""
     return {"version": CURRENT_TOS_VERSION}
+
+
+@app.post("/api/auth/accept-tos")
+def accept_tos(request: Request, user_id: int = Depends(get_current_user_id)):
+    """Record that the user accepted the current TOS version."""
+    client_ip = request.client.host if request.client else None
+    _state.db.create_tos_acceptance(
+        user_id=user_id,
+        tos_version=CURRENT_TOS_VERSION,
+        ip_address=client_ip,
+    )
+    return {"detail": "Terms accepted", "version": CURRENT_TOS_VERSION}
 
 
 # --- Conversations ---

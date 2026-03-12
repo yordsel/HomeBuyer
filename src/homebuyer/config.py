@@ -51,6 +51,9 @@ JWT_SECRET_KEY = os.environ.get(
 JWT_ALGORITHM = "HS256"
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
+# Terms of Service — bump this version when TOS changes to require re-acceptance
+CURRENT_TOS_VERSION = "1.0"
+
 # ---------------------------------------------------------------------------
 # Redfin gis-csv API
 # ---------------------------------------------------------------------------

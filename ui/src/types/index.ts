@@ -1097,8 +1097,10 @@ export interface User {
 
 export interface AuthResponse {
   access_token: string;
+  refresh_token: string;
   token_type: string;
   user: User;
+  tos_update_required: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -414,6 +414,19 @@ CREATE TABLE IF NOT EXISTS tos_acceptances (
 
 CREATE INDEX IF NOT EXISTS idx_tos_user ON tos_acceptances(user_id);
 CREATE INDEX IF NOT EXISTS idx_conv_messages_idx ON conversation_messages(conversation_id, message_index);
+
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    token_hash      TEXT NOT NULL,
+    expires_at      TEXT NOT NULL,
+    revoked         INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash);
 """
 
 
@@ -2233,9 +2246,17 @@ class Database:
         )
 
     def get_user_by_id(self, user_id: int) -> Optional[dict]:
-        """Fetch a user by ID, or None if not found."""
+        """Fetch a user by ID (without password_hash), or None if not found."""
         return self.fetchone(
             "SELECT id, email, full_name, is_active, created_at "
+            "FROM users WHERE id = ?",
+            (user_id,),
+        )
+
+    def get_user_with_password_by_id(self, user_id: int) -> Optional[dict]:
+        """Fetch a user by ID including password_hash, or None if not found."""
+        return self.fetchone(
+            "SELECT id, email, password_hash, full_name, is_active, created_at "
             "FROM users WHERE id = ?",
             (user_id,),
         )
@@ -2262,6 +2283,52 @@ class Database:
             "FROM tos_acceptances WHERE user_id = ? ORDER BY accepted_at DESC LIMIT 1",
             (user_id,),
         )
+
+    # ------------------------------------------------------------------
+    # Refresh tokens
+    # ------------------------------------------------------------------
+
+    def create_refresh_token(
+        self, user_id: int, token_hash: str, expires_at: str
+    ) -> int:
+        """Store a hashed refresh token. Returns the row id."""
+        row_id = self._insert_returning_id(
+            "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
+            (user_id, token_hash, expires_at),
+        )
+        self.commit()
+        return row_id
+
+    def get_refresh_token_by_hash(self, token_hash: str) -> Optional[dict]:
+        """Look up a refresh token by its hash."""
+        return self.fetchone(
+            "SELECT id, user_id, token_hash, expires_at, revoked, created_at "
+            "FROM refresh_tokens WHERE token_hash = ?",
+            (token_hash,),
+        )
+
+    def revoke_refresh_token(self, token_id: int) -> None:
+        """Mark a single refresh token as revoked."""
+        self.execute(
+            "UPDATE refresh_tokens SET revoked = 1 WHERE id = ?", (token_id,)
+        )
+        self.commit()
+
+    def revoke_all_user_refresh_tokens(self, user_id: int) -> None:
+        """Revoke all refresh tokens for a user (e.g. on password change or logout-all)."""
+        self.execute(
+            "UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ? AND revoked = 0",
+            (user_id,),
+        )
+        self.commit()
+
+    def update_user_password(self, user_id: int, password_hash: str) -> None:
+        """Update a user's password hash."""
+        self.execute(
+            "UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
+            (password_hash, user_id),
+        )
+        self.commit()
 
     # ------------------------------------------------------------------
     # Conversation management

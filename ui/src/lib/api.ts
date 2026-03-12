@@ -42,6 +42,7 @@ const API_BASE = isLocal ? 'http://127.0.0.1:8787' : '';
 // ---------------------------------------------------------------------------
 
 const TOKEN_KEY = 'homebuyer_token';
+const REFRESH_TOKEN_KEY = 'homebuyer_refresh_token';
 
 export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -51,8 +52,17 @@ export function setStoredToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
 }
 
+export function getStoredRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+export function setStoredRefreshToken(token: string): void {
+  localStorage.setItem(REFRESH_TOKEN_KEY, token);
+}
+
 export function clearStoredToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
 function authHeaders(): Record<string, string> {
@@ -63,57 +73,120 @@ function authHeaders(): Record<string, string> {
   return {};
 }
 
-/** Simple GET helper. */
-async function apiGet<T>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
-    headers: { ...authHeaders() },
+// ---------------------------------------------------------------------------
+// Token refresh logic — handles 401 retry transparently
+// ---------------------------------------------------------------------------
+
+let refreshPromise: Promise<AuthResponse> | null = null;
+
+/** Callback set by AuthContext so the API layer can force a logout on unrecoverable auth failures. */
+let onAuthFailure: (() => void) | null = null;
+export function setOnAuthFailure(cb: () => void) {
+  onAuthFailure = cb;
+}
+
+async function refreshAccessToken(): Promise<AuthResponse> {
+  const refreshToken = getStoredRefreshToken();
+  if (!refreshToken) {
+    throw new Error('No refresh token');
+  }
+  const resp = await fetch(`${API_BASE}/api/auth/refresh`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refreshToken }),
   });
+  if (!resp.ok) {
+    // Refresh failed — clear tokens and force logout
+    clearStoredToken();
+    onAuthFailure?.();
+    throw new Error('Session expired. Please sign in again.');
+  }
+  const data: AuthResponse = await resp.json();
+  setStoredToken(data.access_token);
+  setStoredRefreshToken(data.refresh_token);
+  return data;
+}
+
+/**
+ * Attempt to refresh the token exactly once. Concurrent callers share the
+ * same in-flight promise so only one refresh request is made.
+ */
+async function ensureFreshToken(): Promise<void> {
+  if (!refreshPromise) {
+    refreshPromise = refreshAccessToken();
+  }
+  try {
+    await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// HTTP helpers with automatic 401 → refresh → retry
+// ---------------------------------------------------------------------------
+
+/** Paths that should NOT trigger a token refresh on 401. */
+const AUTH_PATHS = ['/api/auth/login', '/api/auth/register', '/api/auth/refresh'];
+
+/**
+ * Core fetch wrapper with 401 → refresh → retry logic.
+ * On a 401 from any non-auth endpoint, it attempts one token refresh
+ * and retries the original request with the new access token.
+ */
+async function apiFetch<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const doFetch = () =>
+    fetch(`${API_BASE}${path}`, {
+      ...init,
+      credentials: 'include',
+      headers: { ...authHeaders(), ...(init.headers as Record<string, string> ?? {}) },
+    });
+
+  let resp = await doFetch();
+
+  // Attempt one transparent refresh on 401 (skip for auth endpoints)
+  if (resp.status === 401 && !AUTH_PATHS.includes(path) && getStoredRefreshToken()) {
+    await ensureFreshToken();
+    resp = await doFetch();
+  }
+
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
     throw new Error(body.detail ?? `HTTP ${resp.status}`);
   }
-  return resp.json();
+  return resp.json() as Promise<T>;
 }
 
-/** Simple POST helper. */
+/** GET helper. */
+async function apiGet<T>(path: string): Promise<T> {
+  return apiFetch<T>(path);
+}
+
+/** POST helper. */
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
+  return apiFetch<T>(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    throw new Error(data.detail ?? `HTTP ${resp.status}`);
-  }
-  return resp.json();
 }
 
-/** Simple PATCH helper. */
+/** PATCH helper. */
 async function apiPatch<T>(path: string, body: unknown): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
+  return apiFetch<T>(path, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    throw new Error(data.detail ?? `HTTP ${resp.status}`);
-  }
-  return resp.json();
 }
 
-/** Simple DELETE helper. */
+/** DELETE helper. */
 async function apiDelete<T>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
-    method: 'DELETE',
-    headers: { ...authHeaders() },
-  });
-  if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    throw new Error(data.detail ?? `HTTP ${resp.status}`);
-  }
-  return resp.json();
+  return apiFetch<T>(path, { method: 'DELETE' });
 }
 
 // ============================================================================
@@ -388,6 +461,7 @@ export function streamFaketorMessage(
     try {
       const resp = await fetch(`${API_BASE}/api/faketor/chat/stream`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(payload),
         signal: controller.signal,
@@ -515,6 +589,34 @@ export async function authLogin(email: string, password: string): Promise<AuthRe
 
 export async function authGetMe(): Promise<User> {
   return apiGet('/api/auth/me');
+}
+
+export async function authLogout(): Promise<void> {
+  const refreshToken = getStoredRefreshToken();
+  if (refreshToken) {
+    // Best-effort server-side revocation — don't block on failure
+    fetch(`${API_BASE}/api/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    }).catch(() => {});
+  }
+  clearStoredToken();
+}
+
+export async function authAcceptTos(): Promise<{ detail: string; version: string }> {
+  return apiPost('/api/auth/accept-tos', {});
+}
+
+export async function authChangePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ detail: string }> {
+  return apiPost('/api/auth/change-password', {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
 }
 
 // ============================================================================

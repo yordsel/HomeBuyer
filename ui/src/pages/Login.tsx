@@ -1,8 +1,30 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { toast } from 'sonner';
-import { Home, LogIn, UserPlus } from 'lucide-react';
+import { Home, LogIn, UserPlus, Check, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { TOS_VERSION, TermsPage } from './Terms';
+
+interface PasswordRule {
+  label: string;
+  test: (pw: string) => boolean;
+}
+
+const PASSWORD_RULES: PasswordRule[] = [
+  { label: 'At least 8 characters', test: (pw) => pw.length >= 8 },
+  { label: 'One uppercase letter', test: (pw) => /[A-Z]/.test(pw) },
+  { label: 'One lowercase letter', test: (pw) => /[a-z]/.test(pw) },
+  { label: 'One digit', test: (pw) => /\d/.test(pw) },
+  { label: 'One special character', test: (pw) => /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(pw) },
+];
+
+function getPasswordStrength(pw: string): { score: number; label: string; color: string } {
+  const passed = PASSWORD_RULES.filter((r) => r.test(pw)).length;
+  if (passed <= 1) return { score: passed, label: 'Weak', color: 'bg-red-500' };
+  if (passed <= 2) return { score: passed, label: 'Weak', color: 'bg-red-500' };
+  if (passed <= 3) return { score: passed, label: 'Fair', color: 'bg-yellow-500' };
+  if (passed <= 4) return { score: passed, label: 'Good', color: 'bg-blue-500' };
+  return { score: passed, label: 'Strong', color: 'bg-green-500' };
+}
 
 export function LoginPage() {
   const { login, register } = useAuth();
@@ -14,14 +36,17 @@ export function LoginPage() {
   const [showTerms, setShowTerms] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  const passwordStrength = useMemo(() => getPasswordStrength(password), [password]);
+  const allRulesPassed = passwordStrength.score === PASSWORD_RULES.length;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
 
     try {
       if (mode === 'register') {
-        if (password.length < 8) {
-          toast.error('Password must be at least 8 characters');
+        if (!allRulesPassed) {
+          toast.error('Password does not meet all requirements');
           setLoading(false);
           return;
         }
@@ -108,9 +133,34 @@ export function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder={mode === 'register' ? 'At least 8 characters' : 'Enter your password'}
-                minLength={mode === 'register' ? 8 : undefined}
+                placeholder={mode === 'register' ? 'Create a strong password' : 'Enter your password'}
               />
+              {mode === 'register' && password.length > 0 && (
+                <div className="mt-2 space-y-2">
+                  {/* Strength bar */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${passwordStrength.color}`}
+                        style={{ width: `${(passwordStrength.score / PASSWORD_RULES.length) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-medium text-gray-500">{passwordStrength.label}</span>
+                  </div>
+                  {/* Rule checklist */}
+                  <ul className="space-y-0.5">
+                    {PASSWORD_RULES.map((rule) => {
+                      const passed = rule.test(password);
+                      return (
+                        <li key={rule.label} className={`flex items-center gap-1.5 text-xs ${passed ? 'text-green-600' : 'text-gray-400'}`}>
+                          {passed ? <Check size={12} /> : <X size={12} />}
+                          {rule.label}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
             </div>
 
             {mode === 'register' && (
@@ -136,7 +186,7 @@ export function LoginPage() {
 
             <button
               type="submit"
-              disabled={loading || (mode === 'register' && !acceptedTos)}
+              disabled={loading || (mode === 'register' && (!acceptedTos || !allRulesPassed))}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? (
