@@ -1113,6 +1113,25 @@ export interface AuthActivityEvent {
   created_at: string;
 }
 
+export interface LinkedOAuthAccount {
+  provider: string;
+  email: string | null;
+  display_name: string | null;
+  created_at: string;
+}
+
+export interface LinkedAccountsResponse {
+  accounts: LinkedOAuthAccount[];
+  has_password: boolean;
+}
+
+export interface SessionInfo {
+  id: number;
+  created_at: string;
+  ip_address: string | null;
+  user_agent: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------

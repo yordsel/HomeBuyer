@@ -60,6 +60,16 @@ JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRE_MI
 CURRENT_TOS_VERSION = "1.0"
 
 # ---------------------------------------------------------------------------
+# Google OAuth (optional — enables "Sign in with Google")
+# ---------------------------------------------------------------------------
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.environ.get(
+    "GOOGLE_REDIRECT_URI",
+    "http://localhost:8787/api/auth/google/callback",
+)
+
+# ---------------------------------------------------------------------------
 # Redfin gis-csv API
 # ---------------------------------------------------------------------------
 REDFIN_GIS_CSV_BASE = "https://www.redfin.com/stingray/api/gis-csv"

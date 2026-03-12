@@ -42,6 +42,27 @@ const AuthContext = createContext<AuthContextValue>({
   acceptTos: async () => {},
 });
 
+/**
+ * Parse OAuth callback tokens from URL hash fragment.
+ * After Google OAuth redirect, the URL looks like:
+ *   /auth/callback#access_token=...&refresh_token=...
+ */
+function consumeOAuthTokensFromHash(): { access_token: string; refresh_token: string } | null {
+  const hash = window.location.hash;
+  if (!hash || !hash.includes('access_token')) return null;
+
+  const params = new URLSearchParams(hash.slice(1));
+  const access_token = params.get('access_token');
+  const refresh_token = params.get('refresh_token');
+
+  if (access_token && refresh_token) {
+    // Clean up the URL (remove hash fragment)
+    window.history.replaceState(null, '', window.location.pathname);
+    return { access_token, refresh_token };
+  }
+  return null;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -61,8 +82,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // On mount, check for existing token and validate it
+  // On mount, check for OAuth callback tokens OR existing stored token
   useEffect(() => {
+    // Check if we're returning from OAuth
+    const oauthTokens = consumeOAuthTokensFromHash();
+    if (oauthTokens) {
+      setStoredToken(oauthTokens.access_token);
+      setStoredRefreshToken(oauthTokens.refresh_token);
+    }
+
     const token = getStoredToken();
     if (!token) {
       setIsLoading(false);

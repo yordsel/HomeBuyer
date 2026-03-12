@@ -15,6 +15,9 @@ import {
   KeyRound,
   Eye,
   EyeOff,
+  Link2,
+  Unlink,
+  Smartphone,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -22,8 +25,14 @@ import {
   authGetActivity,
   authDeactivateAccount,
   authDeleteAccount,
+  authGetLinkedAccounts,
+  authUnlinkAccount,
+  authGoogleAuthorize,
+  authGetSessions,
+  authRevokeSession,
+  authRevokeAllOtherSessions,
 } from '../lib/api';
-import type { AuthActivityEvent } from '../types';
+import type { AuthActivityEvent, LinkedOAuthAccount, SessionInfo } from '../types';
 
 // Mirror backend password rules
 const PASSWORD_RULES = [
@@ -315,6 +324,220 @@ function ActivityLogSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Linked Accounts Section
+// ---------------------------------------------------------------------------
+
+function LinkedAccountsSection() {
+  const [accounts, setAccounts] = useState<LinkedOAuthAccount[]>([]);
+  const [hasPassword, setHasPassword] = useState(true);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    authGetLinkedAccounts()
+      .then((data) => {
+        setAccounts(data.accounts);
+        setHasPassword(data.has_password);
+      })
+      .catch(() => toast.error('Failed to load linked accounts'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function handleUnlink(provider: string) {
+    try {
+      await authUnlinkAccount(provider);
+      setAccounts((prev) => prev.filter((a) => a.provider !== provider));
+      toast.success(`${provider} account unlinked`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to unlink');
+    }
+  }
+
+  async function handleLinkGoogle() {
+    try {
+      const { authorization_url } = await authGoogleAuthorize();
+      window.location.href = authorization_url;
+    } catch {
+      toast.error('Google sign-in is not configured');
+    }
+  }
+
+  const googleLinked = accounts.some((a) => a.provider === 'google');
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-6">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-50">
+          <Link2 size={18} className="text-green-600" />
+        </div>
+        <div>
+          <h3 className="text-base font-semibold text-gray-900">Linked Accounts</h3>
+          <p className="text-xs text-gray-500">Sign in with external providers</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-6">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-green-600 border-t-transparent" />
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* Google */}
+          <div className="flex items-center justify-between rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center gap-3">
+              <svg className="h-5 w-5" viewBox="0 0 24 24">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+              </svg>
+              <div>
+                <p className="text-sm font-medium text-gray-700">Google</p>
+                {googleLinked && (
+                  <p className="text-xs text-gray-400">
+                    {accounts.find((a) => a.provider === 'google')?.email ?? 'Connected'}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {googleLinked ? (
+              <button
+                onClick={() => handleUnlink('google')}
+                disabled={!hasPassword}
+                title={!hasPassword ? 'Set a password before unlinking' : 'Unlink Google account'}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <Unlink size={14} />
+                Unlink
+              </button>
+            ) : (
+              <button
+                onClick={handleLinkGoogle}
+                className="flex items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
+              >
+                <Link2 size={14} />
+                Link
+              </button>
+            )}
+          </div>
+
+          {!hasPassword && (
+            <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+              Your account uses OAuth only. Set a password in the section above before unlinking providers.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Active Sessions Section
+// ---------------------------------------------------------------------------
+
+function ActiveSessionsSection() {
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    authGetSessions()
+      .then(setSessions)
+      .catch(() => toast.error('Failed to load sessions'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function handleRevoke(sessionId: number) {
+    try {
+      await authRevokeSession(sessionId);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      toast.success('Session revoked');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to revoke session');
+    }
+  }
+
+  async function handleRevokeAll() {
+    try {
+      const result = await authRevokeAllOtherSessions();
+      toast.success(result.detail);
+      // Refresh session list
+      const updated = await authGetSessions();
+      setSessions(updated);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to revoke sessions');
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50">
+            <Smartphone size={18} className="text-indigo-600" />
+          </div>
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">Active Sessions</h3>
+            <p className="text-xs text-gray-500">Devices where you're signed in</p>
+          </div>
+        </div>
+        {sessions.length > 1 && (
+          <button
+            onClick={handleRevokeAll}
+            className="text-xs font-medium text-red-600 hover:text-red-700"
+          >
+            Sign out all others
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-6">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
+        </div>
+      ) : sessions.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-6">No active sessions</p>
+      ) : (
+        <div className="space-y-2">
+          {sessions.map((s, idx) => (
+            <div
+              key={s.id}
+              className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5"
+            >
+              <div className="flex items-center gap-3">
+                <Monitor size={16} className="text-gray-400" />
+                <div>
+                  <p className="text-sm font-medium text-gray-700">
+                    {s.user_agent ? parseBrowserFromUA(s.user_agent) : 'Unknown browser'}
+                    {idx === 0 && (
+                      <span className="ml-2 inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700">
+                        Current
+                      </span>
+                    )}
+                  </p>
+                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                    {s.ip_address && <span>{s.ip_address}</span>}
+                    <span>{formatRelativeTime(s.created_at)}</span>
+                  </div>
+                </div>
+              </div>
+              {idx !== 0 && (
+                <button
+                  onClick={() => handleRevoke(s.id)}
+                  className="text-xs font-medium text-red-600 hover:text-red-700"
+                >
+                  Revoke
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Danger Zone (Deactivate / Delete)
 // ---------------------------------------------------------------------------
 
@@ -481,6 +704,8 @@ export function AccountSettingsPage() {
 
       <div className="space-y-6">
         <ChangePasswordSection />
+        <LinkedAccountsSection />
+        <ActiveSessionsSection />
         <ActivityLogSection />
         <DangerZoneSection />
       </div>

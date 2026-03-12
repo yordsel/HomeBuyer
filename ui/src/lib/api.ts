@@ -22,6 +22,8 @@ import type {
   WorkingSetMeta,
   AuthResponse,
   AuthActivityEvent,
+  LinkedAccountsResponse,
+  SessionInfo,
   User,
   Conversation,
   ConversationDetail,
@@ -648,6 +650,41 @@ export async function authResetPassword(
   newPassword: string,
 ): Promise<{ detail: string }> {
   return apiPost('/api/auth/reset-password', { token, new_password: newPassword });
+}
+
+// ============================================================================
+// Google OAuth
+// ============================================================================
+
+export async function authGoogleAuthorize(): Promise<{ authorization_url: string }> {
+  return apiGet('/api/auth/google/authorize');
+}
+
+export async function authGetLinkedAccounts(): Promise<LinkedAccountsResponse> {
+  return apiGet('/api/auth/linked-accounts');
+}
+
+export async function authUnlinkAccount(provider: string): Promise<{ detail: string }> {
+  return apiFetch(`/api/auth/linked-accounts/${provider}`, { method: 'DELETE' });
+}
+
+// ============================================================================
+// Session Management
+// ============================================================================
+
+export async function authGetSessions(): Promise<SessionInfo[]> {
+  return apiGet('/api/auth/sessions');
+}
+
+export async function authRevokeSession(sessionId: number): Promise<{ detail: string }> {
+  return apiFetch(`/api/auth/sessions/${sessionId}`, { method: 'DELETE' });
+}
+
+export async function authRevokeAllOtherSessions(): Promise<{ detail: string }> {
+  const refreshToken = getStoredRefreshToken();
+  return apiPost('/api/auth/sessions/revoke-others', {
+    refresh_token: refreshToken ?? '',
+  });
 }
 
 // ============================================================================

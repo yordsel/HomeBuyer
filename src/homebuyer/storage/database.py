@@ -53,7 +53,7 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 # Schema DDL (SQLite dialect — translated at runtime for Postgres)
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA_SQL_SQLITE = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -352,7 +352,7 @@ CREATE INDEX IF NOT EXISTS idx_precomputed_type
 CREATE TABLE IF NOT EXISTS users (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     email           TEXT NOT NULL UNIQUE,
-    password_hash   TEXT NOT NULL,
+    password_hash   TEXT,
     full_name       TEXT,
     is_active       INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -360,6 +360,21 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+CREATE TABLE IF NOT EXISTS oauth_accounts (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id             INTEGER NOT NULL,
+    provider            TEXT NOT NULL,
+    provider_user_id    TEXT NOT NULL,
+    email               TEXT,
+    display_name        TEXT,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    UNIQUE(provider, provider_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_oauth_accounts_user ON oauth_accounts(user_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_accounts_provider ON oauth_accounts(provider, provider_user_id);
 
 CREATE TABLE IF NOT EXISTS fun_facts (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -829,6 +844,41 @@ class Database:
                     )
                     self.commit()
                     logger.info("Migration: added %s column to properties.", col_name)
+
+        # --- v3 migration: make password_hash nullable for OAuth-only users ---
+        if self.table_exists("users") and not self.is_postgres:
+            # SQLite doesn't support ALTER COLUMN, so recreate table if needed
+            # Check if password_hash is currently NOT NULL
+            table_info = self.fetchall("PRAGMA table_info(users)")
+            pw_col = next((c for c in table_info if c["name"] == "password_hash"), None)
+            if pw_col and pw_col["notnull"]:
+                logger.info("Migration v3: making password_hash nullable in users table.")
+                # Temporarily disable FK enforcement for the table swap
+                self.conn.execute("PRAGMA foreign_keys=OFF")
+                # Drop leftover temp table from any interrupted previous migration
+                self.execute("DROP TABLE IF EXISTS users_new")
+                self.execute("""
+                    CREATE TABLE users_new (
+                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        email           TEXT NOT NULL UNIQUE,
+                        password_hash   TEXT,
+                        full_name       TEXT,
+                        is_active       INTEGER NOT NULL DEFAULT 1,
+                        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+                    )
+                """)
+                self.execute("""
+                    INSERT INTO users_new (id, email, password_hash, full_name, is_active, created_at, updated_at)
+                    SELECT id, email, password_hash, full_name, is_active, created_at, updated_at FROM users
+                """)
+                self.execute("DROP TABLE users")
+                self.execute("ALTER TABLE users_new RENAME TO users")
+                self.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+                self.commit()
+                # Re-enable FK enforcement
+                self.conn.execute("PRAGMA foreign_keys=ON")
+                logger.info("Migration v3: users table recreated with nullable password_hash.")
 
         # --- Create/update schema ---
         if self.is_postgres:
@@ -2270,8 +2320,16 @@ class Database:
     # User management
     # ------------------------------------------------------------------
 
-    def create_user(self, email: str, password_hash: str, full_name: str | None = None) -> dict:
-        """Create a new user and return the user row (without password_hash)."""
+    def create_user(
+        self,
+        email: str,
+        password_hash: str | None = None,
+        full_name: str | None = None,
+    ) -> dict:
+        """Create a new user and return the user row (without password_hash).
+
+        password_hash may be None for OAuth-only users who don't set a password.
+        """
         user_id = self._insert_returning_id(
             "INSERT INTO users (email, password_hash, full_name) VALUES (?, ?, ?)",
             (email, password_hash, full_name),
@@ -2390,8 +2448,95 @@ class Database:
         self.execute("DELETE FROM auth_activity_log WHERE user_id = ?", (user_id,))
         self.execute("DELETE FROM email_verification_tokens WHERE user_id = ?", (user_id,))
         self.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
+        self.execute("DELETE FROM oauth_accounts WHERE user_id = ?", (user_id,))
         self.execute("DELETE FROM users WHERE id = ?", (user_id,))
         self.commit()
+
+    # ------------------------------------------------------------------
+    # OAuth accounts
+    # ------------------------------------------------------------------
+
+    def create_oauth_account(
+        self,
+        user_id: int,
+        provider: str,
+        provider_user_id: str,
+        email: str | None = None,
+        display_name: str | None = None,
+    ) -> int:
+        """Link an OAuth provider account to a local user. Returns the row id."""
+        row_id = self._insert_returning_id(
+            "INSERT INTO oauth_accounts "
+            "(user_id, provider, provider_user_id, email, display_name) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, provider, provider_user_id, email, display_name),
+        )
+        self.commit()
+        return row_id
+
+    def get_oauth_account(
+        self, provider: str, provider_user_id: str
+    ) -> Optional[dict]:
+        """Look up an OAuth account by provider + provider_user_id."""
+        return self.fetchone(
+            "SELECT id, user_id, provider, provider_user_id, email, display_name, created_at "
+            "FROM oauth_accounts WHERE provider = ? AND provider_user_id = ?",
+            (provider, provider_user_id),
+        )
+
+    def get_user_oauth_accounts(self, user_id: int) -> list[dict]:
+        """Return all linked OAuth accounts for a user."""
+        return self.fetchall(
+            "SELECT id, provider, provider_user_id, email, display_name, created_at "
+            "FROM oauth_accounts WHERE user_id = ?",
+            (user_id,),
+        )
+
+    def delete_oauth_account(self, user_id: int, provider: str) -> bool:
+        """Unlink an OAuth provider from a user. Returns True if a row was deleted."""
+        cursor = self.execute(
+            "DELETE FROM oauth_accounts WHERE user_id = ? AND provider = ?",
+            (user_id, provider),
+        )
+        self.commit()
+        return cursor.rowcount > 0
+
+    def user_has_password(self, user_id: int) -> bool:
+        """Check whether a user has a password set (vs OAuth-only)."""
+        row = self.fetchone(
+            "SELECT password_hash FROM users WHERE id = ?", (user_id,)
+        )
+        return row is not None and row.get("password_hash") is not None
+
+    # ------------------------------------------------------------------
+    # Active sessions (for session management UI)
+    # ------------------------------------------------------------------
+
+    def get_active_sessions(self, user_id: int) -> list[dict]:
+        """Return non-revoked, non-expired refresh tokens for a user (active sessions)."""
+        return self.fetchall(
+            "SELECT rt.id, rt.created_at, "
+            "  (SELECT aal.ip_address FROM auth_activity_log aal "
+            "   WHERE aal.user_id = rt.user_id AND aal.event_type = 'login_success' "
+            "   ORDER BY aal.created_at DESC LIMIT 1) AS ip_address, "
+            "  (SELECT aal.user_agent FROM auth_activity_log aal "
+            "   WHERE aal.user_id = rt.user_id AND aal.event_type = 'login_success' "
+            "   ORDER BY aal.created_at DESC LIMIT 1) AS user_agent "
+            "FROM refresh_tokens rt "
+            "WHERE rt.user_id = ? AND rt.revoked = 0 AND rt.expires_at > datetime('now') "
+            "ORDER BY rt.created_at DESC",
+            (user_id,),
+        )
+
+    def revoke_other_sessions(self, user_id: int, keep_token_id: int) -> int:
+        """Revoke all refresh tokens for a user EXCEPT the specified one. Returns count revoked."""
+        cursor = self.execute(
+            "UPDATE refresh_tokens SET revoked = 1 "
+            "WHERE user_id = ? AND id != ? AND revoked = 0",
+            (user_id, keep_token_id),
+        )
+        self.commit()
+        return cursor.rowcount
 
     # ------------------------------------------------------------------
     # Auth activity logging

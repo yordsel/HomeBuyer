@@ -27,10 +27,20 @@ from slowapi.util import get_remote_address
 
 import json
 
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from homebuyer.auth import get_current_user_id
-from homebuyer.config import CURRENT_TOS_VERSION, DATABASE_URL, DB_PATH, ENVIRONMENT, GEO_DIR
+from homebuyer.config import (
+    CURRENT_TOS_VERSION,
+    DATABASE_URL,
+    DB_PATH,
+    ENVIRONMENT,
+    GEO_DIR,
+    APP_URL,
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    GOOGLE_REDIRECT_URI,
+)
 from homebuyer.middleware.security_headers import SecurityHeadersMiddleware
 from homebuyer.utils.serialization import safe_json_dumps
 
@@ -791,7 +801,7 @@ def auth_login(req: AuthUserLogin, request: Request):
 
     ip, ua = _client_info(request)
     user = _state.db.get_user_by_email(req.email)
-    if not user or not verify_password(req.password, user["password_hash"]):
+    if not user or not user.get("password_hash") or not verify_password(req.password, user["password_hash"]):
         _state.db.log_auth_event(
             "login_failure",
             user_id=user["id"] if user else None,
@@ -914,7 +924,7 @@ def auth_change_password(
 
     ip, ua = _client_info(request)
 
-    if not verify_password(req.current_password, user["password_hash"]):
+    if not user.get("password_hash") or not verify_password(req.current_password, user["password_hash"]):
         _state.db.log_auth_event(
             "password_change", user_id=user_id,
             ip_address=ip, user_agent=ua, success=False,
@@ -979,7 +989,7 @@ def auth_deactivate(
     user = _state.db.get_user_with_password_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if not verify_password(req.password, user["password_hash"]):
+    if not user.get("password_hash") or not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=400, detail="Incorrect password")
 
     _state.db.deactivate_user(user_id)
@@ -1006,7 +1016,7 @@ def auth_delete_account(
     user = _state.db.get_user_with_password_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if not verify_password(req.password, user["password_hash"]):
+    if not user.get("password_hash") or not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=400, detail="Incorrect password")
 
     ip, ua = _client_info(request)
@@ -1172,6 +1182,245 @@ def auth_verify_email(token: str, request: Request):
         ip_address=ip, user_agent=ua,
     )
     return {"detail": "Email verified successfully. You can now sign in."}
+
+
+# ---------------------------------------------------------------------------
+# Google OAuth
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/auth/google/authorize")
+def auth_google_authorize():
+    """Return the Google OAuth authorization URL for the client to redirect to."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=501, detail="Google OAuth is not configured")
+
+    from authlib.integrations.httpx_client import AsyncOAuth2Client
+
+    client = AsyncOAuth2Client(
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        redirect_uri=GOOGLE_REDIRECT_URI,
+        scope="openid email profile",
+    )
+    uri, _state = client.create_authorization_url(
+        "https://accounts.google.com/o/oauth2/v2/auth",
+        access_type="offline",
+    )
+    return {"authorization_url": uri}
+
+
+@app.get("/api/auth/google/callback")
+async def auth_google_callback(code: str, request: Request):
+    """Handle Google OAuth callback — exchange code for tokens, create/link user, redirect."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=501, detail="Google OAuth is not configured")
+
+    from authlib.integrations.httpx_client import AsyncOAuth2Client
+    from homebuyer.auth import (
+        AuthResponse,
+        UserResponse,
+        create_access_token,
+        create_refresh_token,
+        set_access_cookie,
+    )
+
+    client = AsyncOAuth2Client(
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        redirect_uri=GOOGLE_REDIRECT_URI,
+    )
+
+    # Exchange authorization code for tokens
+    try:
+        token = await client.fetch_token(
+            "https://oauth2.googleapis.com/token",
+            code=code,
+        )
+    except Exception:
+        raise HTTPException(status_code=400, detail="Failed to exchange authorization code")
+
+    # Fetch user info from Google
+    async with client as c:
+        resp = await c.get("https://www.googleapis.com/oauth2/v3/userinfo")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=400, detail="Failed to fetch Google user info")
+        google_user = resp.json()
+
+    google_sub = google_user.get("sub")
+    google_email = google_user.get("email")
+    google_name = google_user.get("name")
+
+    if not google_sub or not google_email:
+        raise HTTPException(status_code=400, detail="Google account missing required info")
+
+    ip, ua = _client_info(request)
+
+    # Check if this Google account is already linked
+    oauth_account = _state.db.get_oauth_account("google", google_sub)
+
+    if oauth_account:
+        # Existing OAuth link — log in as that user
+        user_id = oauth_account["user_id"]
+        user = _state.db.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Linked user not found")
+        if not user.get("is_active", True):
+            raise HTTPException(status_code=403, detail="Account is deactivated")
+    else:
+        # Check if a user with this email already exists
+        existing_user = _state.db.get_user_by_email(google_email)
+        if existing_user:
+            # Link Google account to existing user
+            user_id = existing_user["id"]
+            user = existing_user
+            _state.db.create_oauth_account(
+                user_id=user_id,
+                provider="google",
+                provider_user_id=google_sub,
+                email=google_email,
+                display_name=google_name,
+            )
+            _state.db.log_auth_event(
+                "oauth_link", user_id=user_id,
+                ip_address=ip, user_agent=ua,
+                detail=f"provider=google email={google_email}",
+            )
+        else:
+            # Create a new user (no password — OAuth-only)
+            user = _state.db.create_user(
+                email=google_email,
+                password_hash=None,
+                full_name=google_name,
+            )
+            user_id = user["id"]
+            _state.db.create_oauth_account(
+                user_id=user_id,
+                provider="google",
+                provider_user_id=google_sub,
+                email=google_email,
+                display_name=google_name,
+            )
+            # Auto-accept TOS for OAuth registration
+            _state.db.create_tos_acceptance(
+                user_id=user_id,
+                tos_version=CURRENT_TOS_VERSION,
+                ip_address=ip,
+            )
+            _state.db.log_auth_event(
+                "register", user_id=user_id,
+                ip_address=ip, user_agent=ua,
+                detail="provider=google",
+            )
+
+    # Issue tokens
+    access_token = create_access_token(data={"sub": str(user_id)})
+    refresh_token = create_refresh_token(_state.db, user_id)
+
+    _state.db.log_auth_event(
+        "login_success", user_id=user_id,
+        ip_address=ip, user_agent=ua,
+        detail="provider=google",
+    )
+
+    # Redirect to frontend with tokens as URL fragment (not query params — safer)
+    import urllib.parse
+    fragment = urllib.parse.urlencode({
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    })
+    redirect_url = f"{APP_URL}/auth/callback#{fragment}"
+    response = RedirectResponse(url=redirect_url, status_code=302)
+    set_access_cookie(response, access_token)
+    return response
+
+
+@app.get("/api/auth/linked-accounts")
+def auth_linked_accounts(user_id: int = Depends(get_current_user_id)):
+    """List OAuth providers linked to the current user's account."""
+    accounts = _state.db.get_user_oauth_accounts(user_id)
+    has_password = _state.db.user_has_password(user_id)
+    return {
+        "accounts": [
+            {
+                "provider": a["provider"],
+                "email": a.get("email"),
+                "display_name": a.get("display_name"),
+                "created_at": a.get("created_at"),
+            }
+            for a in accounts
+        ],
+        "has_password": has_password,
+    }
+
+
+@app.delete("/api/auth/linked-accounts/{provider}")
+def auth_unlink_account(provider: str, user_id: int = Depends(get_current_user_id)):
+    """Unlink an OAuth provider from the current user's account.
+
+    Only allowed if the user has a password set (otherwise they'd be locked out).
+    """
+    has_password = _state.db.user_has_password(user_id)
+    if not has_password:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot unlink OAuth — set a password first to maintain account access",
+        )
+    deleted = _state.db.delete_oauth_account(user_id, provider)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="No linked account found for this provider")
+    return {"detail": f"{provider} account unlinked successfully"}
+
+
+# ---------------------------------------------------------------------------
+# Session management
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/auth/sessions")
+def auth_list_sessions(user_id: int = Depends(get_current_user_id)):
+    """List the current user's active sessions (non-revoked refresh tokens)."""
+    sessions = _state.db.get_active_sessions(user_id)
+    return [
+        {
+            "id": s["id"],
+            "created_at": s["created_at"],
+            "ip_address": s.get("ip_address"),
+            "user_agent": s.get("user_agent"),
+        }
+        for s in sessions
+    ]
+
+
+@app.delete("/api/auth/sessions/{session_id}")
+def auth_revoke_session(session_id: int, user_id: int = Depends(get_current_user_id)):
+    """Revoke a specific session (refresh token) by ID."""
+    from homebuyer.auth import _hash_token
+
+    # Verify the session belongs to this user
+    row = _state.db.fetchone(
+        "SELECT id, user_id FROM refresh_tokens WHERE id = ? AND revoked = 0",
+        (session_id,),
+    )
+    if not row or row["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _state.db.revoke_refresh_token(session_id)
+    return {"detail": "Session revoked"}
+
+
+@app.post("/api/auth/sessions/revoke-others")
+def auth_revoke_all_other_sessions(
+    req: RefreshTokenRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Revoke all sessions except the current one (identified by the refresh token)."""
+    from homebuyer.auth import _hash_token
+
+    token_hash = _hash_token(req.refresh_token)
+    current_row = _state.db.get_refresh_token_by_hash(token_hash)
+    keep_id = current_row["id"] if current_row else -1
+    count = _state.db.revoke_other_sessions(user_id, keep_id)
+    return {"detail": f"Revoked {count} other session(s)"}
 
 
 # --- Conversations ---
