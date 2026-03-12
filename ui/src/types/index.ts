@@ -192,7 +192,7 @@ export interface ComparableProperty {
   year_built: number | null;
   neighborhood: string | null;
   price_per_sqft: number | null;
-  distance_score: number;
+  similarity_score: number;
   latitude: number | null;
   longitude: number | null;
 }

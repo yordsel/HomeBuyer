@@ -2119,19 +2119,23 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         categories = []
         for ind in sim["individual"]:
             roi = roi_by_cat.get(ind["category"])
+            cat_ratio = ind["roi_ratio"]
             categories.append({
                 "category": ind["category"],
                 "avg_cost": ind["estimated_cost"],
                 "ml_delta": ind["predicted_delta"],
-                "roi": ind["roi_ratio"],
+                "roi_multiplier": cat_ratio,
+                "roi_note": _format_roi_note(cat_ratio, ind["estimated_cost"], ind["predicted_delta"]),
                 "market_premium_pct": roi.avg_ppsf_premium_pct if roi else None,
             })
+        total_ratio = sim["roi_ratio"]
         return json.dumps({
             "current_price": sim["current_price"],
             "improved_price": sim["improved_price"],
             "total_delta": sim["total_delta"],
             "total_cost": sim["total_cost"],
-            "roi": sim["roi_ratio"],
+            "roi_multiplier": total_ratio,
+            "roi_note": _format_roi_note(total_ratio, sim["total_cost"], sim["total_delta"]),
             "categories": categories,
         })
 
@@ -2278,8 +2282,20 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         }
         # Include owner context if provided
         if purchase_price:
-            result["purchase_price"] = int(purchase_price)
-            result["current_equity_gain"] = current_value - int(purchase_price)
+            pp = int(purchase_price)
+            equity = current_value - pp
+            result["purchase_price"] = pp
+            result["current_equity_gain"] = equity
+            if equity >= 0:
+                result["equity_note"] = (
+                    f"Property has gained ${equity:,.0f} in value since "
+                    f"purchase (bought at ${pp:,.0f}, now worth ${current_value:,.0f})"
+                )
+            else:
+                result["equity_note"] = (
+                    f"Property has lost ${abs(equity):,.0f} in value since "
+                    f"purchase (bought at ${pp:,.0f}, now worth ${current_value:,.0f})"
+                )
         if purchase_date:
             result["purchase_date"] = purchase_date
 
@@ -2956,6 +2972,35 @@ def comparables(req: CompsRequest):
 # ---------------------------------------------------------------------------
 
 
+def _format_roi_note(
+    roi_multiplier: Optional[float],
+    cost: Optional[int],
+    value_delta: Optional[int],
+) -> Optional[str]:
+    """Human-readable ROI note.
+
+    ``roi_multiplier`` is value_delta / cost (e.g. 1.4 means $1.40 value
+    gained per $1 spent, NOT 140% return).  Pre-computing a note prevents
+    the LLM from mis-stating the return.
+    """
+    if roi_multiplier is None or cost is None or value_delta is None:
+        return None
+    if cost == 0:
+        return None
+    pct_return = (roi_multiplier - 1.0) * 100
+    if roi_multiplier >= 1.0:
+        return (
+            f"For every $1 spent, you gain ${roi_multiplier:.2f} in value "
+            f"({pct_return:+.0f}% net return on a ${cost:,.0f} investment "
+            f"adding ${value_delta:,.0f} in value)"
+        )
+    return (
+        f"For every $1 spent, you gain only ${roi_multiplier:.2f} in value "
+        f"({pct_return:+.0f}% net return — the ${cost:,.0f} investment "
+        f"adds only ${value_delta:,.0f} in value)"
+    )
+
+
 def _comp_to_dict(comp) -> dict:
     """Convert ComparableProperty to JSON-serializable dict."""
     return {
@@ -2969,7 +3014,7 @@ def _comp_to_dict(comp) -> dict:
         "year_built": comp.year_built,
         "neighborhood": comp.neighborhood,
         "price_per_sqft": comp.price_per_sqft,
-        "distance_score": comp.distance_score,
+        "similarity_score": comp.similarity_score,
         "latitude": comp.latitude,
         "longitude": comp.longitude,
     }

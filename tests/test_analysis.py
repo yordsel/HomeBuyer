@@ -145,7 +145,7 @@ def test_find_comparables(tmp_db: Database):
     assert comps[0].neighborhood == "North Berkeley"
     # Should be sorted by similarity score (ascending)
     for i in range(len(comps) - 1):
-        assert comps[i].distance_score <= comps[i + 1].distance_score
+        assert comps[i].similarity_score <= comps[i + 1].similarity_score
 
 
 def test_price_estimate(tmp_db: Database):

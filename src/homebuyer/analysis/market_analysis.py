@@ -71,7 +71,7 @@ class ComparableProperty:
     year_built: Optional[int] = None
     neighborhood: Optional[str] = None
     price_per_sqft: Optional[float] = None
-    distance_score: float = 0.0  # similarity to target
+    similarity_score: float = 0.0  # similarity to target
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
@@ -416,14 +416,14 @@ class MarketAnalyzer:
                     year_built=row["year_built"],
                     neighborhood=row["neighborhood"],
                     price_per_sqft=row["price_per_sqft"],
-                    distance_score=score,
+                    similarity_score=score,
                     latitude=row["latitude"],
                     longitude=row["longitude"],
                 )
             )
 
         # Sort by similarity (lower is more similar)
-        comps.sort(key=lambda c: c.distance_score)
+        comps.sort(key=lambda c: c.similarity_score)
         return comps[:max_results]
 
     def estimate_price(
@@ -896,6 +896,10 @@ class MarketAnalyzer:
                     market.median_sale_price,
                     market.median_list_price,
                 ),
+                "sale_to_list_note": self._format_sale_to_list_note(
+                    market.sale_to_list_ratio,
+                    market.sold_above_list_pct,
+                ),
             },
             "price_distribution_2yr": [
                 {"bracket": r["price_bracket"], "count": r["count"]}
@@ -939,6 +943,39 @@ class MarketAnalyzer:
                 f"is {pct:.0f}% below median list price"
             )
         return "Homes are selling at asking price on average"
+
+    @staticmethod
+    def _format_sale_to_list_note(
+        ratio: Optional[float], sold_above_pct: Optional[float]
+    ) -> Optional[str]:
+        """Human-readable note for sale-to-list ratio and sold-above-list %.
+
+        ``sale_to_list_ratio`` is a multiplier (e.g. 1.05 means 5% above list).
+        ``sold_above_list_pct`` is already 0–100 (e.g. 87 means 87% of homes
+        sold above their list price).  Pre-computing a plain-English note
+        prevents the LLM from confusing the two or mis-converting the ratio.
+        """
+        parts: list[str] = []
+        if ratio is not None:
+            above = ratio >= 1.0
+            pct = abs(ratio - 1.0) * 100
+            if pct < 0.05:
+                parts.append("sale-to-list ratio is ~1.0 (homes sell at asking)")
+            elif above:
+                parts.append(
+                    f"sale-to-list ratio is {ratio:.3f} "
+                    f"(homes sell {pct:.1f}% above asking on average)"
+                )
+            else:
+                parts.append(
+                    f"sale-to-list ratio is {ratio:.3f} "
+                    f"(homes sell {pct:.1f}% below asking on average)"
+                )
+        if sold_above_pct is not None:
+            parts.append(
+                f"{sold_above_pct:.0f}% of homes sold above their list price"
+            )
+        return "; ".join(parts) if parts else None
 
     def _calc_yoy_change(self, neighborhood: str) -> Optional[float]:
         """Calculate year-over-year median price change for a neighborhood."""
@@ -1239,7 +1276,7 @@ class MarketAnalyzer:
                     year_built=row["year_built"],
                     neighborhood=row["neighborhood"],
                     price_per_sqft=row["price_per_sqft"],
-                    distance_score=score,
+                    similarity_score=score,
                     latitude=row["latitude"],
                     longitude=row["longitude"],
                 )

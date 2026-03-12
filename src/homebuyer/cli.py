@@ -1244,7 +1244,7 @@ def precompute(ctx: click.Context, limit: int | None, force: bool, batch_size: i
                                 "year_built": c.year_built,
                                 "neighborhood": c.neighborhood,
                                 "price_per_sqft": c.price_per_sqft,
-                                "distance_score": c.distance_score,
+                                "similarity_score": c.similarity_score,
                                 "latitude": c.latitude,
                                 "longitude": c.longitude,
                             }
