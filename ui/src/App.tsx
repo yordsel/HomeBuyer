@@ -9,7 +9,7 @@ import { MarketPage } from './pages/Market';
 import { ModelInfoPage } from './pages/ModelInfo';
 import { AffordPage } from './pages/Afford';
 import { PotentialPage } from './pages/Potential';
-import { LoginPage } from './pages/Login';
+import { MarketingPage } from './pages/Marketing';
 import { PropertyProvider } from './context/PropertyContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import type { PageId } from './types';
@@ -68,7 +68,7 @@ function AppContent() {
   }
 
   if (!isAuthenticated) {
-    return <LoginPage />;
+    return <MarketingPage />;
   }
 
   return <AuthenticatedApp />;
