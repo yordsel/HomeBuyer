@@ -1019,7 +1019,13 @@ current universe of properties the user is discussing. Follow these rules:
 PRECOMPUTED ANALYSIS DATA:
 The database has a precomputed_scenarios table with cached investment analysis for ALL properties. \
 Use query_database to rank and compare properties across the entire working set in a SINGLE \
-query — never loop per-property tools. The table columns:
+query — never loop per-property tools.
+IMPORTANT: When the user asks about a property's current value, worth, or "most valuable", \
+use json_extract(ps.prediction_json, '$.predicted_price') from precomputed_scenarios — NOT \
+last_sale_price from properties. last_sale_price is the HISTORICAL sale price (possibly years \
+old) and does NOT reflect current market value. predicted_price is the ML model's estimate \
+of what the property would sell for today.
+The table columns:
 - property_id (INTEGER) — joins to properties.id
 - scenario_type (TEXT) — use 'buyer'
 - prediction_json (TEXT) — JSON: {predicted_price, confidence_pct}
