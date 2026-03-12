@@ -1516,12 +1516,21 @@ def _execute_query_with_working_set(tool_input: dict, working_set) -> str:
     except Exception as e:
         error_msg = str(e)
         logger.warning("query_database (session) failed: %s", e, exc_info=True)
+        # Rollback so the connection isn't stuck in an aborted transaction
+        # (PostgreSQL rejects all queries after an error until rollback).
+        try:
+            db.conn.rollback()
+        except Exception:
+            pass
         return json.dumps({"error": f"SQL error: {error_msg}", "query": sql})
     finally:
         try:
             db.execute("DROP TABLE IF EXISTS _working_set")
         except Exception:
-            pass
+            try:
+                db.conn.rollback()
+            except Exception:
+                pass
 
 
 def _execute_update_working_set_with_temp_table(tool_input: dict, working_set) -> str:
@@ -1580,12 +1589,19 @@ def _execute_update_working_set_with_temp_table(tool_input: dict, working_set) -
     except Exception as e:
         error_msg = str(e)
         logger.warning("update_working_set (sql+temp) failed: %s", e, exc_info=True)
+        try:
+            db.conn.rollback()
+        except Exception:
+            pass
         return json.dumps({"error": f"SQL error: {error_msg}", "query": sql})
     finally:
         try:
             db.execute("DROP TABLE IF EXISTS _working_set")
         except Exception:
-            pass
+            try:
+                db.conn.rollback()
+            except Exception:
+                pass
 
 
 def _update_working_set(working_set, tool_name: str, tool_input: dict, result_str: str) -> None:
@@ -2765,6 +2781,10 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         except Exception as e:
             error_msg = str(e)
             logger.warning("query_database failed: %s", e, exc_info=True)
+            try:
+                _state.db.conn.rollback()
+            except Exception:
+                pass
             return json.dumps({"error": f"SQL error: {error_msg}", "query": sql})
 
     else:
