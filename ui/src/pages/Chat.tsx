@@ -516,6 +516,14 @@ function WelcomeScreen({
   onSelect: (prompt: string) => void;
   hasProperty: boolean;
 }) {
+  const [funFact, setFunFact] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getRandomFunFact()
+      .then((f) => setFunFact(f.display_text))
+      .catch(() => {/* non-critical — silently hide */});
+  }, []);
+
   const prompts = hasProperty
     ? [
         'What\u2019s this property worth?',
@@ -540,6 +548,12 @@ function WelcomeScreen({
         Your AI real estate advisor for Berkeley. Ask about any property, neighborhood,
         or the market — I'll pull live data and give you data-driven insights.
       </p>
+      {funFact && (
+        <div className="mb-6 max-w-lg w-full px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-left">
+          <p className="text-xs font-semibold text-amber-700 mb-1">Did you know?</p>
+          <p className="text-sm text-amber-900">{funFact}</p>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2 w-full max-w-lg">
         {prompts.map((prompt) => (
           <button

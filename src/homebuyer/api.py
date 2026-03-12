@@ -598,6 +598,21 @@ def status():
     return _state.db.get_statistics()
 
 
+@app.get("/api/fun-fact")
+def random_fun_fact():
+    """Return a random fun fact about the Berkeley market."""
+    fact = _state.db.get_random_fun_fact()
+    if not fact:
+        return {
+            "category": "meta",
+            "display_text": (
+                "I know everything about Berkeley real estate. "
+                "Well, almost — nobody's generated my fun facts yet."
+            ),
+        }
+    return fact
+
+
 # --- Authentication ---
 
 

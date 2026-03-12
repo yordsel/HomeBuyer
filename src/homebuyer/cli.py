@@ -1285,6 +1285,27 @@ def precompute(ctx: click.Context, limit: int | None, force: bool, batch_size: i
         click.echo(f"Done in {elapsed:.1f}s. Succeeded: {succeeded:,}, Failed: {failed:,}")
 
 
+@main.command("generate-facts")
+@click.pass_context
+def generate_facts(ctx: click.Context) -> None:
+    """Generate fun facts about the Berkeley market for the welcome screen."""
+    from homebuyer.services.fun_facts import generate_fun_facts
+
+    db_path = ctx.obj["db_path"]
+    if not db_path.exists():
+        click.echo("Error: Database not found. Run 'homebuyer init' first.", err=True)
+        sys.exit(1)
+
+    with Database(db_path) as db:
+        db.initialize_schema()
+        facts = generate_fun_facts(db)
+
+    click.echo(f"\nGenerated {len(facts)} fun facts:\n")
+    for f in facts:
+        click.echo(f"  [{f['category']:>12}] {f['display_text']}")
+    click.echo("\nDone. Facts stored in the fun_facts table.")
+
+
 def _dev_potential_to_dict(result) -> dict:
     """Convert DevelopmentPotential to JSON-serializable dict (CLI version)."""
     resp: dict = {}

@@ -99,6 +99,19 @@ export async function getStatus(): Promise<DatabaseStatus> {
 }
 
 // ============================================================================
+// Fun Facts
+// ============================================================================
+
+export interface FunFact {
+  category: string;
+  display_text: string;
+}
+
+export async function getRandomFunFact(): Promise<FunFact> {
+  return apiGet('/api/fun-fact');
+}
+
+// ============================================================================
 // Predictions
 // ============================================================================
 

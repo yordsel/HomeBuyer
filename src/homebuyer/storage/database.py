@@ -360,6 +360,19 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+CREATE TABLE IF NOT EXISTS fun_facts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    category        TEXT NOT NULL,
+    stat_key        TEXT NOT NULL,
+    stat_value      TEXT NOT NULL,
+    display_text    TEXT NOT NULL,
+    detail_json     TEXT,
+    generated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(category, stat_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fun_facts_category ON fun_facts(category);
 """
 
 
@@ -554,6 +567,47 @@ class Database:
     def commit(self) -> None:
         """Commit the current transaction."""
         self.conn.commit()
+
+    # ------------------------------------------------------------------
+    # Fun facts helpers
+    # ------------------------------------------------------------------
+
+    def upsert_fun_fact(
+        self,
+        category: str,
+        stat_key: str,
+        stat_value: str,
+        display_text: str,
+        detail_json: str | None = None,
+    ) -> None:
+        """Insert or replace a fun fact."""
+        if self.is_postgres:
+            self.execute(
+                "INSERT INTO fun_facts (category, stat_key, stat_value, display_text, detail_json, generated_at) "
+                "VALUES (%s, %s, %s, %s, %s, "
+                "TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')) "
+                "ON CONFLICT (category, stat_key) DO UPDATE SET "
+                "stat_value = EXCLUDED.stat_value, "
+                "display_text = EXCLUDED.display_text, "
+                "detail_json = EXCLUDED.detail_json, "
+                "generated_at = TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')",
+                (category, stat_key, stat_value, display_text, detail_json),
+            )
+            self.commit()
+        else:
+            self.execute(
+                "INSERT OR REPLACE INTO fun_facts "
+                "(category, stat_key, stat_value, display_text, detail_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (category, stat_key, stat_value, display_text, detail_json),
+            )
+
+    def get_random_fun_fact(self) -> Optional[dict]:
+        """Return a single random fun fact."""
+        return self.fetchone(
+            "SELECT category, stat_key, stat_value, display_text, detail_json "
+            "FROM fun_facts ORDER BY RANDOM() LIMIT 1"
+        )
 
     def table_exists(self, table_name: str) -> bool:
         """Check if a table exists in the database."""
