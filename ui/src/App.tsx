@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Toaster } from 'sonner';
 import { Sidebar } from './components/Sidebar';
 import { ContextPanel } from './components/context/ContextPanel';
@@ -9,6 +9,7 @@ import { MarketPage } from './pages/Market';
 import { ModelInfoPage } from './pages/ModelInfo';
 import { AffordPage } from './pages/Afford';
 import { PotentialPage } from './pages/Potential';
+import { HistoryPage } from './pages/History';
 import { MarketingPage } from './pages/Marketing';
 import { PropertyProvider } from './context/PropertyContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -16,11 +17,33 @@ import type { PageId } from './types';
 
 function AuthenticatedApp() {
   const [currentPage, setCurrentPage] = useState<PageId>('chat');
+  // Track which conversation to load in Chat; null = new conversation
+  const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
+  // Key to force-remount ChatPage when starting a new conversation
+  const [chatKey, setChatKey] = useState(0);
+
+  const handleNewChat = useCallback(() => {
+    setActiveConversationId(null);
+    setChatKey((k) => k + 1);
+    setCurrentPage('chat');
+  }, []);
+
+  const handleOpenConversation = useCallback((convId: number) => {
+    setActiveConversationId(convId);
+    setChatKey((k) => k + 1);
+    setCurrentPage('chat');
+  }, []);
 
   function renderPage() {
     switch (currentPage) {
       case 'chat':
-        return <ChatPage />;
+        return (
+          <ChatPage
+            key={chatKey}
+            conversationId={activeConversationId}
+            onNewChat={handleNewChat}
+          />
+        );
       case 'predict':
         return <PredictPage onNavigate={setCurrentPage} />;
       case 'neighborhoods':
@@ -33,8 +56,16 @@ function AuthenticatedApp() {
         return <AffordPage />;
       case 'potential':
         return <PotentialPage />;
+      case 'history':
+        return <HistoryPage onOpenConversation={handleOpenConversation} />;
       default:
-        return <ChatPage />;
+        return (
+          <ChatPage
+            key={chatKey}
+            conversationId={activeConversationId}
+            onNewChat={handleNewChat}
+          />
+        );
     }
   }
 

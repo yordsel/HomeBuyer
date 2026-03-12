@@ -13,7 +13,7 @@ import {
   Send, Loader2, Bot, User, MessageCircle, Search,
   Home, BarChart3, GitCompare, MapPin, Building2,
   TrendingUp, DollarSign, Wrench, FileText, Database,
-  Undo2, CheckCircle2,
+  Undo2, CheckCircle2, Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -56,10 +56,16 @@ const TOOL_ICONS: Record<string, typeof Home> = {
 // ChatPage
 // ---------------------------------------------------------------------------
 
-export function ChatPage() {
+interface ChatPageProps {
+  conversationId?: number | null;
+  onNewChat?: () => void;
+}
+
+export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageProps = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
+  const [loadingConversation, setLoadingConversation] = useState(false);
 
   // Live streaming state — updated via SSE callbacks, rendered as a
   // partial assistant message at the bottom of the chat
@@ -72,6 +78,9 @@ export function ChatPage() {
   // Deferred blocks: processBlocks must run AFTER onWorkingSet so that
   // setTrackedFromServer doesn't overwrite the property we just tracked.
   const deferredBlocksRef = useRef<ResponseBlock[] | null>(null);
+
+  // Conversation persistence — use ref so callbacks always see latest value
+  const convIdRef = useRef<number | null>(initialConvId ?? null);
 
   const {
     activeProperty,
@@ -170,6 +179,25 @@ export function ChatPage() {
     return () => { abortRef.current?.abort(); };
   }, []);
 
+  // ---- Load existing conversation or wait for first message to create one ----
+  useEffect(() => {
+    if (initialConvId) {
+      setLoadingConversation(true);
+      api.getConversation(initialConvId)
+        .then((conv) => {
+          convIdRef.current = conv.id;
+          if (conv.messages && conv.messages.length > 0) {
+            setMessages(conv.messages);
+          }
+        })
+        .catch((err) => {
+          toast.error(`Failed to load conversation: ${err.message}`);
+        })
+        .finally(() => setLoadingConversation(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialConvId]);
+
   // ---- Process completed response blocks (track properties, etc.) ----
   const processBlocks = useCallback(
     (blocks: ResponseBlock[]) => {
@@ -212,6 +240,38 @@ export function ChatPage() {
       }
     },
     [activeProperty, setActiveProperty, trackProperty, addBlocksToProperty],
+  );
+
+  // ---- Persist a user+assistant message pair to the backend ----
+  const persistMessages = useCallback(
+    async (userMsg: ChatMessage, assistantMsg: ChatMessage) => {
+      try {
+        let cid = convIdRef.current;
+
+        // Create conversation on first message if needed
+        if (!cid) {
+          const title = userMsg.content.slice(0, 80);
+          const conv = await api.createConversation(sessionId, title);
+          cid = conv.id;
+          convIdRef.current = cid;
+        }
+
+        // Serialize structured data to JSON strings for storage
+        const toSave = [userMsg, assistantMsg].map((m) => ({
+          role: m.role,
+          content: m.content,
+          blocks_json: m.blocks ? JSON.stringify(m.blocks) : null,
+          tools_used_json: m.toolsUsed ? JSON.stringify(m.toolsUsed) : null,
+          tool_events_json: m.toolEvents ? JSON.stringify(m.toolEvents) : null,
+        }));
+
+        await api.saveConversationMessages(cid, toSave);
+      } catch (err) {
+        // Non-critical — log but don't interrupt chat flow
+        console.error('Failed to persist messages:', err);
+      }
+    },
+    [sessionId],
   );
 
   // ---- Send message (streaming) ----
@@ -306,6 +366,9 @@ export function ChatPage() {
             setStreamToolEvents([]);
             setActiveToolLabel(null);
 
+            // Auto-save user + assistant messages
+            persistMessages(userMsg, assistantMsg);
+
             // Defer block processing — onWorkingSet fires AFTER onDone
             // and setTrackedFromServer would overwrite what processBlocks sets.
             // Store blocks and process them after onWorkingSet arrives.
@@ -347,7 +410,7 @@ export function ChatPage() {
 
       abortRef.current = controller;
     },
-    [input, streaming, messages, activeProperty, sessionId, processBlocks, setWorkingSetMeta, setTrackedFromServer],
+    [input, streaming, messages, activeProperty, sessionId, processBlocks, setWorkingSetMeta, setTrackedFromServer, persistMessages],
   );
 
   // ---- Handle address search selection ----
@@ -392,7 +455,21 @@ export function ChatPage() {
             </p>
           </div>
         </div>
-        <AddressSearch onSelect={handleAddressSelect} />
+        <div className="flex items-center gap-2">
+          {onNewChat && messages.length > 0 && (
+            <button
+              onClick={onNewChat}
+              title="New conversation"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600
+                         bg-gray-50 border border-gray-200 rounded-lg
+                         hover:bg-gray-100 hover:text-gray-800 transition-colors"
+            >
+              <Plus size={14} />
+              New Chat
+            </button>
+          )}
+          <AddressSearch onSelect={handleAddressSelect} />
+        </div>
       </div>
 
       {/* Messages area */}
@@ -400,8 +477,16 @@ export function ChatPage() {
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-gray-50"
       >
+        {/* Loading conversation */}
+        {loadingConversation && (
+          <div className="flex flex-col items-center justify-center min-h-[60%] text-center">
+            <Loader2 size={32} className="animate-spin text-indigo-400 mb-3" />
+            <p className="text-sm text-gray-500">Loading conversation...</p>
+          </div>
+        )}
+
         {/* Welcome state */}
-        {messages.length === 0 && !streaming && (
+        {messages.length === 0 && !streaming && !loadingConversation && (
           <WelcomeScreen
             onSelect={handleSend}
             hasProperty={!!activeProperty}

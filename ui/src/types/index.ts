@@ -1105,4 +1105,21 @@ export interface AuthResponse {
 // App
 // ---------------------------------------------------------------------------
 
-export type PageId = 'chat' | 'predict' | 'neighborhoods' | 'market' | 'model' | 'afford' | 'potential';
+export type PageId = 'chat' | 'predict' | 'neighborhoods' | 'market' | 'model' | 'afford' | 'potential' | 'history';
+
+// ---------------------------------------------------------------------------
+// Conversations
+// ---------------------------------------------------------------------------
+
+export interface Conversation {
+  id: number;
+  session_id: string;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface ConversationDetail extends Conversation {
+  messages: ChatMessage[];
+}

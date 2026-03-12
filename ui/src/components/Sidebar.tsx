@@ -11,6 +11,7 @@ import {
   ChevronsRight,
   LogOut,
   User,
+  History,
 } from 'lucide-react';
 import type { PageId } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -22,6 +23,7 @@ interface SidebarProps {
 
 const NAV_ITEMS: { id: PageId; label: string; icon: typeof Search }[] = [
   { id: 'chat', label: 'Chat', icon: MessageCircle },
+  { id: 'history', label: 'History', icon: History },
   { id: 'predict', label: 'Predict', icon: Search },
   { id: 'neighborhoods', label: 'Neighborhoods', icon: MapPin },
   { id: 'market', label: 'Market', icon: TrendingUp },

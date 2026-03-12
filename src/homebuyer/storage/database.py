@@ -373,6 +373,36 @@ CREATE TABLE IF NOT EXISTS fun_facts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_fun_facts_category ON fun_facts(category);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    session_id      TEXT NOT NULL UNIQUE,
+    title           TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id     INTEGER NOT NULL,
+    role                TEXT NOT NULL,
+    content             TEXT NOT NULL,
+    blocks_json         TEXT,
+    tools_used_json     TEXT,
+    tool_events_json    TEXT,
+    message_index       INTEGER NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_conv_messages_conv ON conversation_messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_conv_messages_idx ON conversation_messages(conversation_id, message_index);
 """
 
 
@@ -2198,6 +2228,135 @@ class Database:
             "FROM users WHERE id = ?",
             (user_id,),
         )
+
+    # ------------------------------------------------------------------
+    # Conversation management
+    # ------------------------------------------------------------------
+
+    def create_conversation(
+        self, user_id: int, session_id: str, title: str | None = None
+    ) -> dict:
+        """Create a new conversation and return the row."""
+        conv_id = self._insert_returning_id(
+            "INSERT INTO conversations (user_id, session_id, title) VALUES (?, ?, ?)",
+            (user_id, session_id, title),
+        )
+        self.commit()
+        return {
+            "id": conv_id,
+            "user_id": user_id,
+            "session_id": session_id,
+            "title": title,
+        }
+
+    def get_conversation(self, conversation_id: int, user_id: int) -> Optional[dict]:
+        """Fetch a single conversation, enforcing user ownership."""
+        return self.fetchone(
+            "SELECT id, user_id, session_id, title, created_at, updated_at "
+            "FROM conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        )
+
+    def get_conversation_by_session(
+        self, session_id: str, user_id: int
+    ) -> Optional[dict]:
+        """Fetch a conversation by session_id, enforcing user ownership."""
+        return self.fetchone(
+            "SELECT id, user_id, session_id, title, created_at, updated_at "
+            "FROM conversations WHERE session_id = ? AND user_id = ?",
+            (session_id, user_id),
+        )
+
+    def list_conversations(
+        self, user_id: int, limit: int = 50, offset: int = 0
+    ) -> list[dict]:
+        """List conversations for a user, ordered by most recent first."""
+        rows = self.fetchall(
+            "SELECT c.id, c.session_id, c.title, c.created_at, c.updated_at, "
+            "  (SELECT COUNT(*) FROM conversation_messages cm "
+            "   WHERE cm.conversation_id = c.id) AS message_count "
+            "FROM conversations c "
+            "WHERE c.user_id = ? "
+            "ORDER BY c.updated_at DESC "
+            "LIMIT ? OFFSET ?",
+            (user_id, limit, offset),
+        )
+        return rows
+
+    def update_conversation_title(
+        self, conversation_id: int, user_id: int, title: str
+    ) -> bool:
+        """Update a conversation's title. Returns True if the row was found."""
+        self.execute(
+            "UPDATE conversations SET title = ? WHERE id = ? AND user_id = ?",
+            (title, conversation_id, user_id),
+        )
+        self.commit()
+        return True
+
+    def delete_conversation(self, conversation_id: int, user_id: int) -> bool:
+        """Delete a conversation and its messages. Returns True if deleted."""
+        # Delete messages first (SQLite doesn't always enforce ON DELETE CASCADE)
+        self.execute(
+            "DELETE FROM conversation_messages WHERE conversation_id = ? "
+            "AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ?)",
+            (conversation_id, user_id),
+        )
+        self.execute(
+            "DELETE FROM conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id),
+        )
+        self.commit()
+        return True
+
+    def save_message(
+        self,
+        conversation_id: int,
+        role: str,
+        content: str,
+        blocks_json: str | None = None,
+        tools_used_json: str | None = None,
+        tool_events_json: str | None = None,
+        message_index: int = 0,
+    ) -> int:
+        """Insert a message into a conversation and return its ID."""
+        msg_id = self._insert_returning_id(
+            "INSERT INTO conversation_messages "
+            "(conversation_id, role, content, blocks_json, tools_used_json, "
+            "tool_events_json, message_index) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                conversation_id,
+                role,
+                content,
+                blocks_json,
+                tools_used_json,
+                tool_events_json,
+                message_index,
+            ),
+        )
+        self.commit()
+        return msg_id
+
+    def get_messages(self, conversation_id: int, user_id: int) -> list[dict]:
+        """Fetch all messages for a conversation, enforcing user ownership."""
+        return self.fetchall(
+            "SELECT cm.id, cm.role, cm.content, cm.blocks_json, "
+            "cm.tools_used_json, cm.tool_events_json, cm.message_index, cm.created_at "
+            "FROM conversation_messages cm "
+            "JOIN conversations c ON cm.conversation_id = c.id "
+            "WHERE cm.conversation_id = ? AND c.user_id = ? "
+            "ORDER BY cm.message_index ASC",
+            (conversation_id, user_id),
+        )
+
+    def touch_conversation(self, conversation_id: int) -> None:
+        """Update the updated_at timestamp on a conversation."""
+        self.execute(
+            "UPDATE conversations SET updated_at = datetime('now') WHERE id = ?",
+            (conversation_id,),
+        )
+        self.commit()
 
     def get_statistics(self) -> dict:
         """Return row counts and date ranges for all tables."""

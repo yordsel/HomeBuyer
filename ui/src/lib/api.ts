@@ -22,6 +22,8 @@ import type {
   WorkingSetMeta,
   AuthResponse,
   User,
+  Conversation,
+  ConversationDetail,
 } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -78,6 +80,33 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.detail ?? `HTTP ${resp.status}`);
+  }
+  return resp.json();
+}
+
+/** Simple PATCH helper. */
+async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.detail ?? `HTTP ${resp.status}`);
+  }
+  return resp.json();
+}
+
+/** Simple DELETE helper. */
+async function apiDelete<T>(path: string): Promise<T> {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+    headers: { ...authHeaders() },
   });
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));
@@ -476,4 +505,47 @@ export async function authLogin(email: string, password: string): Promise<AuthRe
 
 export async function authGetMe(): Promise<User> {
   return apiGet('/api/auth/me');
+}
+
+// ============================================================================
+// Conversations
+// ============================================================================
+
+export async function listConversations(): Promise<Conversation[]> {
+  return apiGet('/api/conversations');
+}
+
+export async function createConversation(
+  session_id: string,
+  title?: string,
+): Promise<{ id: number; session_id: string; title: string | null }> {
+  return apiPost('/api/conversations', { session_id, title: title ?? null });
+}
+
+export async function getConversation(id: number): Promise<ConversationDetail> {
+  return apiGet(`/api/conversations/${id}`);
+}
+
+export async function updateConversationTitle(
+  id: number,
+  title: string,
+): Promise<{ ok: boolean }> {
+  return apiPatch(`/api/conversations/${id}`, { title });
+}
+
+export async function deleteConversation(id: number): Promise<{ ok: boolean }> {
+  return apiDelete(`/api/conversations/${id}`);
+}
+
+export async function saveConversationMessages(
+  conversationId: number,
+  messages: {
+    role: string;
+    content: string;
+    blocks_json?: string | null;
+    tools_used_json?: string | null;
+    tool_events_json?: string | null;
+  }[],
+): Promise<{ ok: boolean; message_ids: number[] }> {
+  return apiPost(`/api/conversations/${conversationId}/messages`, { messages });
 }

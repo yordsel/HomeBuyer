@@ -320,6 +320,27 @@ class AuthUserLogin(BaseModel):
     password: str
 
 
+class CreateConversationRequest(BaseModel):
+    session_id: str
+    title: Optional[str] = None
+
+
+class UpdateConversationRequest(BaseModel):
+    title: str
+
+
+class SaveMessageRequest(BaseModel):
+    role: str
+    content: str
+    blocks_json: Optional[str] = None
+    tools_used_json: Optional[str] = None
+    tool_events_json: Optional[str] = None
+
+
+class SaveMessagesRequest(BaseModel):
+    messages: list[SaveMessageRequest]
+
+
 class ListingPredictRequest(BaseModel):
     url: str
 
@@ -685,6 +706,124 @@ def auth_me(user_id: int = Depends(get_current_user_id)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return UserResponse(id=user["id"], email=user["email"], full_name=user.get("full_name"))
+
+
+# --- Conversations ---
+
+
+@app.get("/api/conversations")
+def list_conversations(user_id: int = Depends(get_current_user_id)):
+    """List the current user's conversations, most recent first."""
+    return _state.db.list_conversations(user_id)
+
+
+@app.post("/api/conversations")
+def create_conversation(
+    req: CreateConversationRequest, user_id: int = Depends(get_current_user_id)
+):
+    """Create a new conversation."""
+    return _state.db.create_conversation(
+        user_id=user_id, session_id=req.session_id, title=req.title
+    )
+
+
+@app.get("/api/conversations/{conversation_id}")
+def get_conversation(conversation_id: int, user_id: int = Depends(get_current_user_id)):
+    """Get a conversation with all its messages."""
+    conv = _state.db.get_conversation(conversation_id, user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    messages = _state.db.get_messages(conversation_id, user_id)
+    # Parse JSON fields back into objects for the frontend
+    for msg in messages:
+        if msg.get("blocks_json"):
+            try:
+                msg["blocks"] = json.loads(msg["blocks_json"])
+            except (json.JSONDecodeError, TypeError):
+                msg["blocks"] = []
+        else:
+            msg["blocks"] = []
+        if msg.get("tools_used_json"):
+            try:
+                msg["tools_used"] = json.loads(msg["tools_used_json"])
+            except (json.JSONDecodeError, TypeError):
+                msg["tools_used"] = []
+        else:
+            msg["tools_used"] = []
+        if msg.get("tool_events_json"):
+            try:
+                msg["tool_events"] = json.loads(msg["tool_events_json"])
+            except (json.JSONDecodeError, TypeError):
+                msg["tool_events"] = []
+        else:
+            msg["tool_events"] = []
+        # Remove raw JSON fields
+        msg.pop("blocks_json", None)
+        msg.pop("tools_used_json", None)
+        msg.pop("tool_events_json", None)
+
+    conv["messages"] = messages
+    return conv
+
+
+@app.patch("/api/conversations/{conversation_id}")
+def update_conversation(
+    conversation_id: int,
+    req: UpdateConversationRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Update a conversation's title."""
+    conv = _state.db.get_conversation(conversation_id, user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    _state.db.update_conversation_title(conversation_id, user_id, req.title)
+    return {"ok": True}
+
+
+@app.delete("/api/conversations/{conversation_id}")
+def delete_conversation(
+    conversation_id: int, user_id: int = Depends(get_current_user_id)
+):
+    """Delete a conversation and all its messages."""
+    conv = _state.db.get_conversation(conversation_id, user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    _state.db.delete_conversation(conversation_id, user_id)
+    return {"ok": True}
+
+
+@app.post("/api/conversations/{conversation_id}/messages")
+def save_messages(
+    conversation_id: int,
+    req: SaveMessagesRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Append messages to a conversation."""
+    conv = _state.db.get_conversation(conversation_id, user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Get current max message_index
+    existing = _state.db.get_messages(conversation_id, user_id)
+    next_index = max((m["message_index"] for m in existing), default=-1) + 1
+
+    saved_ids = []
+    for msg in req.messages:
+        msg_id = _state.db.save_message(
+            conversation_id=conversation_id,
+            role=msg.role,
+            content=msg.content,
+            blocks_json=msg.blocks_json,
+            tools_used_json=msg.tools_used_json,
+            tool_events_json=msg.tool_events_json,
+            message_index=next_index,
+        )
+        saved_ids.append(msg_id)
+        next_index += 1
+
+    _state.db.touch_conversation(conversation_id)
+    return {"ok": True, "message_ids": saved_ids}
 
 
 # --- Prediction ---
