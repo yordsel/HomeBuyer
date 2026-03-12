@@ -104,6 +104,18 @@ RENTCAST_API_KEY = os.environ.get("RENTCAST_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # ---------------------------------------------------------------------------
+# Resend Email API (optional — enables transactional emails for password
+# reset and email verification)
+# ---------------------------------------------------------------------------
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+# "From" address for transactional emails.  Must be a verified domain in Resend.
+# Falls back to Resend's sandbox address for development.
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "HomeBuyer <onboarding@resend.dev>")
+# Base URL for links in emails (password reset, verification).
+# In production this should be the deployed frontend URL.
+APP_URL = os.environ.get("APP_URL", "http://localhost:1420")
+
+# ---------------------------------------------------------------------------
 # Accela Citizen Access (Berkeley building permits)
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------

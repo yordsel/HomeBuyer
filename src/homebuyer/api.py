@@ -547,6 +547,14 @@ class AppState:
         else:
             logger.info("Faketor AI advisor disabled (no ANTHROPIC_API_KEY)")
 
+        # Check email service status
+        from homebuyer.services.email import is_email_configured
+
+        if is_email_configured():
+            logger.info("Transactional email enabled (Resend API)")
+        else:
+            logger.info("Transactional email disabled (no RESEND_API_KEY) — tokens will be logged")
+
         # In-memory TTL cache for frequently-accessed analytics
         self._ttl_cache: dict[str, tuple[float, object]] = {}
 
@@ -1015,10 +1023,10 @@ def auth_delete_account(
 @app.post("/api/auth/forgot-password")
 @limiter.limit("3/hour")
 def auth_forgot_password(req: ForgotPasswordRequest, request: Request):
-    """Generate a password reset token and log the event.
+    """Generate a password reset token and send a reset email.
 
-    Always returns success to avoid email enumeration. In production,
-    this would send an email with the reset link.
+    Always returns success to avoid email enumeration. If Resend is not
+    configured the token is logged to the console for local development.
     """
     import secrets
     from datetime import datetime, timedelta, timezone
@@ -1040,9 +1048,10 @@ def auth_forgot_password(req: ForgotPasswordRequest, request: Request):
             "password_reset_request", user_id=user["id"],
             ip_address=ip, user_agent=ua,
         )
-        # In production: send email with link containing raw_token
-        # For dev: log the token so it can be used for testing
-        logger.info("Password reset token for %s: %s", req.email, raw_token)
+        # Send reset email (falls back to logging in dev if Resend is not configured)
+        from homebuyer.services.email import send_password_reset
+
+        send_password_reset(to=req.email, token=raw_token)
     else:
         _state.db.log_auth_event(
             "password_reset_request", user_id=None,
@@ -1097,7 +1106,8 @@ def auth_reset_password(req: ResetPasswordRequest, request: Request):
 def auth_resend_verification(request: Request, user_id: int = Depends(get_current_user_id)):
     """Resend email verification for the current user.
 
-    In production, this would send an email. For dev, the token is logged.
+    Sends via Resend if configured; falls back to logging the token for
+    local development.
     """
     import secrets
     from datetime import datetime, timedelta, timezone
@@ -1117,8 +1127,10 @@ def auth_resend_verification(request: Request, user_id: int = Depends(get_curren
     _state.db.create_email_verification_token(
         user_id=user_id, token_hash=token_hash, expires_at=expires_at,
     )
-    # In production: send email with verification link
-    logger.info("Email verification token for user %d: %s", user_id, raw_token)
+    # Send verification email (falls back to logging in dev if Resend is not configured)
+    from homebuyer.services.email import send_email_verification
+
+    send_email_verification(to=user["email"], token=raw_token)
 
     ip, ua = _client_info(request)
     _state.db.log_auth_event(
