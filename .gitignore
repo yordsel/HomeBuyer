@@ -33,6 +33,11 @@ data/berkeley_homebuyer.db-wal
 data/berkeley_homebuyer.db
 data/berkeley_properties.db
 data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Regulation scraper cached HTML (regenerable, ~2MB)
+data/regulations/sources/
 
 # Keep deployed data (models and geo, required for production)
 # data/models/                — ~2MB, committed for deploy

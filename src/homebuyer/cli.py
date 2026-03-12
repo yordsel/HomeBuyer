@@ -11,6 +11,7 @@ Usage:
     homebuyer collect permits     Scrape building permits from Accela portal
     homebuyer collect permits-address ADDRESS  Permits for a single address
     homebuyer collect parcels     Download Berkeley parcel data from Open Data
+    homebuyer collect regulations Build regulation JSON from seed + web sources
     homebuyer collect all         Run all collectors
     homebuyer process zoning      Assign zoning districts to properties
     homebuyer process parcels     Enrich parcels with zoning + neighborhood
@@ -288,45 +289,97 @@ def collect_parcels(ctx: click.Context, min_lot: int, all_uses: bool) -> None:
         sys.exit(1)
 
 
+@collect.command("regulations")
+@click.option("--seed-only", is_flag=True,
+              help="Export seed data to JSON only (no web scraping).")
+@click.option("--no-scrape", is_flag=True,
+              help="Skip web scraping, use seed data only.")
+@click.option("--generate-seed", is_flag=True,
+              help="One-time: convert hardcoded KB to seed JSON files.")
+@click.pass_context
+def collect_regulations(
+    ctx: click.Context,
+    seed_only: bool,
+    no_scrape: bool,
+    generate_seed: bool,
+) -> None:
+    """Build regulation JSON files from seed data and web sources.
+
+    First run: use --generate-seed to export current hardcoded KB.
+    Subsequent runs: scrapes official Berkeley sources and merges updates.
+    """
+    from homebuyer.collectors.regulations import RegulationCollector
+
+    collector = RegulationCollector(data_dir=DATA_DIR)
+
+    if generate_seed:
+        collector.generate_seed_from_hardcoded()
+        click.echo("Seed JSON files generated in data/regulations/seed/")
+        return
+
+    result = collector.collect(
+        scrape=not (seed_only or no_scrape),
+        seed_only=seed_only,
+    )
+
+    if result.get("success"):
+        click.echo(
+            f"Regulation data collected: {result['zones']} zones, "
+            f"{result['categories']} categories "
+            f"(mode={result['mode']}, {result['duration_s']:.1f}s)"
+        )
+        if result.get("scraped_sources"):
+            click.echo(f"  Scraped sources: {', '.join(result['scraped_sources'])}")
+    else:
+        click.echo(f"ERROR: {result.get('error', 'Unknown error')}", err=True)
+        sys.exit(1)
+
+
 @collect.command("all")
 @click.option("--days", default=1825, help="Number of days back for sales (default: 1825).")
 @click.pass_context
 def collect_all(ctx: click.Context, days: int) -> None:
     """Run all collectors in sequence."""
     click.echo("=" * 60)
-    click.echo("Step 1/6: Collecting property sales from Redfin...")
+    click.echo("Step 1/7: Collecting property sales from Redfin...")
     click.echo("=" * 60)
     ctx.invoke(collect_sales, days=days)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 2/6: Collecting market metrics from Redfin Data Center...")
+    click.echo("Step 2/7: Collecting market metrics from Redfin Data Center...")
     click.echo("=" * 60)
     ctx.invoke(collect_market)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 3/6: Collecting mortgage rates from FRED...")
+    click.echo("Step 3/7: Collecting mortgage rates from FRED...")
     click.echo("=" * 60)
     ctx.invoke(collect_rates)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 4/6: Collecting economic indicators from FRED...")
+    click.echo("Step 4/7: Collecting economic indicators from FRED...")
     click.echo("=" * 60)
     ctx.invoke(collect_indicators)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 5/6: Collecting Census ACS income data...")
+    click.echo("Step 5/7: Collecting Census ACS income data...")
     click.echo("=" * 60)
     ctx.invoke(collect_census)
 
     click.echo()
     click.echo("=" * 60)
-    click.echo("Step 6/6: Collecting BESO energy benchmarking data...")
+    click.echo("Step 6/7: Collecting BESO energy benchmarking data...")
     click.echo("=" * 60)
     ctx.invoke(collect_beso)
+
+    click.echo()
+    click.echo("=" * 60)
+    click.echo("Step 7/7: Collecting regulation data...")
+    click.echo("=" * 60)
+    ctx.invoke(collect_regulations)
 
     click.echo()
     click.echo("All collections complete.")

@@ -1,0 +1,339 @@
+{
+  "$meta": {
+    "schema_version": 1,
+    "generated_at": "2026-03-12T03:29:11.872475+00:00",
+    "generator": "generate_seed_from_hardcoded",
+    "description": "Seed zone definitions converted from hardcoded berkeley_regulations.py"
+  },
+  "R-1": {
+    "name": "Single Family Residential",
+    "description": "Allows one single-family home per lot. This is the most common residential zone in Berkeley, covering roughly 49% of the city's residential land. ADUs and JADUs are permitted. SB 9 lot splitting is eligible. Middle Housing allows up to 5 units.",
+    "max_units_base": 1,
+    "lot_coverage_pct": 45,
+    "max_height_ft": 35,
+    "adu_eligible": true,
+    "sb9_eligible": true,
+    "middle_housing_max_units": 5,
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "R-1H": {
+    "name": "Single Family Residential \u2014 Hillside Overlay",
+    "description": "Same permitted uses as R-1 (single-family home), but within the Hillside Overlay Zone. The 'H' suffix means stricter height limits, fire safety requirements, vegetation management rules, and view protection. ADUs are allowed (max 16 ft height). SB 9 lot splitting is eligible, but Middle Housing is NOT eligible due to hillside fire hazard concerns.",
+    "max_units_base": 1,
+    "lot_coverage_pct": 45,
+    "max_height_ft": 35,
+    "adu_eligible": true,
+    "adu_max_height_ft": 16,
+    "sb9_eligible": true,
+    "middle_housing_max_units": null,
+    "hillside": true,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "R-2": {
+    "name": "Restricted Two-Family Residential",
+    "description": "Allows one dwelling unit per 2,500 sqft of lot area. Permits duplexes and single-family homes. ADUs are eligible. Middle Housing allows up to 6 units. Not eligible for SB 9 (only R-1 zones qualify).",
+    "max_units_base": "1 per 2,500 sqft",
+    "lot_coverage_pct": 45,
+    "max_height_ft": 35,
+    "adu_eligible": true,
+    "sb9_eligible": false,
+    "middle_housing_max_units": 6,
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "R-2H": {
+    "name": "Restricted Two-Family Residential \u2014 Hillside Overlay",
+    "description": "Same uses as R-2 (1 unit per 2,500 sqft) with Hillside Overlay restrictions. Stricter height limits and fire safety rules apply. Middle Housing is NOT eligible in hillside zones.",
+    "max_units_base": "1 per 2,500 sqft",
+    "lot_coverage_pct": 45,
+    "max_height_ft": 35,
+    "adu_eligible": true,
+    "adu_max_height_ft": 16,
+    "sb9_eligible": false,
+    "middle_housing_max_units": null,
+    "hillside": true,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "R-2A": {
+    "name": "Restricted Multiple-Family Residential",
+    "description": "Higher density than R-2: allows one dwelling unit per 1,650 sqft of lot area. Common in transitional areas between single-family and multi-family neighborhoods. Middle Housing allows up to 7 units.",
+    "max_units_base": "1 per 1,650 sqft",
+    "lot_coverage_pct": 45,
+    "max_height_ft": 35,
+    "adu_eligible": true,
+    "sb9_eligible": false,
+    "middle_housing_max_units": 7,
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "R-2AH": {
+    "name": "Restricted Multiple-Family Residential \u2014 Hillside Overlay",
+    "description": "Same uses as R-2A (1 unit per 1,650 sqft) with Hillside Overlay restrictions. Middle Housing is NOT eligible.",
+    "max_units_base": "1 per 1,650 sqft",
+    "lot_coverage_pct": 45,
+    "max_height_ft": 35,
+    "adu_eligible": true,
+    "adu_max_height_ft": 16,
+    "sb9_eligible": false,
+    "middle_housing_max_units": null,
+    "hillside": true,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "R-3": {
+    "name": "Multiple-Family Residential",
+    "description": "Medium-density multi-family zone allowing one unit per 1,500 sqft. Minimum 3 units. Permits apartments, condos, townhouses. NOT eligible for Middle Housing (already allows multi-family by right).",
+    "max_units_base": "1 per 1,500 sqft (min 3)",
+    "lot_coverage_pct": 50,
+    "max_height_ft": 35,
+    "adu_eligible": true,
+    "sb9_eligible": false,
+    "middle_housing_max_units": null,
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "R-3H": {
+    "name": "Multiple-Family Residential \u2014 Hillside Overlay",
+    "description": "Same uses as R-3 with Hillside Overlay restrictions. Multi-family development with stricter height and fire safety rules.",
+    "max_units_base": "1 per 1,500 sqft (min 3)",
+    "lot_coverage_pct": 50,
+    "max_height_ft": 35,
+    "adu_eligible": true,
+    "adu_max_height_ft": 16,
+    "sb9_eligible": false,
+    "middle_housing_max_units": null,
+    "hillside": true,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "R-4": {
+    "name": "Multi-Family Residential High Density",
+    "description": "High-density residential zone allowing one unit per 1,000 sqft. Minimum 4 units. Found near transit corridors and commercial areas. NOT eligible for Middle Housing.",
+    "max_units_base": "1 per 1,000 sqft (min 4)",
+    "lot_coverage_pct": 55,
+    "max_height_ft": 35,
+    "adu_eligible": true,
+    "sb9_eligible": false,
+    "middle_housing_max_units": null,
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "R-4H": {
+    "name": "Multi-Family Residential High Density \u2014 Hillside Overlay",
+    "description": "Same uses as R-4 with Hillside Overlay restrictions.",
+    "max_units_base": "1 per 1,000 sqft (min 4)",
+    "lot_coverage_pct": 55,
+    "max_height_ft": 35,
+    "adu_eligible": true,
+    "adu_max_height_ft": 16,
+    "sb9_eligible": false,
+    "middle_housing_max_units": null,
+    "hillside": true,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "R-S": {
+    "name": "Residential Southside",
+    "description": "Special residential district for the Southside area near UC Berkeley. Allows a mix of residential uses including single-family, multi-family, and student housing. Higher density than standard R-1.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "R-SH": {
+    "name": "Residential Southside \u2014 Hillside Overlay",
+    "description": "Same uses as R-S with Hillside Overlay restrictions.",
+    "hillside": true,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "R-SMU": {
+    "name": "Residential Small-Scale Mixed Use",
+    "description": "Allows small-scale mixed-use development in residential areas. Permits ground-floor commercial with residential above. Typically found along neighborhood commercial corridors.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "MUR": {
+    "name": "Mixed Use Residential",
+    "description": "Mixed-use zone allowing residential and compatible commercial uses. One unit per 1,500 sqft. Up to 60% lot coverage. Middle Housing allows up to 7 units.",
+    "max_units_base": "1 per 1,500 sqft",
+    "lot_coverage_pct": 60,
+    "middle_housing_max_units": 7,
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "MULI": {
+    "name": "Mixed Use Light Industrial",
+    "description": "Allows a mix of light industrial, commercial, and residential uses. Found in West Berkeley's industrial transition areas.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "ES-R": {
+    "name": "Environmental Safety \u2014 Residential",
+    "description": "Restrictive hillside zone for areas with significant environmental constraints (steep slopes, fire risk, landslide hazard). Very low density: max 20% lot coverage, limited to 1 unit. ADUs limited to 500 sqft max.",
+    "max_units_base": 1,
+    "lot_coverage_pct": 20,
+    "adu_eligible": true,
+    "adu_max_sqft": 500,
+    "adu_max_height_ft": 16,
+    "sb9_eligible": false,
+    "middle_housing_max_units": null,
+    "hillside": true,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-W": {
+    "name": "West Berkeley Commercial",
+    "description": "Commercial district for West Berkeley. Allows retail, office, light manufacturing, and mixed-use residential. Reflects the area's historic industrial-to-commercial transition.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-SA": {
+    "name": "South Area Commercial",
+    "description": "Commercial district implementing the South Berkeley Area Plan. Allows retail, services, and mixed-use residential. Vehicle service stations not permitted; vehicle sales must be indoor only.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-AC": {
+    "name": "Ashby BART Commercial",
+    "description": "Commercial district around the Ashby BART station. Oriented toward transit-accessible mixed-use development.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-N": {
+    "name": "Neighborhood Commercial",
+    "description": "Small-scale commercial zone serving immediate neighborhood needs. Allows retail shops, restaurants, personal services, with residential uses above ground floor.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-NS": {
+    "name": "North Shattuck Commercial",
+    "description": "Commercial district for the North Shattuck corridor (Gourmet Ghetto area). Restaurants, specialty retail, and mixed-use development.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-C": {
+    "name": "City Center Commercial",
+    "description": "Intense commercial zone in downtown Berkeley. Allows offices, retail, restaurants, entertainment, and high-density residential.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-T": {
+    "name": "Telegraph Avenue Commercial",
+    "description": "Commercial district along Telegraph Avenue near UC Berkeley. Student-oriented retail, restaurants, and mixed-use.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-U": {
+    "name": "University Avenue Commercial",
+    "description": "Commercial district along University Avenue. Mixed-use corridor connecting downtown to the waterfront.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-SO": {
+    "name": "Solano Avenue Commercial",
+    "description": "Commercial district along Solano Avenue. Neighborhood retail, restaurants, and services with a small-town character.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-DMU Buffer": {
+    "name": "Downtown Mixed Use \u2014 Buffer",
+    "description": "Transition zone between downtown core and surrounding residential. Lower intensity mixed-use than the core DMU zones.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-DMU Core": {
+    "name": "Downtown Mixed Use \u2014 Core",
+    "description": "Highest intensity downtown zone. Allows tall mixed-use buildings, offices, residential towers, and major commercial uses.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-DMU Outer Core": {
+    "name": "Downtown Mixed Use \u2014 Outer Core",
+    "description": "Mid-intensity downtown zone between the core and buffer. Mixed-use with moderate height allowances.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-E": {
+    "name": "Elmwood Commercial",
+    "description": "Small commercial district in the Elmwood neighborhood. Local retail and services with residential above.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "M": {
+    "name": "Manufacturing",
+    "description": "Industrial/manufacturing zone. Allows factories, warehouses, and heavy commercial uses. Limited residential.",
+    "hillside": false,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-N(H)": {
+    "name": "Neighborhood Commercial \u2014 Hillside Overlay",
+    "description": "Small-scale commercial zone serving immediate neighborhood needs. Allows retail shops, restaurants, personal services, with residential uses above ground floor. Hillside Overlay restrictions apply.",
+    "hillside": true,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  },
+  "C-NS(H)": {
+    "name": "North Shattuck Commercial \u2014 Hillside Overlay",
+    "description": "Commercial district for the North Shattuck corridor (Gourmet Ghetto area). Restaurants, specialty retail, and mixed-use development. Hillside Overlay restrictions apply.",
+    "hillside": true,
+    "source_url": "https://berkeley.municipal.codes/BMC/23",
+    "source_document": "Berkeley Municipal Code Title 23",
+    "last_verified": "2026-03-12T03:29:11.872475+00:00"
+  }
+}

@@ -18,8 +18,23 @@ PROCESSED_DIR = DATA_DIR / "processed"
 GEO_DIR = DATA_DIR / "geo"
 DB_PATH = DATA_DIR / "berkeley_homebuyer.db"
 
+# Regulation data (JSON knowledge base)
+REGULATIONS_DIR = DATA_DIR / "regulations"
+REGULATIONS_SEED_DIR = REGULATIONS_DIR / "seed"
+REGULATIONS_SOURCES_DIR = REGULATIONS_DIR / "sources"
+
 # PostgreSQL connection URL (when set, overrides SQLite file path)
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+# ---------------------------------------------------------------------------
+# Authentication / JWT
+# ---------------------------------------------------------------------------
+JWT_SECRET_KEY = os.environ.get(
+    "JWT_SECRET_KEY",
+    "dev-secret-DO-NOT-USE-IN-PRODUCTION",
+)
+JWT_ALGORITHM = "HS256"
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
 # ---------------------------------------------------------------------------
 # Redfin gis-csv API
@@ -69,6 +84,41 @@ RENTCAST_API_KEY = os.environ.get("RENTCAST_API_KEY", "")
 # Anthropic Claude API (optional — enables AI-powered property summaries)
 # ---------------------------------------------------------------------------
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+# ---------------------------------------------------------------------------
+# Accela Citizen Access (Berkeley building permits)
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Berkeley Municipal Code & regulation source URLs (for regulation scraping)
+# ---------------------------------------------------------------------------
+BMC_TITLE_23_BASE = "https://berkeley.municipal.codes/BMC/23"
+BMC_ZONING_SECTIONS: dict[str, str] = {
+    "residential": "https://berkeley.municipal.codes/BMC/23.202",
+    "commercial": "https://berkeley.municipal.codes/BMC/23.204",
+    "mixed_use": "https://berkeley.municipal.codes/BMC/23.206",
+    "manufacturing": "https://berkeley.municipal.codes/BMC/23.208",
+    "adu": "https://berkeley.municipal.codes/BMC/23.306",
+    "hillside": "https://berkeley.municipal.codes/BMC/23.210",
+}
+BERKELEYCA_MIDDLE_HOUSING_URL = (
+    "https://berkeleyca.gov/construction-development/"
+    "land-use-development/middle-housing-zoning"
+)
+BERKELEYCA_TRANSFER_TAX_URL = (
+    "https://berkeleyca.gov/city-services/report-pay/property-transfer-tax"
+)
+BERKELEYCA_BESO_INFO_URL = (
+    "https://berkeleyca.gov/construction-development/green-building/"
+    "building-emissions-saving-ordinance-beso"
+)
+BERKELEYCA_PERMITTING_URL = (
+    "https://berkeleyca.gov/construction-development/"
+    "permits-design-parameters/permit-process"
+)
+RENT_BOARD_URL = "https://rentboard.berkeleyca.gov/"
+RENT_BOARD_RENT_CONTROL_URL = (
+    "https://rentboard.berkeleyca.gov/rights-responsibilities/rent-control-101"
+)
 
 # ---------------------------------------------------------------------------
 # Accela Citizen Access (Berkeley building permits)
