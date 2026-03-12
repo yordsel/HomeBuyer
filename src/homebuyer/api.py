@@ -17,7 +17,7 @@ from dataclasses import asdict
 from pathlib import Path as _Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 
@@ -314,6 +314,7 @@ class AuthUserCreate(BaseModel):
     email: EmailStr
     password: str
     full_name: Optional[str] = None
+    accepted_tos_version: Optional[str] = None
 
 
 class AuthUserLogin(BaseModel):
@@ -646,7 +647,7 @@ def random_fun_fact():
 
 
 @app.post("/api/auth/register")
-def auth_register(req: AuthUserCreate):
+def auth_register(req: AuthUserCreate, request: Request):
     """Create a new user account and return a JWT token."""
     from homebuyer.auth import (
         AuthResponse,
@@ -658,6 +659,9 @@ def auth_register(req: AuthUserCreate):
     if len(req.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
+    if not req.accepted_tos_version:
+        raise HTTPException(status_code=400, detail="You must accept the Terms and Conditions")
+
     existing = _state.db.get_user_by_email(req.email)
     if existing:
         raise HTTPException(status_code=409, detail="An account with this email already exists")
@@ -665,6 +669,14 @@ def auth_register(req: AuthUserCreate):
     password_hash = hash_password(req.password)
     user = _state.db.create_user(
         email=req.email, password_hash=password_hash, full_name=req.full_name
+    )
+
+    # Record TOS acceptance
+    client_ip = request.client.host if request.client else None
+    _state.db.create_tos_acceptance(
+        user_id=user["id"],
+        tos_version=req.accepted_tos_version,
+        ip_address=client_ip,
     )
 
     token = create_access_token(data={"sub": str(user["id"])})
@@ -707,6 +719,17 @@ def auth_me(user_id: int = Depends(get_current_user_id)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return UserResponse(id=user["id"], email=user["email"], full_name=user.get("full_name"))
+
+
+# --- Terms of Service ---
+
+CURRENT_TOS_VERSION = "1.0"
+
+
+@app.get("/api/terms/current")
+def get_current_tos_version():
+    """Return the current Terms of Service version."""
+    return {"version": CURRENT_TOS_VERSION}
 
 
 # --- Conversations ---

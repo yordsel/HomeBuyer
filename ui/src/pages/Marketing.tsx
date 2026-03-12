@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { LogIn, UserPlus, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { TOS_VERSION, TermsPage } from './Terms';
 
 /* -------------------------------------------------------------------------- */
 /*  Auth Modal                                                                 */
@@ -13,7 +14,19 @@ function AuthModal({ onClose, initialMode = 'login' }: { onClose: () => void; in
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [acceptedTos, setAcceptedTos] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  if (showTerms) {
+    return (
+      <div className="fixed inset-0 z-[100] overflow-y-auto bg-black/60 backdrop-blur-sm" onClick={onClose}>
+        <div onClick={(e) => e.stopPropagation()}>
+          <TermsPage onBack={() => setShowTerms(false)} />
+        </div>
+      </div>
+    );
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,7 +38,12 @@ function AuthModal({ onClose, initialMode = 'login' }: { onClose: () => void; in
           setLoading(false);
           return;
         }
-        await register(email, password, fullName || undefined);
+        if (!acceptedTos) {
+          toast.error('You must accept the Terms and Conditions');
+          setLoading(false);
+          return;
+        }
+        await register(email, password, fullName || undefined, TOS_VERSION);
         toast.success('Account created successfully');
       } else {
         await login(email, password);
@@ -74,7 +92,27 @@ function AuthModal({ onClose, initialMode = 'login' }: { onClose: () => void; in
               placeholder={mode === 'register' ? 'At least 8 characters' : 'Enter your password'}
               minLength={mode === 'register' ? 8 : undefined} />
           </div>
-          <button type="submit" disabled={loading}
+          {mode === 'register' && (
+            <label className="flex items-start gap-2 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={acceptedTos}
+                onChange={(e) => setAcceptedTos(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+              />
+              <span>
+                I agree to the{' '}
+                <button
+                  type="button"
+                  onClick={() => setShowTerms(true)}
+                  className="font-medium text-amber-600 hover:text-amber-700 underline"
+                >
+                  Terms and Conditions
+                </button>
+              </span>
+            </label>
+          )}
+          <button type="submit" disabled={loading || (mode === 'register' && !acceptedTos)}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-bold text-slate-900 hover:bg-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
             {loading ? (
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-900 border-t-transparent" />
@@ -139,6 +177,7 @@ const FAQ_DATA = [
 export function MarketingPage() {
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [showTermsPage, setShowTermsPage] = useState(false);
 
   function openAuth(mode: 'login' | 'register' = 'login') {
     setAuthMode(mode);
@@ -149,6 +188,13 @@ export function MarketingPage() {
     <div className="bg-white text-gray-900 font-sans antialiased">
       {/* Auth Modal */}
       {showAuth && <AuthModal onClose={() => setShowAuth(false)} initialMode={authMode} />}
+
+      {/* Full-page Terms overlay */}
+      {showTermsPage && (
+        <div className="fixed inset-0 z-[90] overflow-y-auto bg-white">
+          <TermsPage onBack={() => setShowTermsPage(false)} />
+        </div>
+      )}
 
       {/* Sticky Nav */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-slate-900/95 backdrop-blur-sm border-b border-slate-800">
@@ -402,6 +448,11 @@ export function MarketingPage() {
         <div className="max-w-6xl mx-auto text-center space-y-2">
           <p className="text-slate-500 text-sm">Built with questionable judgment in Berkeley, CA</p>
           <p className="text-slate-600 text-xs">HomeBuyer is a side project. Not a real estate brokerage. Not financial advice. Not even a real company.</p>
+          <div className="flex justify-center gap-4 text-xs">
+            <button onClick={() => { setShowTermsPage(true); window.scrollTo(0, 0); }} className="text-slate-500 hover:text-slate-300 transition-colors underline">
+              Terms and Conditions
+            </button>
+          </div>
           <p className="text-slate-700 text-xs">&copy; 2026 HomeBuyer</p>
         </div>
       </footer>

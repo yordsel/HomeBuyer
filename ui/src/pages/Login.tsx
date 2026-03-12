@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { Home, LogIn, UserPlus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { TOS_VERSION, TermsPage } from './Terms';
 
 export function LoginPage() {
   const { login, register } = useAuth();
@@ -9,6 +10,8 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [acceptedTos, setAcceptedTos] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -22,7 +25,12 @@ export function LoginPage() {
           setLoading(false);
           return;
         }
-        await register(email, password, fullName || undefined);
+        if (!acceptedTos) {
+          toast.error('You must accept the Terms and Conditions');
+          setLoading(false);
+          return;
+        }
+        await register(email, password, fullName || undefined, TOS_VERSION);
         toast.success('Account created successfully');
       } else {
         await login(email, password);
@@ -33,6 +41,10 @@ export function LoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (showTerms) {
+    return <TermsPage onBack={() => setShowTerms(false)} />;
   }
 
   return (
@@ -101,9 +113,30 @@ export function LoginPage() {
               />
             </div>
 
+            {mode === 'register' && (
+              <label className="flex items-start gap-2 text-sm text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={acceptedTos}
+                  onChange={(e) => setAcceptedTos(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span>
+                  I agree to the{' '}
+                  <button
+                    type="button"
+                    onClick={() => setShowTerms(true)}
+                    className="font-medium text-blue-600 hover:text-blue-700 underline"
+                  >
+                    Terms and Conditions
+                  </button>
+                </span>
+              </label>
+            )}
+
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || (mode === 'register' && !acceptedTos)}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? (

@@ -499,8 +499,14 @@ export async function authRegister(
   email: string,
   password: string,
   full_name?: string,
+  accepted_tos_version?: string,
 ): Promise<AuthResponse> {
-  return apiPost('/api/auth/register', { email, password, full_name: full_name ?? null });
+  return apiPost('/api/auth/register', {
+    email,
+    password,
+    full_name: full_name ?? null,
+    accepted_tos_version: accepted_tos_version ?? null,
+  });
 }
 
 export async function authLogin(email: string, password: string): Promise<AuthResponse> {

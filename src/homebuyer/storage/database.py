@@ -402,6 +402,17 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_conv_messages_conv ON conversation_messages(conversation_id);
+
+CREATE TABLE IF NOT EXISTS tos_acceptances (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    tos_version     TEXT NOT NULL,
+    ip_address      TEXT,
+    accepted_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tos_user ON tos_acceptances(user_id);
 CREATE INDEX IF NOT EXISTS idx_conv_messages_idx ON conversation_messages(conversation_id, message_index);
 """
 
@@ -2226,6 +2237,29 @@ class Database:
         return self.fetchone(
             "SELECT id, email, full_name, is_active, created_at "
             "FROM users WHERE id = ?",
+            (user_id,),
+        )
+
+    # ------------------------------------------------------------------
+    # Terms of Service acceptance
+    # ------------------------------------------------------------------
+
+    def create_tos_acceptance(
+        self, user_id: int, tos_version: str, ip_address: str | None = None
+    ) -> dict:
+        """Record that a user accepted a specific version of the Terms."""
+        row_id = self._insert_returning_id(
+            "INSERT INTO tos_acceptances (user_id, tos_version, ip_address) VALUES (?, ?, ?)",
+            (user_id, tos_version, ip_address),
+        )
+        self.commit()
+        return {"id": row_id, "user_id": user_id, "tos_version": tos_version}
+
+    def get_latest_tos_acceptance(self, user_id: int) -> Optional[dict]:
+        """Return the most recent TOS acceptance for a user, or None."""
+        return self.fetchone(
+            "SELECT id, user_id, tos_version, ip_address, accepted_at "
+            "FROM tos_acceptances WHERE user_id = ? ORDER BY accepted_at DESC LIMIT 1",
             (user_id,),
         )
 
