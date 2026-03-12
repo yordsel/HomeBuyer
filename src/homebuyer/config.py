@@ -42,6 +42,11 @@ ALAMEDA_FIPS_COUNTY = "001"
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # ---------------------------------------------------------------------------
+# Environment (controls security header strictness, CSP policy, etc.)
+# ---------------------------------------------------------------------------
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
+
+# ---------------------------------------------------------------------------
 # Authentication / JWT
 # ---------------------------------------------------------------------------
 JWT_SECRET_KEY = os.environ.get(

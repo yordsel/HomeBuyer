@@ -30,7 +30,8 @@ import json
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from homebuyer.auth import get_current_user_id
-from homebuyer.config import CURRENT_TOS_VERSION, DATABASE_URL, DB_PATH, GEO_DIR
+from homebuyer.config import CURRENT_TOS_VERSION, DATABASE_URL, DB_PATH, ENVIRONMENT, GEO_DIR
+from homebuyer.middleware.security_headers import SecurityHeadersMiddleware
 from homebuyer.utils.serialization import safe_json_dumps
 
 logger = logging.getLogger(__name__)
@@ -645,6 +646,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security headers (CSP, X-Frame-Options, HSTS, etc.)
+app.add_middleware(SecurityHeadersMiddleware, environment=ENVIRONMENT)
 
 # ---------------------------------------------------------------------------
 # Rate limiting (slowapi)
