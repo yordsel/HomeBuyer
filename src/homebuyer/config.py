@@ -11,7 +11,11 @@ load_dotenv(override=True)
 # ---------------------------------------------------------------------------
 # Project paths (relative to project root)
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+# When installed via pip (e.g. on Render), __file__ is in site-packages and
+# the 3-parent trick lands inside the venv, not the repo checkout.  Fall back
+# to cwd() when the computed root doesn't contain the expected data/ dir.
+_computed_root = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = _computed_root if (_computed_root / "data").is_dir() else Path.cwd()
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"
