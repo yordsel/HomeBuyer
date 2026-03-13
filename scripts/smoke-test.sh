@@ -189,7 +189,7 @@ warn_status  POST  "$BASE/api/property/rental-analysis"  200  "Rental analysis" 
 
 # Investment prospectus depends on ML model + multiple analyzers — warn only
 warn_status  POST  "$BASE/api/property/prospectus"  200  "Investment prospectus" \
-  '{"address":"1200 Cedar St"}'
+  '{"address":"CLAREMONT AVE"}'
 
 # ---------------------------------------------------------------------------
 # 7. Auth endpoints (basic reachability — not testing login flow)
