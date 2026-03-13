@@ -23,6 +23,26 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# Residential property types from Redfin — used to exclude commercial
+# and large multifamily buildings from fun facts that assume single-family
+# scale (anomaly detection, neighborhood price spreads, etc.).
+_RESIDENTIAL_TYPES = (
+    "Single Family Residential",
+    "Condo/Co-op",
+    "Townhouse",
+    "Multi-Family (2-4 Unit)",
+)
+
+_RESIDENTIAL_FILTER = (
+    "property_type IN ("
+    + ", ".join(f"'{t}'" for t in _RESIDENTIAL_TYPES)
+    + ")"
+)
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -135,9 +155,14 @@ def _gen_least_expensive(db: Database) -> dict | None:
 
 
 def _gen_biggest_anomaly(db: Database) -> dict | None:
-    """Most anomalous recent sale (biggest delta vs neighborhood average)."""
+    """Most anomalous recent sale (biggest delta vs neighborhood average).
+
+    Only considers residential sales so that commercial or large
+    multifamily buildings don't dominate the result.
+    """
     cutoff = _date_ago(2, db=db)
     date_filter = _date_col_ge("s.sale_date", cutoff, db=db)
+    res_outer = _RESIDENTIAL_FILTER.replace("property_type", "s.property_type")
     row = db.fetchone(f"""
         SELECT s.address, s.sale_price, s.neighborhood,
                nm.avg_price,
@@ -147,10 +172,12 @@ def _gen_biggest_anomaly(db: Database) -> dict | None:
             SELECT neighborhood, CAST(AVG(sale_price) AS INTEGER) as avg_price
             FROM property_sales
             WHERE sale_price IS NOT NULL AND neighborhood IS NOT NULL
+              AND {_RESIDENTIAL_FILTER}
             GROUP BY neighborhood HAVING COUNT(*) >= 5
         ) nm ON s.neighborhood = nm.neighborhood
         WHERE s.sale_price IS NOT NULL
           AND {date_filter}
+          AND {res_outer}
         ORDER BY ABS(s.sale_price - nm.avg_price) DESC
         LIMIT 1
     """)
@@ -359,7 +386,11 @@ def _gen_sale_to_list(db: Database) -> dict | None:
 
 
 def _gen_price_spread(db: Database) -> dict | None:
-    """Gap between priciest and cheapest neighborhoods."""
+    """Gap between priciest and cheapest neighborhoods.
+
+    Restricted to residential sales so that a single large commercial
+    transaction doesn't skew an entire neighborhood's average.
+    """
     cutoff = _date_ago(2, db=db)
     date_filter = _date_col_ge("sale_date", cutoff, db=db)
     rows = db.fetchall(f"""
@@ -367,6 +398,7 @@ def _gen_price_spread(db: Database) -> dict | None:
         FROM property_sales
         WHERE sale_price IS NOT NULL AND neighborhood IS NOT NULL
           AND {date_filter}
+          AND {_RESIDENTIAL_FILTER}
         GROUP BY neighborhood HAVING COUNT(*) >= 5
         ORDER BY avg_price DESC
     """)
