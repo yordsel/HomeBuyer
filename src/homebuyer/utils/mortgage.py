@@ -3,11 +3,11 @@
 
 def get_current_mortgage_rate(db) -> float:
     """Get the latest 30-year mortgage rate from the database. Returns rate as percentage."""
-    row = db.conn.execute(
+    row = db.fetchone(
         """SELECT rate_30yr FROM mortgage_rates
            WHERE rate_30yr IS NOT NULL
            ORDER BY observation_date DESC LIMIT 1"""
-    ).fetchone()
+    )
     return row["rate_30yr"] if row else 6.5  # reasonable default
 
 
