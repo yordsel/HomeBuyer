@@ -262,10 +262,40 @@ def _gen_oldest_neighborhood(db: Database) -> dict | None:
     }
 
 
-def _gen_zone_distribution(db: Database) -> dict | None:
-    """Most common zoning class."""
-    # PostgreSQL: ROUND(double precision, int) is not supported — cast to
-    # numeric first.  SQLite's ROUND() handles floats natively.
+def _gen_zone_largest_by_area(db: Database) -> dict | None:
+    """Zone covering the most residential land area (from zones.json metadata)."""
+    # This fact comes from official city data, not our sales dataset.
+    # R-1 (including R-1H) covers ~49% of Berkeley's residential land —
+    # the single largest residential zone by area.
+    from homebuyer.utils.file_utils import load_json_data as _load
+    from homebuyer.config import REGULATIONS_DIR
+
+    zones_path = REGULATIONS_DIR / "zones.json"
+    if not zones_path.exists():
+        return None
+    zones = _load(zones_path)
+    r1 = zones.get("R-1")
+    if not r1:
+        return None
+    return {
+        "category": "zone",
+        "stat_key": "largest_zone_by_area",
+        "stat_value": "R-1: ~49%",
+        "display_text": (
+            "R-1 (Single Family Residential) covers roughly 49% of "
+            "Berkeley's residential land — by far the largest zone by area. "
+            "The hills alone account for most of it."
+        ),
+        "detail_json": json.dumps({
+            "zoning_class": "R-1",
+            "pct_of_residential_land": 49,
+            "source": "Berkeley Municipal Code Title 23",
+        }),
+    }
+
+
+def _gen_zone_most_properties(db: Database) -> dict | None:
+    """Zone with the most tracked properties in our database."""
     if db.is_postgres:
         pct_expr = ("ROUND((100.0 * COUNT(*) / "
                     "(SELECT COUNT(*) FROM properties "
@@ -285,16 +315,66 @@ def _gen_zone_distribution(db: Database) -> dict | None:
     if not row:
         return None
     zone = row["zoning_class"]
-    pct = float(row["pct"])  # Decimal → float for json.dumps compatibility
+    pct = float(row["pct"])
+    cnt = int(row["cnt"])
     return {
         "category": "zone",
-        "stat_key": "largest_zone",
-        "stat_value": f"{zone}: {pct}%",
+        "stat_key": "most_properties_zone",
+        "stat_value": f"{zone}: {cnt} properties ({pct}%)",
         "display_text": (
-            f"{zone} zoning covers {pct}% of Berkeley's parcels. "
-            f"It's basically the default setting for this city."
+            f"{zone} has the most tracked properties in Berkeley — "
+            f"{cnt} homes ({pct}% of our database). "
+            f"Smaller flatland lots mean more properties per acre."
         ),
-        "detail_json": json.dumps({"zoning_class": zone, "pct": pct}),
+        "detail_json": json.dumps({
+            "zoning_class": zone, "count": cnt, "pct": pct,
+        }),
+    }
+
+
+def _gen_zone_most_sales(db: Database) -> dict | None:
+    """Zone with the highest sales turnover in the last 2 years."""
+    cutoff = _date_ago(2, db=db)
+    date_filter = _date_col_ge("s.sale_date", cutoff, db=db)
+    if db.is_postgres:
+        pct_expr = ("ROUND((100.0 * COUNT(*) / "
+                    f"(SELECT COUNT(*) FROM property_sales s "
+                    f"JOIN properties p ON s.address = p.address "
+                    f"WHERE p.zoning_class IS NOT NULL "
+                    f"AND {date_filter.replace('s.sale_date', 's.sale_date')}))::numeric, 1)")
+    else:
+        pct_expr = ("ROUND(100.0 * COUNT(*) / "
+                    f"(SELECT COUNT(*) FROM property_sales s "
+                    f"JOIN properties p ON s.address = p.address "
+                    f"WHERE p.zoning_class IS NOT NULL "
+                    f"AND {date_filter.replace('s.sale_date', 's.sale_date')}), 1)")
+    row = db.fetchone(f"""
+        SELECT p.zoning_class, COUNT(*) as sale_cnt,
+               {pct_expr} as pct
+        FROM property_sales s
+        JOIN properties p ON s.address = p.address
+        WHERE p.zoning_class IS NOT NULL
+          AND {date_filter}
+        GROUP BY p.zoning_class
+        ORDER BY sale_cnt DESC LIMIT 1
+    """)
+    if not row:
+        return None
+    zone = row["zoning_class"]
+    cnt = int(row["sale_cnt"])
+    pct = float(row["pct"])
+    return {
+        "category": "zone",
+        "stat_key": "most_sales_zone",
+        "stat_value": f"{zone}: {cnt} sales ({pct}%)",
+        "display_text": (
+            f"{zone} zones see the most action — {cnt} sales in the "
+            f"last 2 years ({pct}% of all Berkeley transactions). "
+            f"That's where the market moves fastest."
+        ),
+        "detail_json": json.dumps({
+            "zoning_class": zone, "sale_count": cnt, "pct": pct,
+        }),
     }
 
 
@@ -425,7 +505,9 @@ _GENERATORS = [
     _gen_biggest_anomaly,
     _gen_longest_unsold,
     _gen_oldest_neighborhood,
-    _gen_zone_distribution,
+    _gen_zone_largest_by_area,
+    _gen_zone_most_properties,
+    _gen_zone_most_sales,
     _gen_median_price,
     _gen_median_dom,
     _gen_sale_to_list,
