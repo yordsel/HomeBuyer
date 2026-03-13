@@ -97,6 +97,8 @@ def _gen_most_expensive(db: Database) -> dict | None:
         JOIN precomputed_scenarios ps ON p.id = ps.property_id
             AND ps.scenario_type = 'buyer'
         WHERE {pred} IS NOT NULL
+          AND p.street_number IS NOT NULL AND p.street_number != ''
+          AND p.sqft IS NOT NULL AND p.sqft > 0
         ORDER BY predicted DESC LIMIT 1
     """)
     if not row:
@@ -125,6 +127,8 @@ def _gen_least_expensive(db: Database) -> dict | None:
         JOIN precomputed_scenarios ps ON p.id = ps.property_id
             AND ps.scenario_type = 'buyer'
         WHERE {pred} IS NOT NULL AND {pred} > 0
+          AND p.street_number IS NOT NULL AND p.street_number != ''
+          AND p.sqft IS NOT NULL AND p.sqft > 0
         ORDER BY predicted ASC LIMIT 1
     """)
     if not row:
@@ -209,6 +213,7 @@ def _gen_longest_unsold(db: Database) -> dict | None:
         FROM properties
         WHERE last_sale_date IS NOT NULL AND last_sale_date != ''
           AND neighborhood IS NOT NULL
+          AND street_number IS NOT NULL AND street_number != ''
         ORDER BY last_sale_date ASC LIMIT 1
     """)
     if not row or not row["last_sale_date"]:
