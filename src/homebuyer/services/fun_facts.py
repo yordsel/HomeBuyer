@@ -412,5 +412,9 @@ def generate_fun_facts(db: Database) -> list[dict]:
                 logger.info("No data for fact generator %s — skipped", name)
         except Exception:
             logger.warning("Fact generator %s failed", name, exc_info=True)
+            # PostgreSQL aborts the entire transaction on error — rollback so
+            # subsequent generators can still run.
+            if db.is_postgres:
+                db.conn.rollback()
     db.commit()
     return results

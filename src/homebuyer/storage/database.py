@@ -695,7 +695,7 @@ class Database:
         if self.is_postgres:
             self.execute(
                 "INSERT INTO fun_facts (category, stat_key, stat_value, display_text, detail_json, generated_at) "
-                "VALUES (%s, %s, %s, %s, %s, "
+                "VALUES (?, ?, ?, ?, ?, "
                 "TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')) "
                 "ON CONFLICT (category, stat_key) DO UPDATE SET "
                 "stat_value = EXCLUDED.stat_value, "
