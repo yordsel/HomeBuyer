@@ -10,17 +10,13 @@ from __future__ import annotations
 import logging
 from collections import Counter
 
+from homebuyer.utils.formatting import fmt_price as _fmt_price
+
 logger = logging.getLogger(__name__)
 
 # Maximum number of per-property detail lines in the summary.
 # Beyond this, we aggregate into stats to keep the summary compact.
 _MAX_PROPERTY_DETAIL_LINES = 10
-
-
-def _fmt_price(v: int | float | None) -> str:
-    if v is None:
-        return "N/A"
-    return f"${int(v):,}"
 
 
 class AnalysisAccumulator:

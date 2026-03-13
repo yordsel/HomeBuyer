@@ -96,3 +96,80 @@ export function truncate(s: string, maxLen: number): string {
   if (s.length <= maxLen) return s;
   return s.slice(0, maxLen - 1) + '\u2026';
 }
+
+// ---------------------------------------------------------------------------
+// Chart / time-series utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute a trailing moving average for a numeric series.
+ *
+ * Previously duplicated in TrendChart.tsx and AboveListChart.tsx.
+ *
+ * @param values  Array of nullable numbers (null entries are skipped).
+ * @param window  Number of trailing periods (default 12).
+ * @param minPoints  Minimum non-null points in the window to emit a
+ *                   value (default 3).
+ * @returns  Array of the same length with computed averages (or null).
+ */
+export function computeMovingAverage(
+  values: (number | null)[],
+  window = 12,
+  minPoints = 3,
+): (number | null)[] {
+  return values.map((_, i) => {
+    const start = Math.max(0, i - window + 1);
+    const slice = values.slice(start, i + 1).filter((v): v is number => v != null);
+    if (slice.length >= Math.min(window, i + 1) && slice.length >= minPoints) {
+      return slice.reduce((s, v) => s + v, 0) / slice.length;
+    }
+    return null;
+  });
+}
+
+export type TrendDirection = 'rising' | 'declining' | 'stable' | null;
+
+export interface TrendInfo {
+  label: string;
+  color: string;
+  direction: TrendDirection;
+}
+
+/**
+ * Determine trend direction from the last N values of a moving average.
+ *
+ * Previously duplicated in TrendChart.tsx and AboveListChart.tsx.
+ *
+ * @param maValues  Array of non-null MA values.
+ * @param lookback  Number of recent points to compare (default 6).
+ * @param threshold  Percentage change threshold for "stable" band (default 3).
+ * @param invertColors  If true, rising = red and declining = green
+ *                      (used for "sold above list" chart where lower is better
+ *                      for buyers). Default false.
+ */
+export function getTrendInfo(
+  maValues: number[],
+  lookback = 6,
+  threshold = 3,
+  invertColors = false,
+): TrendInfo {
+  if (maValues.length < lookback) {
+    return { label: '', color: 'text-gray-500', direction: null };
+  }
+
+  const recent = maValues.slice(-lookback);
+  const first = recent[0];
+  const last = recent[recent.length - 1];
+  const pctChange = ((last - first) / Math.abs(first)) * 100;
+
+  const risingColor = invertColors ? 'text-red-600' : 'text-green-600';
+  const decliningColor = invertColors ? 'text-green-600' : 'text-red-600';
+
+  if (pctChange < -threshold) {
+    return { label: 'Declining', color: decliningColor, direction: 'declining' };
+  }
+  if (pctChange > threshold) {
+    return { label: 'Rising', color: risingColor, direction: 'rising' };
+  }
+  return { label: 'Stable', color: 'text-amber-600', direction: 'stable' };
+}

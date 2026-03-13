@@ -13,7 +13,7 @@ import pytest
 
 from fastapi.testclient import TestClient
 
-from homebuyer.storage.database import Database
+from tests.conftest import _make_test_db
 
 
 # ---------------------------------------------------------------------------
@@ -62,10 +62,7 @@ def auth_db(tmp_path):
     Uses check_same_thread=False because FastAPI TestClient runs
     requests in a separate thread from the test thread.
     """
-    db_path = tmp_path / "auth_test.db"
-    db = Database(db_path)
-    db.connect(check_same_thread=False)
-    db.initialize_schema()
+    db = _make_test_db(tmp_path, check_same_thread=False)
     yield db
     db.close()
 

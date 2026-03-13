@@ -9,7 +9,7 @@ import {
   Tooltip,
 } from 'recharts';
 import type { MarketSnapshot } from '../types';
-import { formatCurrency } from '../lib/utils';
+import { formatCurrency, computeMovingAverage, getTrendInfo } from '../lib/utils';
 
 interface TrendChartProps {
   data: MarketSnapshot[];
@@ -56,51 +56,21 @@ export function TrendChart({
     const v = d[dataKey];
     return v != null ? (v as number) : null;
   });
+  const ma12Values = computeMovingAverage(rawValues);
 
-  const chartData = data.map((d, i) => {
-    const raw = rawValues[i];
-
-    // Trailing 12-month moving average
-    let ma12: number | null = null;
-    const window = 12;
-    const start = Math.max(0, i - window + 1);
-    const slice = rawValues.slice(start, i + 1).filter((v): v is number => v != null);
-    if (slice.length >= Math.min(window, i + 1) && slice.length >= 3) {
-      ma12 = slice.reduce((s, v) => s + v, 0) / slice.length;
-    }
-
-    return {
-      period: d.period,
-      raw,
-      ma12,
-    };
-  });
+  const chartData = data.map((d, i) => ({
+    period: d.period,
+    raw: rawValues[i],
+    ma12: ma12Values[i],
+  }));
 
   // Latest MA and raw for header
   const latestMa = [...chartData].reverse().find((d) => d.ma12 != null)?.ma12;
   const latestRaw = [...chartData].reverse().find((d) => d.raw != null)?.raw;
 
   // Trend direction from last 6 MA values
-  const maValues = chartData.filter((d) => d.ma12 != null);
-  let trendLabel = '';
-  let trendColor = 'text-gray-500';
-  if (maValues.length >= 6 && latestMa != null) {
-    const recent = maValues.slice(-6);
-    const first = recent[0].ma12!;
-    const last = recent[recent.length - 1].ma12!;
-    // Use percentage change for scale-independent comparison
-    const pctChange = ((last - first) / Math.abs(first)) * 100;
-    if (pctChange < -3) {
-      trendLabel = 'Declining';
-      trendColor = 'text-red-600';
-    } else if (pctChange > 3) {
-      trendLabel = 'Rising';
-      trendColor = 'text-green-600';
-    } else {
-      trendLabel = 'Stable';
-      trendColor = 'text-amber-600';
-    }
-  }
+  const nonNullMa = chartData.map((d) => d.ma12).filter((v): v is number => v != null);
+  const { label: trendLabel, color: trendColor } = getTrendInfo(nonNullMa);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">

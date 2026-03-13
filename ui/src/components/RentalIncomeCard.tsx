@@ -1,18 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
-  Loader2,
   DollarSign,
-  AlertTriangle,
   RefreshCw,
   Home,
   TrendingUp,
   PiggyBank,
   Receipt,
-  ChevronDown,
-  ChevronUp,
 } from 'lucide-react';
-import * as api from '../lib/api';
 import { formatCurrency, formatNumber } from '../lib/utils';
+import { useRentalAnalysis } from '../hooks/useRentalAnalysis';
+import { MetricBox, CollapsibleSection, CardLoading, CardError } from './shared';
 import type { RentalAnalysisResponse, ExpenseBreakdown } from '../types';
 
 interface RentalIncomeCardProps {
@@ -31,44 +28,9 @@ interface RentalIncomeCardProps {
 }
 
 export function RentalIncomeCard(props: RentalIncomeCardProps) {
-  const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<RentalAnalysisResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data: effectiveData, loading, error, refetch } = useRentalAnalysis(props);
   const [showExpenses, setShowExpenses] = useState(false);
   const [showMortgage, setShowMortgage] = useState(false);
-
-  // Use parent-provided data when available; fall back to internal fetch.
-  const effectiveData = props.rentalData ?? data;
-
-  useEffect(() => {
-    // Skip fetch when the parent already provides the data.
-    if (props.rentalData) return;
-    fetchAnalysis();
-  }, [props.latitude, props.longitude, props.rentalData, props.address, props.neighborhood, props.beds, props.baths, props.sqft, props.lot_size_sqft, props.year_built, props.list_price]);
-
-  async function fetchAnalysis() {
-    setLoading(true);
-    setError(null);
-    try {
-      const resp = await api.getRentalAnalysis({
-        latitude: props.latitude,
-        longitude: props.longitude,
-        address: props.address,
-        neighborhood: props.neighborhood,
-        beds: props.beds,
-        baths: props.baths,
-        sqft: props.sqft,
-        lot_size_sqft: props.lot_size_sqft,
-        year_built: props.year_built,
-        list_price: props.list_price,
-      });
-      setData(resp);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }
 
   // Get the as-is scenario for the summary card
   const asIs = effectiveData?.scenarios.find((s) => s.scenario_type === 'as_is') ?? null;
@@ -83,7 +45,7 @@ export function RentalIncomeCard(props: RentalIncomeCardProps) {
         </div>
         {effectiveData && (
           <button
-            onClick={fetchAnalysis}
+            onClick={refetch}
             className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600"
           >
             <RefreshCw size={12} />
@@ -95,24 +57,11 @@ export function RentalIncomeCard(props: RentalIncomeCardProps) {
       {/* Body */}
       <div className="px-6 py-4">
         {loading && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 size={20} className="animate-spin text-green-500 mr-2" />
-            <span className="text-sm text-gray-500">Analyzing rental income...</span>
-          </div>
+          <CardLoading message="Analyzing rental income..." spinnerColor="text-green-500" />
         )}
 
         {!loading && error && (
-          <div className="flex flex-col items-center py-6 text-center">
-            <AlertTriangle size={24} className="text-amber-400 mb-2" />
-            <p className="text-sm text-gray-600 mb-3">{error}</p>
-            <button
-              onClick={fetchAnalysis}
-              className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-800"
-            >
-              <RefreshCw size={12} />
-              Retry
-            </button>
-          </div>
+          <CardError message={error} onRetry={refetch} />
         )}
 
         {!loading && asIs && (
@@ -236,29 +185,6 @@ export function RentalIncomeCard(props: RentalIncomeCardProps) {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function MetricBox({
-  icon,
-  label,
-  value,
-  sub,
-  valueColor,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  sub?: string;
-  valueColor?: string;
-}) {
-  return (
-    <div className="bg-gray-50 rounded-lg p-3 text-center">
-      <div className="flex items-center justify-center gap-1 mb-1">{icon}</div>
-      <p className={`text-lg font-bold ${valueColor ?? 'text-gray-900'}`}>{value}</p>
-      <p className="text-xs font-medium text-gray-500">{label}</p>
-      {sub && <p className="text-xs text-gray-400">{sub}</p>}
-    </div>
-  );
-}
-
 function ExpenseTable({ expenses }: { expenses: ExpenseBreakdown }) {
   const items = [
     { label: 'Property Tax (1.17%)', value: expenses.property_tax },
@@ -300,36 +226,3 @@ function Row({
   );
 }
 
-function CollapsibleSection({
-  title,
-  subtitle,
-  open,
-  onToggle,
-  children,
-}: {
-  title: string;
-  subtitle: string;
-  open: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center justify-between px-3 py-2.5 bg-gray-50 hover:bg-gray-100 transition-colors"
-      >
-        <div className="text-left">
-          <p className="text-sm font-medium text-gray-700">{title}</p>
-          <p className="text-xs text-gray-500">{subtitle}</p>
-        </div>
-        {open ? (
-          <ChevronUp size={16} className="text-gray-400" />
-        ) : (
-          <ChevronDown size={16} className="text-gray-400" />
-        )}
-      </button>
-      {open && <div className="px-3 py-3 border-t border-gray-200">{children}</div>}
-    </div>
-  );
-}

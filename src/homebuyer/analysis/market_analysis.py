@@ -10,6 +10,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 from homebuyer.storage.database import Database
+from homebuyer.utils.mortgage import get_current_mortgage_rate
 
 logger = logging.getLogger(__name__)
 
@@ -706,15 +707,7 @@ class MarketAnalyzer:
             Dict with affordable price range and neighborhood options.
         """
         # Get current mortgage rate
-        rate_row = self.db.execute(
-            """
-            SELECT rate_30yr FROM mortgage_rates
-            WHERE rate_30yr IS NOT NULL
-            ORDER BY observation_date DESC LIMIT 1
-            """
-        ).fetchone()
-
-        rate_30yr = rate_row["rate_30yr"] if rate_row else 6.5
+        rate_30yr = get_current_mortgage_rate(self.db)
         monthly_rate = (rate_30yr / 100) / 12
         n_payments = 360  # 30 years
 

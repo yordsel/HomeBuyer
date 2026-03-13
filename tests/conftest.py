@@ -8,13 +8,26 @@ import pytest
 from homebuyer.storage.database import Database
 
 
+def _make_test_db(tmp_path: Path, *, check_same_thread: bool = True) -> Database:
+    """Create a temporary database for testing.
+
+    Args:
+        tmp_path: Pytest-provided temporary directory.
+        check_same_thread: SQLite ``check_same_thread`` flag.
+            Set to ``False`` for FastAPI ``TestClient`` tests that run
+            requests in a separate thread.
+    """
+    db_path = tmp_path / "test.db"
+    db = Database(db_path)
+    db.connect(check_same_thread=check_same_thread)
+    db.initialize_schema()
+    return db
+
+
 @pytest.fixture
 def tmp_db(tmp_path: Path) -> Database:
     """Create a temporary database for testing."""
-    db_path = tmp_path / "test.db"
-    db = Database(db_path)
-    db.connect()
-    db.initialize_schema()
+    db = _make_test_db(tmp_path)
     yield db
     db.close()
 

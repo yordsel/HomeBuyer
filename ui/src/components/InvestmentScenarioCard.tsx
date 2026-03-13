@@ -1,19 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
-  Loader2,
   BarChart3,
-  AlertTriangle,
   RefreshCw,
   Trophy,
   TrendingUp,
   Building,
   Home,
   Scissors,
-  ChevronDown,
-  ChevronUp,
 } from 'lucide-react';
-import * as api from '../lib/api';
 import { formatCurrency, formatCompact, formatNumber } from '../lib/utils';
+import { useRentalAnalysis } from '../hooks/useRentalAnalysis';
+import { MetricBox, CollapsibleSection, CardLoading, CardError } from './shared';
 import type {
   RentalAnalysisResponse,
   InvestmentScenario,
@@ -43,45 +40,9 @@ const SCENARIO_ICONS: Record<string, React.ReactNode> = {
 };
 
 export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
-  const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<RentalAnalysisResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data: effectiveData, loading, error, refetch } = useRentalAnalysis(props);
   const [activeTab, setActiveTab] = useState(0);
   const [showProjections, setShowProjections] = useState(false);
-
-  // Use parent-provided data when available; fall back to internal fetch.
-  const effectiveData = props.rentalData ?? data;
-
-  useEffect(() => {
-    // Skip fetch when the parent already provides the data.
-    if (props.rentalData) return;
-    fetchAnalysis();
-  }, [props.latitude, props.longitude, props.rentalData, props.address, props.neighborhood, props.beds, props.baths, props.sqft, props.lot_size_sqft, props.year_built, props.list_price]);
-
-  async function fetchAnalysis() {
-    setLoading(true);
-    setError(null);
-    try {
-      const resp = await api.getRentalAnalysis({
-        latitude: props.latitude,
-        longitude: props.longitude,
-        address: props.address,
-        neighborhood: props.neighborhood,
-        beds: props.beds,
-        baths: props.baths,
-        sqft: props.sqft,
-        lot_size_sqft: props.lot_size_sqft,
-        year_built: props.year_built,
-        list_price: props.list_price,
-      });
-      setData(resp);
-      setActiveTab(0);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }
 
   const scenarios = effectiveData?.scenarios ?? [];
   const activeScenario = scenarios[activeTab] ?? null;
@@ -102,7 +63,7 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
         </div>
         {effectiveData && (
           <button
-            onClick={fetchAnalysis}
+            onClick={refetch}
             className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600"
           >
             <RefreshCw size={12} />
@@ -114,23 +75,14 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
       {/* Body */}
       <div>
         {loading && (
-          <div className="flex items-center justify-center py-8 px-6">
-            <Loader2 size={20} className="animate-spin text-indigo-500 mr-2" />
-            <span className="text-sm text-gray-500">Analyzing investment scenarios...</span>
+          <div className="px-6">
+            <CardLoading message="Analyzing investment scenarios..." spinnerColor="text-indigo-500" />
           </div>
         )}
 
         {!loading && error && (
-          <div className="flex flex-col items-center py-6 px-6 text-center">
-            <AlertTriangle size={24} className="text-amber-400 mb-2" />
-            <p className="text-sm text-gray-600 mb-3">{error}</p>
-            <button
-              onClick={fetchAnalysis}
-              className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-800"
-            >
-              <RefreshCw size={12} />
-              Retry
-            </button>
+          <div className="px-6">
+            <CardError message={error} onRetry={refetch} />
           </div>
         )}
 
@@ -200,7 +152,7 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
 
                 {/* Investment Summary */}
                 <div className="grid grid-cols-3 gap-3">
-                  <StatBox
+                  <MetricBox
                     label="Total Investment"
                     value={formatCompact(activeScenario.total_investment)}
                     sub={
@@ -209,12 +161,12 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
                         : 'Property value'
                     }
                   />
-                  <StatBox
+                  <MetricBox
                     label="Monthly Rent"
                     value={formatCurrency(activeScenario.total_monthly_rent)}
                     sub={`${activeScenario.units.length} unit${activeScenario.units.length > 1 ? 's' : ''}`}
                   />
-                  <StatBox
+                  <MetricBox
                     label="Monthly Cash Flow"
                     value={formatCurrency(activeScenario.monthly_cash_flow)}
                     sub={activeScenario.monthly_cash_flow >= 0 ? 'Positive' : 'Negative'}
@@ -257,29 +209,17 @@ export function InvestmentScenarioCard(props: InvestmentScenarioCardProps) {
 
                 {/* Cash Flow Projections (collapsible) */}
                 {activeScenario.projections.length > 0 && (
-                  <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <button
-                      onClick={() => setShowProjections(!showProjections)}
-                      className="w-full flex items-center justify-between px-3 py-2.5 bg-gray-50 hover:bg-gray-100 transition-colors"
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <TrendingUp size={14} className="text-indigo-600" />
-                        <span className="text-sm font-medium text-gray-700">
-                          Cash Flow Projections
-                        </span>
-                      </div>
-                      {showProjections ? (
-                        <ChevronUp size={16} className="text-gray-400" />
-                      ) : (
-                        <ChevronDown size={16} className="text-gray-400" />
-                      )}
-                    </button>
-                    {showProjections && (
-                      <div className="border-t border-gray-200 overflow-x-auto">
-                        <ProjectionTable projections={activeScenario.projections} />
-                      </div>
-                    )}
-                  </div>
+                  <CollapsibleSection
+                    title="Cash Flow Projections"
+                    subtitle={`${activeScenario.projections.length}-year outlook`}
+                    open={showProjections}
+                    onToggle={() => setShowProjections(!showProjections)}
+                    icon={<TrendingUp size={14} className="text-indigo-600" />}
+                  >
+                    <div className="overflow-x-auto -mx-3 -my-3">
+                      <ProjectionTable projections={activeScenario.projections} />
+                    </div>
+                  </CollapsibleSection>
                 )}
               </div>
             )}
@@ -329,26 +269,6 @@ function ComparisonPill({
       </p>
       <p className="text-xs text-gray-400">CoC</p>
     </button>
-  );
-}
-
-function StatBox({
-  label,
-  value,
-  sub,
-  valueColor,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  valueColor?: string;
-}) {
-  return (
-    <div className="bg-gray-50 rounded-lg p-3 text-center">
-      <p className={`text-lg font-bold ${valueColor ?? 'text-gray-900'}`}>{value}</p>
-      <p className="text-xs font-medium text-gray-500">{label}</p>
-      {sub && <p className="text-xs text-gray-400">{sub}</p>}
-    </div>
   );
 }
 

@@ -16,6 +16,8 @@ import logging
 from datetime import date
 from typing import TYPE_CHECKING
 
+from homebuyer.utils.formatting import fmt_price as _fmt_price
+
 if TYPE_CHECKING:
     from homebuyer.storage.database import Database
 
@@ -45,17 +47,6 @@ _RESIDENTIAL_FILTER = (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _fmt_price(val: float | int | None) -> str:
-    """Format a price as $X,XXX,XXX or $X.XXM for millions."""
-    if val is None:
-        return "N/A"
-    val = int(val)
-    if val >= 1_000_000:
-        m = val / 1_000_000
-        # Use one decimal if not a round number
-        return f"${m:.1f}M" if val % 100_000 else f"${m:.0f}M"
-    return f"${val:,}"
 
 
 def _json_val(col: str, path: str, *, db: Database, cast: str = "INTEGER") -> str:

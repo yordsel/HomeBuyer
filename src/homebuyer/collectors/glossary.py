@@ -21,6 +21,7 @@ from typing import Any
 
 import requests
 
+from homebuyer.utils.file_utils import load_json_data
 from homebuyer.config import (
     ALAMEDA_FIPS_COUNTY,
     ALAMEDA_FIPS_STATE,
@@ -113,9 +114,7 @@ class GlossaryCollector:
         if not path.exists():
             logger.warning("Glossary file not found: %s", path)
             return {}
-        with open(path) as f:
-            raw = json.load(f)
-        return {k: v for k, v in raw.items() if not k.startswith("$")}
+        return load_json_data(path)
 
     # ------------------------------------------------------------------
     # FHFA conforming loan limits

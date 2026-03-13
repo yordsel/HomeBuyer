@@ -17,26 +17,14 @@ Sources:
 
 from __future__ import annotations
 
-import json
 import logging
 import re
-from pathlib import Path
 from typing import Optional
 
 from homebuyer.config import REGULATIONS_DIR
+from homebuyer.utils.file_utils import load_json_data as _load_json
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# JSON loading
-# ---------------------------------------------------------------------------
-
-def _load_json(path: Path) -> dict:
-    """Load a JSON regulation file, filtering out ``$meta`` keys."""
-    with open(path) as f:
-        raw = json.load(f)
-    return {k: v for k, v in raw.items() if not k.startswith("$")}
 
 
 # Load zone definitions and regulation categories at import time.

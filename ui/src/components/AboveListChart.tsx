@@ -10,6 +10,7 @@ import {
   ReferenceLine,
 } from 'recharts';
 import type { MarketSnapshot } from '../types';
+import { computeMovingAverage, getTrendInfo } from '../lib/utils';
 
 interface AboveListChartProps {
   data: MarketSnapshot[];
@@ -20,55 +21,26 @@ export function AboveListChart({ data }: AboveListChartProps) {
   const rawValues = data.map((d) =>
     d.sold_above_list_pct != null ? d.sold_above_list_pct : null,
   );
+  const ma12Values = computeMovingAverage(rawValues);
 
-  const chartData = data.map((d, i) => {
-    const raw =
-      d.sold_above_list_pct != null ? Math.round(d.sold_above_list_pct) : null;
-
-    // Compute trailing 12-month moving average
-    let ma12: number | null = null;
-    const window = 12;
-    const start = Math.max(0, i - window + 1);
-    const slice = rawValues.slice(start, i + 1).filter((v): v is number => v != null);
-    if (slice.length >= Math.min(window, i + 1) && slice.length >= 3) {
-      ma12 = Math.round((slice.reduce((s, v) => s + v, 0) / slice.length) * 10) / 10;
-    }
-
-    return {
-      period: d.period,
-      raw,
-      ma12,
-      saleToList:
-        d.sale_to_list_ratio != null
-          ? Math.round(d.sale_to_list_ratio * 1000) / 10
-          : null,
-    };
-  });
+  const chartData = data.map((d, i) => ({
+    period: d.period,
+    raw: d.sold_above_list_pct != null ? Math.round(d.sold_above_list_pct) : null,
+    ma12: ma12Values[i] != null ? Math.round(ma12Values[i]! * 10) / 10 : null,
+    saleToList:
+      d.sale_to_list_ratio != null
+        ? Math.round(d.sale_to_list_ratio * 1000) / 10
+        : null,
+  }));
 
   // Find latest MA value for header display
   const latestMa = [...chartData].reverse().find((d) => d.ma12 != null)?.ma12;
   const latestRaw = [...chartData].reverse().find((d) => d.raw != null)?.raw;
 
-  // Determine trend direction from MA values
-  const maValues = chartData.filter((d) => d.ma12 != null);
-  let trendLabel = '';
-  let trendColor = 'text-gray-500';
-  if (maValues.length >= 6) {
-    const recent = maValues.slice(-6);
-    const first = recent[0].ma12!;
-    const last = recent[recent.length - 1].ma12!;
-    const diff = last - first;
-    if (diff < -3) {
-      trendLabel = 'Declining';
-      trendColor = 'text-green-600';
-    } else if (diff > 3) {
-      trendLabel = 'Rising';
-      trendColor = 'text-red-600';
-    } else {
-      trendLabel = 'Stable';
-      trendColor = 'text-amber-600';
-    }
-  }
+  // Determine trend direction — invert colors because for "sold above list",
+  // rising = bad for buyers (red), declining = good for buyers (green)
+  const nonNullMa = chartData.map((d) => d.ma12).filter((v): v is number => v != null);
+  const { label: trendLabel, color: trendColor } = getTrendInfo(nonNullMa, 6, 3, true);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">

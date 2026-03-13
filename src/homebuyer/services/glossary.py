@@ -16,25 +16,13 @@ Sources:
 
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
 from typing import Optional
 
 from homebuyer.config import GLOSSARY_DIR
+from homebuyer.utils.file_utils import load_json_data as _load_json
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# JSON loading
-# ---------------------------------------------------------------------------
-
-def _load_json(path: Path) -> dict:
-    """Load a JSON glossary file, filtering out ``$meta`` keys."""
-    with open(path) as f:
-        raw = json.load(f)
-    return {k: v for k, v in raw.items() if not k.startswith("$")}
 
 
 # Load glossary terms at import time.
