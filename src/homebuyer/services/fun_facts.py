@@ -61,6 +61,18 @@ def _date_ago(years: int, *, db: Database) -> str:
     return f"date('now', '-{years} years')"
 
 
+def _date_col_ge(col: str, cutoff_expr: str, *, db: Database) -> str:
+    """Compare a TEXT date column >= a cutoff expression, dialect-aware.
+
+    In PostgreSQL the column must be explicitly cast to ``date`` because
+    TEXT cannot be compared to a ``timestamp`` / ``date`` value.  In SQLite
+    the ISO-8601 text representation sorts correctly as-is.
+    """
+    if db.is_postgres:
+        return f"{col}::date >= {cutoff_expr}"
+    return f"{col} >= {cutoff_expr}"
+
+
 # ---------------------------------------------------------------------------
 # Fact generators
 # ---------------------------------------------------------------------------
@@ -125,6 +137,7 @@ def _gen_least_expensive(db: Database) -> dict | None:
 def _gen_biggest_anomaly(db: Database) -> dict | None:
     """Most anomalous recent sale (biggest delta vs neighborhood average)."""
     cutoff = _date_ago(2, db=db)
+    date_filter = _date_col_ge("s.sale_date", cutoff, db=db)
     row = db.fetchone(f"""
         SELECT s.address, s.sale_price, s.neighborhood,
                nm.avg_price,
@@ -137,7 +150,7 @@ def _gen_biggest_anomaly(db: Database) -> dict | None:
             GROUP BY neighborhood HAVING COUNT(*) >= 5
         ) nm ON s.neighborhood = nm.neighborhood
         WHERE s.sale_price IS NOT NULL
-          AND s.sale_date >= {cutoff}
+          AND {date_filter}
         ORDER BY ABS(s.sale_price - nm.avg_price) DESC
         LIMIT 1
     """)
@@ -233,11 +246,19 @@ def _gen_oldest_neighborhood(db: Database) -> dict | None:
 
 def _gen_zone_distribution(db: Database) -> dict | None:
     """Most common zoning class."""
-    row = db.fetchone("""
+    # PostgreSQL: ROUND(double precision, int) is not supported — cast to
+    # numeric first.  SQLite's ROUND() handles floats natively.
+    if db.is_postgres:
+        pct_expr = ("ROUND((100.0 * COUNT(*) / "
+                    "(SELECT COUNT(*) FROM properties "
+                    "WHERE zoning_class IS NOT NULL))::numeric, 1)")
+    else:
+        pct_expr = ("ROUND(100.0 * COUNT(*) / "
+                    "(SELECT COUNT(*) FROM properties "
+                    "WHERE zoning_class IS NOT NULL), 1)")
+    row = db.fetchone(f"""
         SELECT zoning_class, COUNT(*) as cnt,
-               ROUND(100.0 * COUNT(*) /
-                   (SELECT COUNT(*) FROM properties WHERE zoning_class IS NOT NULL), 1
-               ) as pct
+               {pct_expr} as pct
         FROM properties
         WHERE zoning_class IS NOT NULL
         GROUP BY zoning_class
@@ -246,7 +267,7 @@ def _gen_zone_distribution(db: Database) -> dict | None:
     if not row:
         return None
     zone = row["zoning_class"]
-    pct = row["pct"]
+    pct = float(row["pct"])  # Decimal → float for json.dumps compatibility
     return {
         "category": "zone",
         "stat_key": "largest_zone",
@@ -340,11 +361,12 @@ def _gen_sale_to_list(db: Database) -> dict | None:
 def _gen_price_spread(db: Database) -> dict | None:
     """Gap between priciest and cheapest neighborhoods."""
     cutoff = _date_ago(2, db=db)
+    date_filter = _date_col_ge("sale_date", cutoff, db=db)
     rows = db.fetchall(f"""
         SELECT neighborhood, CAST(AVG(sale_price) AS INTEGER) as avg_price
         FROM property_sales
         WHERE sale_price IS NOT NULL AND neighborhood IS NOT NULL
-          AND sale_date >= {cutoff}
+          AND {date_filter}
         GROUP BY neighborhood HAVING COUNT(*) >= 5
         ORDER BY avg_price DESC
     """)
