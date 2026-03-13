@@ -472,7 +472,21 @@ export function streamFaketorMessage(
 
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
-        callbacks.onError(data.detail ?? `HTTP ${resp.status}`);
+        // FastAPI 422 returns `detail` as an array of validation errors;
+        // extract a human-readable string so toast.error() doesn't choke.
+        let errMsg = `HTTP ${resp.status}`;
+        if (data.detail) {
+          if (typeof data.detail === 'string') {
+            errMsg = data.detail;
+          } else if (Array.isArray(data.detail)) {
+            errMsg = data.detail
+              .map((e: { msg?: string }) => e.msg ?? JSON.stringify(e))
+              .join('; ');
+          } else {
+            errMsg = JSON.stringify(data.detail);
+          }
+        }
+        callbacks.onError(errMsg);
         return;
       }
 

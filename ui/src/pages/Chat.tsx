@@ -295,6 +295,11 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
         content: m.content,
       }));
 
+      // Safely truncate float→int for fields the backend expects as integers.
+      // Property detail data can arrive as floats from the DB or enrichment.
+      const safeInt = (v: number | undefined) =>
+        v != null && Number.isFinite(v) ? Math.round(v) : undefined;
+
       const controller = api.streamFaketorMessage(
         {
           latitude: activeProperty?.latitude ?? 37.8716,
@@ -307,9 +312,9 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
           zip_code: activeProperty?.zip_code,
           beds: activeProperty?.beds,
           baths: activeProperty?.baths,
-          sqft: activeProperty?.sqft,
-          lot_size_sqft: activeProperty?.lot_size_sqft,
-          year_built: activeProperty?.year_built,
+          sqft: safeInt(activeProperty?.sqft),
+          lot_size_sqft: safeInt(activeProperty?.lot_size_sqft),
+          year_built: safeInt(activeProperty?.year_built),
           property_type: activeProperty?.property_type,
           property_category: activeProperty?.property_category,
         },

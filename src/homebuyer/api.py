@@ -2257,9 +2257,11 @@ class FaketorChatRequest(BaseModel):
     zip_code: Optional[str] = None
     beds: Optional[float] = None
     baths: Optional[float] = None
-    sqft: Optional[int] = None
-    lot_size_sqft: Optional[int] = None
-    year_built: Optional[int] = None
+    # Accept floats from the frontend (property detail data may arrive as float)
+    # and truncate to int so downstream code still sees integers.
+    sqft: Optional[float] = None
+    lot_size_sqft: Optional[float] = None
+    year_built: Optional[float] = None
     property_type: Optional[str] = "Single Family Residential"
     property_category: Optional[str] = None  # sfr, condo, duplex, etc.
 
@@ -3681,14 +3683,19 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
 
 def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
     """Resolve property context from request + DB for Faketor chat."""
+    # Truncate float→int for fields that downstream code treats as int
+    _sqft = int(req.sqft) if req.sqft is not None else None
+    _lot = int(req.lot_size_sqft) if req.lot_size_sqft is not None else None
+    _yr = int(req.year_built) if req.year_built is not None else None
+
     overrides = {
         k: v for k, v in {
             "neighborhood": req.neighborhood,
-            "sqft": req.sqft,
-            "lot_size_sqft": req.lot_size_sqft,
+            "sqft": _sqft,
+            "lot_size_sqft": _lot,
             "beds": req.beds,
             "baths": req.baths,
-            "year_built": req.year_built,
+            "year_built": _yr,
             "address": req.address,
             "zip_code": req.zip_code,
             "property_type": req.property_type,
