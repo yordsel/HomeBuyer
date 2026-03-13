@@ -467,6 +467,15 @@ class RentalAnalysisRequest(BaseModel):
     self_managed: bool = True
 
 
+class ProspectusRequest(BaseModel):
+    """Request body for the investment prospectus endpoint."""
+
+    address: str  # required — used to look up property in DB
+    down_payment_pct: float = 20.0
+    investment_horizon_years: int = 5
+    mode: Optional[str] = None  # "curated", "similar", "thesis", or None = auto
+
+
 # ---------------------------------------------------------------------------
 # Application state — loaded once at startup, kept warm
 # ---------------------------------------------------------------------------
@@ -2241,6 +2250,53 @@ def rent_estimate(req: RentalAnalysisRequest):
     from homebuyer.analysis.rental_analysis import _rent_to_dict
 
     return _rent_to_dict(rent)
+
+
+# --- Investment Prospectus ---
+
+
+@app.post("/api/property/prospectus")
+def investment_prospectus(req: ProspectusRequest):
+    """Generate an investment prospectus for a property.
+
+    Looks up the property by address in the database, then runs the full
+    prospectus pipeline: ML valuation, market context, development potential,
+    rental/investment scenarios, and strategy recommendation.
+    """
+    if not _state or not _state.db:
+        raise HTTPException(status_code=503, detail="Server not ready.")
+
+    # Resolve address to a property record
+    results = _state.db.search_properties(req.address, limit=1)
+    if not results:
+        raise HTTPException(status_code=404, detail=f"Property not found: '{req.address}'")
+
+    prop = dict(results[0])
+
+    from homebuyer.analysis.prospectus import ProspectusGenerator, prospectus_to_dict
+
+    market_analyzer = _state.get_analyzer()
+    prospectus_gen = ProspectusGenerator(
+        db=_state.db,
+        dev_calc=_state.dev_calc,
+        rental_analyzer=_state.rental_analyzer,
+        market_analyzer=market_analyzer,
+        predict_fn=lambda prop_dict, source: _get_or_compute_prediction(prop_dict, source),
+    )
+
+    try:
+        result = prospectus_gen.generate(
+            properties=[prop],
+            down_payment_pct=req.down_payment_pct,
+            investment_horizon_years=req.investment_horizon_years,
+            mode=req.mode,
+        )
+        return prospectus_to_dict(result)
+    except Exception as e:
+        logger.error("Prospectus generation failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Prospectus generation failed: {str(e)}"
+        )
 
 
 # --- Faketor Chat ---

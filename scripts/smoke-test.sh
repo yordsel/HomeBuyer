@@ -187,6 +187,10 @@ check_status  GET   "$BASE/api/afford/1500000"  200  "Affordability calculator"
 warn_status  POST  "$BASE/api/property/rental-analysis"  200  "Rental analysis" \
   '{"address":"1200 Cedar St, Berkeley, CA","latitude":37.880,"longitude":-122.273,"bedrooms":3,"bathrooms":2,"sqft":1500,"lot_sqft":5000}'
 
+# Investment prospectus depends on ML model + multiple analyzers — warn only
+warn_status  POST  "$BASE/api/property/prospectus"  200  "Investment prospectus" \
+  '{"address":"1200 Cedar St"}'
+
 # ---------------------------------------------------------------------------
 # 7. Auth endpoints (basic reachability — not testing login flow)
 # ---------------------------------------------------------------------------
