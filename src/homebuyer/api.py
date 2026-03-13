@@ -1241,8 +1241,13 @@ async def auth_google_callback(code: str, request: Request):
         raise HTTPException(status_code=400, detail="Failed to exchange authorization code")
 
     # Fetch user info from Google
-    async with client as c:
-        resp = await c.get("https://www.googleapis.com/oauth2/v3/userinfo")
+    import httpx
+
+    async with httpx.AsyncClient() as http:
+        resp = await http.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {token['access_token']}"},
+        )
         if resp.status_code != 200:
             raise HTTPException(status_code=400, detail="Failed to fetch Google user info")
         google_user = resp.json()
