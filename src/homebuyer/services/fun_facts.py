@@ -383,6 +383,109 @@ def _gen_zone_most_sales(db: Database) -> dict | None:
     }
 
 
+def _gen_vacant_lot_count(db: Database) -> dict | None:
+    """How many vacant lots exist in our database."""
+    if db.is_postgres:
+        pct_expr = ("ROUND((100.0 * COUNT(*) / "
+                    "(SELECT COUNT(*) FROM properties))::numeric, 1)")
+        total_expr = "ROUND((SUM(lot_size_sqft) / 43560.0)::numeric, 1)"
+    else:
+        pct_expr = ("ROUND(100.0 * COUNT(*) / "
+                    "(SELECT COUNT(*) FROM properties), 1)")
+        total_expr = "ROUND(SUM(lot_size_sqft) / 43560.0, 1)"
+    row = db.fetchone(f"""
+        SELECT COUNT(*) as cnt,
+               {pct_expr} as pct,
+               {total_expr} as total_acres
+        FROM properties
+        WHERE property_category = 'land'
+          AND lot_size_sqft IS NOT NULL AND lot_size_sqft > 0
+    """)
+    if not row or row["cnt"] == 0:
+        return None
+    cnt = int(row["cnt"])
+    pct = float(row["pct"])
+    acres = float(row["total_acres"])
+    return {
+        "category": "land",
+        "stat_key": "vacant_lot_count",
+        "stat_value": f"{cnt} lots ({acres} acres)",
+        "display_text": (
+            f"Berkeley has {cnt} vacant lots in our database — "
+            f"about {pct}% of all tracked parcels, totaling {acres} acres. "
+            f"That's a lot of potential in a city where every sqft counts."
+        ),
+        "detail_json": json.dumps({
+            "count": cnt, "pct": pct, "total_acres": acres,
+        }),
+    }
+
+
+def _gen_vacant_lot_largest(db: Database) -> dict | None:
+    """Largest vacant lot."""
+    row = db.fetchone("""
+        SELECT address, neighborhood, lot_size_sqft, zoning_class
+        FROM properties
+        WHERE property_category = 'land'
+          AND lot_size_sqft IS NOT NULL AND lot_size_sqft > 0
+          AND street_number IS NOT NULL AND street_number != ''
+        ORDER BY lot_size_sqft DESC LIMIT 1
+    """)
+    if not row:
+        return None
+    addr = row["address"]
+    hood = row["neighborhood"] or "Berkeley"
+    sqft = int(row["lot_size_sqft"])
+    acres = round(sqft / 43560, 2)
+    zone = row["zoning_class"] or "unknown"
+    return {
+        "category": "land",
+        "stat_key": "largest_vacant_lot",
+        "stat_value": f"{sqft:,} sqft ({acres} acres)",
+        "display_text": (
+            f"The biggest vacant lot we track is {addr} in {hood} — "
+            f"{sqft:,} sqft ({acres} acres) of undeveloped {zone} land. "
+            f"Someone's sitting on serious potential."
+        ),
+        "detail_json": json.dumps({
+            "address": addr, "neighborhood": hood,
+            "lot_size_sqft": sqft, "zoning_class": zone,
+        }),
+    }
+
+
+def _gen_vacant_lot_smallest(db: Database) -> dict | None:
+    """Smallest buildable vacant lot (>= 1,000 sqft to skip slivers)."""
+    row = db.fetchone("""
+        SELECT address, neighborhood, lot_size_sqft, zoning_class
+        FROM properties
+        WHERE property_category = 'land'
+          AND lot_size_sqft IS NOT NULL AND lot_size_sqft >= 1000
+          AND street_number IS NOT NULL AND street_number != ''
+        ORDER BY lot_size_sqft ASC LIMIT 1
+    """)
+    if not row:
+        return None
+    addr = row["address"]
+    hood = row["neighborhood"] or "Berkeley"
+    sqft = int(row["lot_size_sqft"])
+    zone = row["zoning_class"] or "unknown"
+    return {
+        "category": "land",
+        "stat_key": "smallest_vacant_lot",
+        "stat_value": f"{sqft:,} sqft",
+        "display_text": (
+            f"The tiniest buildable vacant lot? {addr} in {hood} at just "
+            f"{sqft:,} sqft ({zone} zoning). In Berkeley, even a postage "
+            f"stamp of land is an opportunity."
+        ),
+        "detail_json": json.dumps({
+            "address": addr, "neighborhood": hood,
+            "lot_size_sqft": sqft, "zoning_class": zone,
+        }),
+    }
+
+
 def _gen_median_price(db: Database) -> dict | None:
     """Current median sale price from market metrics."""
     row = db.fetchone("""
@@ -513,6 +616,9 @@ _GENERATORS = [
     _gen_zone_largest_by_area,
     _gen_zone_most_properties,
     _gen_zone_most_sales,
+    _gen_vacant_lot_count,
+    _gen_vacant_lot_largest,
+    _gen_vacant_lot_smallest,
     _gen_median_price,
     _gen_median_dom,
     _gen_sale_to_list,
