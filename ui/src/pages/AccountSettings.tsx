@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
   Shield,
@@ -7,7 +7,6 @@ import {
   Trash2,
   AlertTriangle,
   Check,
-  X,
   Monitor,
   LogIn,
   LogOut,
@@ -33,23 +32,8 @@ import {
   authRevokeAllOtherSessions,
 } from '../lib/api';
 import type { AuthActivityEvent, LinkedOAuthAccount, SessionInfo } from '../types';
-
-// Mirror backend password rules
-const PASSWORD_RULES = [
-  { label: 'At least 8 characters', test: (pw: string) => pw.length >= 8 },
-  { label: 'One uppercase letter', test: (pw: string) => /[A-Z]/.test(pw) },
-  { label: 'One lowercase letter', test: (pw: string) => /[a-z]/.test(pw) },
-  { label: 'One digit', test: (pw: string) => /\d/.test(pw) },
-  { label: 'One special character', test: (pw: string) => /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(pw) },
-];
-
-function getPasswordStrength(pw: string): { score: number; label: string; color: string } {
-  const passed = PASSWORD_RULES.filter((r) => r.test(pw)).length;
-  if (passed <= 2) return { score: passed, label: 'Weak', color: 'bg-red-500' };
-  if (passed <= 3) return { score: passed, label: 'Fair', color: 'bg-yellow-500' };
-  if (passed <= 4) return { score: passed, label: 'Good', color: 'bg-blue-500' };
-  return { score: passed, label: 'Strong', color: 'bg-green-500' };
-}
+import { PASSWORD_RULES } from '../lib/password';
+import { PasswordStrengthIndicator } from '../components/auth/PasswordStrengthIndicator';
 
 const EVENT_ICONS: Record<string, typeof LogIn> = {
   login_success: LogIn,
@@ -115,7 +99,6 @@ function ChangePasswordSection() {
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
 
-  const strength = useMemo(() => (newPassword ? getPasswordStrength(newPassword) : null), [newPassword]);
   const allRulesPassed = PASSWORD_RULES.every((r) => r.test(newPassword));
   const passwordsMatch = newPassword === confirmPassword;
   const canSubmit = currentPassword && allRulesPassed && passwordsMatch && !loading;
@@ -187,37 +170,7 @@ function ChangePasswordSection() {
             </button>
           </div>
 
-          {/* Strength bar */}
-          {newPassword && strength && (
-            <div className="mt-2">
-              <div className="flex items-center gap-2 mb-1.5">
-                <div className="h-1.5 flex-1 rounded-full bg-gray-200 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${strength.color}`}
-                    style={{ width: `${(strength.score / PASSWORD_RULES.length) * 100}%` }}
-                  />
-                </div>
-                <span className="text-xs font-medium text-gray-500">{strength.label}</span>
-              </div>
-              <div className="space-y-0.5">
-                {PASSWORD_RULES.map((rule) => {
-                  const ok = rule.test(newPassword);
-                  return (
-                    <div key={rule.label} className="flex items-center gap-1.5">
-                      {ok ? (
-                        <Check size={12} className="text-green-500" />
-                      ) : (
-                        <X size={12} className="text-gray-300" />
-                      )}
-                      <span className={`text-xs ${ok ? 'text-green-600' : 'text-gray-400'}`}>
-                        {rule.label}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          {newPassword && <PasswordStrengthIndicator password={newPassword} />}
         </div>
 
         <div>
