@@ -264,7 +264,7 @@ class RentcastParcelEnricher:
         """
         update: dict = {
             "id": prop_id,
-            "attom_enriched": True,  # DB column name kept for migration safety
+            "rentcast_enriched": True,
         }
         cache_entry: Optional[dict] = None
 

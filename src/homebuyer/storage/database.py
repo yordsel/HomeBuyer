@@ -53,7 +53,7 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 # Schema DDL (SQLite dialect — translated at runtime for Postgres)
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA_SQL_SQLITE = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -236,7 +236,7 @@ CREATE TABLE IF NOT EXISTS properties (
     property_type       TEXT,
     last_sale_date      TEXT,
     last_sale_price     INTEGER,
-    attom_enriched      INTEGER NOT NULL DEFAULT 0,
+    rentcast_enriched   INTEGER NOT NULL DEFAULT 0,
     situs_unit          TEXT,
     property_category   TEXT,
     ownership_type      TEXT,
@@ -253,7 +253,7 @@ CREATE INDEX IF NOT EXISTS idx_properties_neighborhood ON properties(neighborhoo
 CREATE INDEX IF NOT EXISTS idx_properties_zoning ON properties(zoning_class);
 CREATE INDEX IF NOT EXISTS idx_properties_use_code ON properties(use_code);
 CREATE INDEX IF NOT EXISTS idx_properties_lot_size ON properties(lot_size_sqft);
-CREATE INDEX IF NOT EXISTS idx_properties_attom ON properties(attom_enriched);
+CREATE INDEX IF NOT EXISTS idx_properties_rentcast ON properties(rentcast_enriched);
 CREATE INDEX IF NOT EXISTS idx_properties_lot_group ON properties(lot_group_key);
 CREATE INDEX IF NOT EXISTS idx_properties_record_type ON properties(record_type);
 CREATE INDEX IF NOT EXISTS idx_properties_category ON properties(property_category);
@@ -844,6 +844,22 @@ class Database:
                     )
                     self.commit()
                     logger.info("Migration: added %s column to properties.", col_name)
+
+            # --- v4 migration: rename attom_enriched → rentcast_enriched ---
+            if "attom_enriched" in props_cols and "rentcast_enriched" not in props_cols:
+                self.execute(
+                    "ALTER TABLE properties RENAME COLUMN attom_enriched TO rentcast_enriched"
+                )
+                # Replace the old index with one matching the new column name
+                self.execute("DROP INDEX IF EXISTS idx_properties_attom")
+                self.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_properties_rentcast "
+                    "ON properties(rentcast_enriched)"
+                )
+                self.commit()
+                logger.info(
+                    "Migration v4: renamed attom_enriched → rentcast_enriched."
+                )
 
         # --- v3 migration: make password_hash nullable for OAuth-only users ---
         if self.table_exists("users") and not self.is_postgres:
@@ -1552,7 +1568,7 @@ class Database:
         """Get properties not yet enriched via external API."""
         sql = (
             "SELECT id, apn, address, street_number, street_name, zip_code, "
-            "latitude, longitude FROM properties WHERE attom_enriched = 0"
+            "latitude, longitude FROM properties WHERE rentcast_enriched = 0"
         )
         if limit:
             sql += f" LIMIT {limit}"
@@ -1615,7 +1631,7 @@ class Database:
             UPDATE properties SET
                 beds = ?, baths = ?, sqft = ?, year_built = ?,
                 property_type = ?, last_sale_date = ?, last_sale_price = ?,
-                attom_enriched = 1, updated_at = datetime('now')
+                rentcast_enriched = 1, updated_at = datetime('now')
             WHERE id = ?
         """
         adapted = _adapt_sql(sql, self.backend)
@@ -1645,7 +1661,7 @@ class Database:
             "SELECT COUNT(*) AS total, "
             "COUNT(CASE WHEN neighborhood IS NOT NULL THEN 1 END) AS with_neighborhood, "
             "COUNT(CASE WHEN zoning_class IS NOT NULL THEN 1 END) AS with_zoning, "
-            "COUNT(CASE WHEN attom_enriched = 1 THEN 1 END) AS enriched, "
+            "COUNT(CASE WHEN rentcast_enriched = 1 THEN 1 END) AS enriched, "
             "COUNT(DISTINCT use_code) AS use_codes, "
             "COUNT(DISTINCT neighborhood) AS neighborhoods, "
             "COUNT(DISTINCT zip_code) AS zip_codes "

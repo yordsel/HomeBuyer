@@ -3458,7 +3458,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 try:
                     _state.db.update_properties_enrichment_batch([{
                         "id": best["id"],
-                        "attom_enriched": True,
+                        "rentcast_enriched": True,
                         **{k: enriched[k] for k in ("beds", "baths", "sqft",
                            "year_built", "property_type",
                            "last_sale_price", "last_sale_date")
@@ -3491,7 +3491,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             "use_description": best.get("use_description"),
             "last_sale_price": best.get("last_sale_price"),
             "last_sale_date": best.get("last_sale_date"),
-            "enriched": bool(best.get("attom_enriched")),
+            "enriched": bool(best.get("rentcast_enriched")),
         })
 
     elif tool_name == "search_properties":

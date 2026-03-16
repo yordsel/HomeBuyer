@@ -193,7 +193,7 @@ class BerkeleyParcel:
     property_type: Optional[str] = None  # Standardized type
     last_sale_date: Optional[str] = None
     last_sale_price: Optional[int] = None
-    attom_enriched: bool = False  # Flag: has API enrichment been fetched? (column name kept for DB compat)
+    rentcast_enriched: bool = False  # Flag: has RentCast API enrichment been fetched?
 
 
 @dataclass
