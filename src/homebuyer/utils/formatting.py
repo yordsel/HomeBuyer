@@ -27,5 +27,5 @@ def fmt_price(val: float | int | None) -> str:
     if val >= 1_000_000:
         m = val / 1_000_000
         # Use one decimal if not a round number of millions
-        return f"${m:.1f}M" if val % 100_000 else f"${m:.0f}M"
+        return f"${m:.1f}M" if val % 1_000_000 else f"${m:.0f}M"
     return f"${val:,}"
