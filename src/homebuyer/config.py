@@ -246,3 +246,11 @@ class PriceRange:
 
     def __str__(self) -> str:
         return f"${self.min_price:,}-${self.max_price:,}"
+
+
+# ---------------------------------------------------------------------------
+# Feature flags
+# ---------------------------------------------------------------------------
+USE_SEGMENT_ORCHESTRATION = os.environ.get(
+    "USE_SEGMENT_ORCHESTRATION", ""
+).lower() in ("1", "true", "yes")

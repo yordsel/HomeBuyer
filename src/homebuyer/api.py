@@ -589,6 +589,25 @@ class AppState:
 
         self.sessions = SessionManager(ttl_seconds=1800)
 
+        # DataLayer facade for faketor package — wraps all infrastructure
+        # behind a typed Protocol so faketor/ never imports from api.py.
+        # Constructed after all services are initialized.
+        from homebuyer.services.faketor._infra import AppStateDataLayer
+        from homebuyer.services import berkeley_regulations as reg_module
+        from homebuyer.services import glossary as glossary_module
+
+        self.data_layer = AppStateDataLayer(
+            db=self.db,
+            model=self.model,
+            dev_calc=self.dev_calc,
+            rental_analyzer=self.rental_analyzer,
+            geocoder=self.geocoder,
+            regulation_service=reg_module,
+            glossary_service=glossary_module,
+            cache_get=self.cache_get,
+            cache_set=self.cache_set,
+        )
+
     def get_analyzer(self):
         from homebuyer.analysis.market_analysis import MarketAnalyzer
         return MarketAnalyzer(self.db)
