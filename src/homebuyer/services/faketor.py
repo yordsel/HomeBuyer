@@ -1209,6 +1209,37 @@ provided in the conversation context, use them when calling tools. If the user a
 different property, use lookup_property to find it first."""
 
 
+def _sanitize_history(history: list[dict]) -> list[dict]:
+    """Ensure every message in history has a non-empty string content field.
+
+    The Anthropic API rejects messages where ``content`` is ``None`` or empty.
+    This can happen when a prior assistant turn produced only tool calls (no
+    text) and the response was persisted with ``content: ""`` or ``null``.
+    """
+    sanitized: list[dict] = []
+    for msg in history:
+        content = msg.get("content")
+        if content is None or (isinstance(content, str) and not content.strip()):
+            # Skip empty messages — they carry no useful context and would
+            # cause a BadRequestError from the Anthropic API.
+            continue
+        sanitized.append(msg)
+
+    # Anthropic requires alternating user/assistant roles.  After dropping
+    # empty messages we may have consecutive same-role entries.  Merge them
+    # so the API doesn't reject the payload.
+    merged: list[dict] = []
+    for msg in sanitized:
+        if merged and merged[-1]["role"] == msg["role"]:
+            merged[-1] = {
+                **merged[-1],
+                "content": merged[-1]["content"] + "\n\n" + msg["content"],
+            }
+        else:
+            merged.append(dict(msg))
+    return merged
+
+
 class FaketorService:
     """Chat service that wraps Claude with real estate analysis tools."""
 
@@ -1256,8 +1287,8 @@ class FaketorService:
         if working_set_descriptor:
             base_system += f"\n\n{working_set_descriptor}"
 
-        # Build messages: history + new user message
-        messages = list(history) + [{"role": "user", "content": message}]
+        # Build messages: sanitize history then append new user message
+        messages = _sanitize_history(history) + [{"role": "user", "content": message}]
 
         tool_calls_log = []
         blocks = []  # Structured response blocks for frontend rendering
@@ -1438,7 +1469,7 @@ class FaketorService:
         base_system = SYSTEM_PROMPT + f"\n\nCURRENT PROPERTY CONTEXT:\n{json.dumps(property_context, indent=2)}"
         if working_set_descriptor:
             base_system += f"\n\n{working_set_descriptor}"
-        messages = list(history) + [{"role": "user", "content": message}]
+        messages = _sanitize_history(history) + [{"role": "user", "content": message}]
 
         tool_calls_log: list[dict] = []
         blocks: list[dict] = []

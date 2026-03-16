@@ -385,6 +385,8 @@ class ListingPredictRequest(BaseModel):
 
 
 class ManualPredictRequest(BaseModel):
+    model_config = {"coerce_numbers_to_str": True}
+
     neighborhood: str
     zip_code: str = "94702"
     beds: Optional[float] = None
@@ -435,6 +437,8 @@ class PotentialSummaryRequest(BaseModel):
 
 
 class ImprovementSimRequest(BaseModel):
+    model_config = {"coerce_numbers_to_str": True}
+
     latitude: float
     longitude: float
     address: Optional[str] = None
@@ -450,6 +454,8 @@ class ImprovementSimRequest(BaseModel):
 
 
 class RentalAnalysisRequest(BaseModel):
+    model_config = {"coerce_numbers_to_str": True}
+
     latitude: float
     longitude: float
     address: Optional[str] = None
@@ -2303,6 +2309,16 @@ def investment_prospectus(req: ProspectusRequest):
 
 
 class FaketorChatRequest(BaseModel):
+    """Request body for Faketor chat endpoints.
+
+    Pydantic v2 strict mode rejects int→str coercion, which can cause
+    "Input should be a valid string" errors when property data has unexpected
+    types (e.g. zip_code as an integer).  We use ``model_config`` to enable
+    coercion so these edge cases are handled gracefully.
+    """
+
+    model_config = {"coerce_numbers_to_str": True}
+
     latitude: float
     longitude: float
     message: str
