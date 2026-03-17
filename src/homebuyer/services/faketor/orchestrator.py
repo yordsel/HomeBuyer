@@ -39,6 +39,39 @@ _CLAUDE_MODEL = "claude-sonnet-4-20250514"
 _MAX_ITERATIONS = 12
 _FALLBACK_REPLY = "Here's what I found based on my analysis so far."
 
+# Shared tool labels for SSE events — keeps orchestrator consistent with legacy service
+_TOOL_LABELS: dict[str, str] = {
+    "lookup_property": "Looking up property...",
+    "get_price_prediction": "Running price prediction...",
+    "get_comparable_sales": "Finding comparable sales...",
+    "get_development_potential": "Checking development potential...",
+    "get_neighborhood_stats": "Getting neighborhood stats...",
+    "get_market_summary": "Loading market data...",
+    "estimate_rental_income": "Estimating rental income...",
+    "analyze_investment_scenarios": "Comparing investment scenarios...",
+    "estimate_sell_vs_hold": "Analyzing sell vs hold...",
+    "get_improvement_simulation": "Simulating improvements...",
+    "search_properties": "Searching properties...",
+    "lookup_permits": "Looking up permits...",
+    "query_database": "Querying database...",
+    "undo_filter": "Undoing last filter...",
+    "generate_investment_prospectus": "Generating investment prospectus...",
+    "lookup_regulation": "Looking up Berkeley regulations...",
+    "update_working_set": "Updating property list...",
+    "lookup_glossary_term": "Looking up definition...",
+    # Phase F gap tools
+    "compute_true_cost": "Computing true ownership cost...",
+    "rent_vs_buy": "Comparing rent vs buy...",
+    "pmi_model": "Modeling PMI costs...",
+    "rate_penalty": "Calculating rate penalty...",
+    "appreciation_stress_test": "Running appreciation stress test...",
+    "competition": "Analyzing competition...",
+    "neighborhood_lifestyle": "Matching neighborhoods to lifestyle...",
+    "dual_property": "Comparing two properties...",
+    "yield_ranking": "Ranking by investment yield...",
+    "adjacent_market": "Exploring adjacent markets...",
+}
+
 
 @dataclass
 class TurnMetrics:
@@ -799,6 +832,10 @@ class TurnOrchestrator:
                     "event": "tool_start",
                     "data": {
                         "name": tool_block.name,
+                        "label": _TOOL_LABELS.get(
+                            tool_block.name,
+                            f"Using {tool_block.name}...",
+                        ),
                         "input": tool_block.input,
                     },
                 }

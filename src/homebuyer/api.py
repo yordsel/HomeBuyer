@@ -4188,7 +4188,11 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
 
 
 def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
-    """Resolve property context from request + DB for Faketor chat."""
+    """Resolve property context from request + DB for Faketor chat.
+
+    Requires _state to be initialized (callers must guard with 503 check).
+    """
+    assert _state is not None, "_resolve_faketor_context called before _state init"
     # Truncate float→int for fields that downstream code treats as int
     _sqft = int(req.sqft) if req.sqft is not None else None
     _lot = int(req.lot_size_sqft) if req.lot_size_sqft is not None else None

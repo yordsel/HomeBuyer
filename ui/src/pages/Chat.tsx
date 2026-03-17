@@ -83,6 +83,8 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
   // Deferred blocks: processBlocks must run AFTER onWorkingSet so that
   // setTrackedFromServer doesn't overwrite the property we just tracked.
   const deferredBlocksRef = useRef<ResponseBlock[] | null>(null);
+  // Ref to always access the latest processBlocks (avoids stale closure in timeouts)
+  const processBlocksRef = useRef<(blocks: ResponseBlock[]) => void>(() => {});
 
   // Conversation persistence — use ref so callbacks always see latest value
   const convIdRef = useRef<number | null>(initialConvId ?? null);
@@ -184,12 +186,15 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
     }
   }, [messages, streaming, streamText, streamToolEvents]);
 
-  // Clear stale context on mount
+  // Clear stale context on mount — only reset buyer state for new conversations,
+  // not when reopening an existing one (segment persists across turns)
   useEffect(() => {
     clearTrackedProperties();
     setActiveProperty(null);
     setWorkingSetMeta(null);
-    resetBuyer();
+    if (!initialConvId) {
+      resetBuyer();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -265,6 +270,11 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
     },
     [activeProperty, setActiveProperty, trackProperty, addBlocksToProperty],
   );
+
+  // Keep processBlocks ref in sync so deferred timeouts use the latest version
+  useEffect(() => {
+    processBlocksRef.current = processBlocks;
+  }, [processBlocks]);
 
   // ---- Persist a user+assistant message pair to the backend ----
   const persistMessages = useCallback(
@@ -409,7 +419,7 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
                 const pending = deferredBlocksRef.current;
                 if (pending) {
                   deferredBlocksRef.current = null;
-                  processBlocks(pending);
+                  processBlocksRef.current(pending);
                 }
               }, 2000);
             }
@@ -425,7 +435,7 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
               deferredBlocksRef.current = null;
               // Use setTimeout(0) so the setTrackedFromServer state update
               // is enqueued first, then processBlocks runs on top of it.
-              setTimeout(() => processBlocks(pending), 0);
+              setTimeout(() => processBlocksRef.current(pending), 0);
             }
           },
           onError: (message) => {

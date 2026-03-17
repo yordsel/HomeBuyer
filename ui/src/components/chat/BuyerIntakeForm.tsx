@@ -26,9 +26,18 @@ export function BuyerIntakeForm({ onComplete, onSkip }: BuyerIntakeFormProps) {
   const handleSubmit = useCallback(() => {
     const data: BuyerIntakeData = {};
     if (intent) data.intent = intent;
-    if (capital) data.capital = parseFloat(capital.replace(/[^0-9.]/g, ''));
-    if (income) data.income = parseFloat(income.replace(/[^0-9.]/g, ''));
-    if (currentRent) data.current_rent = parseFloat(currentRent.replace(/[^0-9.]/g, ''));
+    if (capital !== '') {
+      const parsed = parseFloat(capital.replace(/[^0-9.]/g, ''));
+      if (!isNaN(parsed)) data.capital = parsed;
+    }
+    if (income !== '') {
+      const parsed = parseFloat(income.replace(/[^0-9.]/g, ''));
+      if (!isNaN(parsed)) data.income = parsed;
+    }
+    if (currentRent !== '') {
+      const parsed = parseFloat(currentRent.replace(/[^0-9.]/g, ''));
+      if (!isNaN(parsed)) data.current_rent = parsed;
+    }
     if (firstTime !== undefined) data.is_first_time_buyer = firstTime;
     onComplete(data);
   }, [intent, capital, income, currentRent, firstTime, onComplete]);

@@ -45,7 +45,7 @@ function MarketChangeItem({ change }: { change: MarketChange }) {
       <span className="font-medium text-gray-700">{label}</span>
       <Arrow size={12} className={arrowColor} />
       <span className="text-gray-600">{value}</span>
-      <span className="text-gray-400 text-xs">({change.change_pct > 0 ? '+' : ''}{change.change_pct}%)</span>
+      <span className="text-gray-400 text-xs">({change.direction === 'up' ? '+' : '-'}{Math.abs(change.change_pct)}%)</span>
     </div>
   );
 }
