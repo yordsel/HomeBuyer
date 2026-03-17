@@ -14,6 +14,7 @@ from homebuyer.services.faketor.prompts import (
     personality,
     preexecuted,
     property,
+    return_briefing,
     segment,
     tools,
 )
@@ -48,6 +49,7 @@ class PromptAssembler:
             data_model.render(),
             tools.render(),
             market.render(context.market),
+            return_briefing.render(context),
             segment.render(
                 context.buyer.segment_id,
                 context.buyer.segment_confidence,
