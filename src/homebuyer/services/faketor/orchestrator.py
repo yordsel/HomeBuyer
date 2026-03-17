@@ -162,7 +162,7 @@ class TurnOrchestrator:
             extraction = self._extractor.extract(message)
             if extraction:
                 extractions = extraction.to_extractions()
-                context.buyer.profile.merge_extractions(extractions)
+                context.buyer.profile.apply_extraction(extractions)
         except Exception as e:
             logger.warning("Signal extraction failed: %s", e)
         metrics.extraction_ms = (time.monotonic() - start) * 1000
@@ -183,7 +183,11 @@ class TurnOrchestrator:
                 context.buyer.profile,
                 context.market,
             )
-            context.buyer.update_segment(result.segment_id, result.confidence)
+            context.buyer.record_transition(
+                context.buyer.segment_id,
+                result.segment_id,
+                result.confidence,
+            )
         except Exception as e:
             logger.warning("Segment classification failed: %s", e)
         metrics.classification_ms = (time.monotonic() - start) * 1000
@@ -422,14 +426,18 @@ class TurnOrchestrator:
                 )
                 if output_extraction:
                     extractions = output_extraction.to_extractions()
-                    context.buyer.profile.merge_extractions(extractions)
+                    context.buyer.profile.apply_extraction(extractions)
 
             # Re-classify after incorporating output signals
             result = self._classifier.classify(
                 context.buyer.profile,
                 context.market,
             )
-            context.buyer.update_segment(result.segment_id, result.confidence)
+            context.buyer.record_transition(
+                context.buyer.segment_id,
+                result.segment_id,
+                result.confidence,
+            )
 
         except Exception as e:
             logger.warning("Post-processing failed: %s", e)
