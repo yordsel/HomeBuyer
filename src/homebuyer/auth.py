@@ -212,3 +212,24 @@ def get_current_user_id(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+def get_optional_user_id(
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme),
+) -> Optional[int]:
+    """Extract the user ID from a JWT if present, otherwise return None.
+
+    Unlike get_current_user_id, this does NOT raise 401 for unauthenticated
+    requests. Used for endpoints that work for both authenticated and
+    anonymous users (e.g., Faketor chat).
+    """
+    effective_token = token or request.cookies.get(ACCESS_TOKEN_COOKIE)
+    if effective_token is None:
+        return None
+    try:
+        payload = jwt.decode(effective_token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        user_id: Optional[int] = payload.get("sub")
+        return int(user_id) if user_id is not None else None
+    except (JWTError, ValueError, TypeError):
+        return None

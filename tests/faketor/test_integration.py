@@ -187,7 +187,7 @@ def _make_store(context: ResearchContext = None) -> ResearchContextStore:
     ctx = context or _make_context()
     store = MagicMock(spec=ResearchContextStore)
     store.load_or_create = AsyncMock(return_value=ctx)
-    store.save = AsyncMock()
+    store.persist = AsyncMock()
     return store
 
 
@@ -270,7 +270,7 @@ class TestStretcherConversation:
         assert result.metrics.total_ms > 0
 
         # Context should have been saved
-        store.save.assert_called_once()
+        store.persist.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_stretcher_with_tool_use(self):
@@ -341,7 +341,7 @@ class TestCompetitiveBidderConversation:
 
         assert result.error is None
         assert "bid" in result.reply.lower() or "comp" in result.reply.lower()
-        store.save.assert_called_once()
+        store.persist.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -478,7 +478,7 @@ class TestContextPersistence:
         await orch.run("user-123", "Hello", [])
 
         store.load_or_create.assert_called_once_with("user-123")
-        store.save.assert_called_once()
+        store.persist.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_context_saved_even_on_error(self):
@@ -492,7 +492,7 @@ class TestContextPersistence:
 
         assert result.error is not None
         # Context should still be saved
-        store.save.assert_called_once()
+        store.persist.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

@@ -447,7 +447,7 @@ class TurnOrchestrator:
     # ------------------------------------------------------------------
 
     async def _persist_context(self, context: ResearchContext) -> None:
-        await self._context_store.save(context)
+        await self._context_store.persist(context)
 
     # ------------------------------------------------------------------
     # Public API: run (non-streaming)

@@ -29,7 +29,7 @@ import json
 
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
-from homebuyer.auth import get_current_user_id
+from homebuyer.auth import get_current_user_id, get_optional_user_id
 from homebuyer.config import (
     CURRENT_TOS_VERSION,
     DATABASE_URL,
@@ -4326,14 +4326,17 @@ async def _run_shadow_extraction(message: str, session_id: str | None, user_id: 
 
 
 @app.post("/api/faketor/chat")
-async def faketor_chat(req: FaketorChatRequest):
+async def faketor_chat(
+    req: FaketorChatRequest,
+    auth_user_id: int | None = Depends(get_optional_user_id),
+):
     """Chat with Faketor, the AI real estate advisor."""
     if not _state:
         raise HTTPException(status_code=503, detail="Server not initialized")
 
     # --- Orchestrated path (Phase E, feature-flag-gated) ---
     if _state.turn_orchestrator is not None:
-        user_id = req.session_id or "anonymous"
+        user_id = str(auth_user_id) if auth_user_id else (req.session_id or "anonymous")
         property_context = _resolve_faketor_context(req)
         working_set = None
         if req.session_id:
@@ -4402,14 +4405,17 @@ async def faketor_chat(req: FaketorChatRequest):
 
 
 @app.post("/api/faketor/chat/stream")
-async def faketor_chat_stream(req: FaketorChatRequest):
+async def faketor_chat_stream(
+    req: FaketorChatRequest,
+    auth_user_id: int | None = Depends(get_optional_user_id),
+):
     """SSE streaming version of Faketor chat."""
     if not _state:
         raise HTTPException(status_code=503, detail="Server not initialized")
 
     # --- Orchestrated path (Phase E, feature-flag-gated) ---
     if _state.turn_orchestrator is not None:
-        user_id = req.session_id or "anonymous"
+        user_id = str(auth_user_id) if auth_user_id else (req.session_id or "anonymous")
         property_context = _resolve_faketor_context(req)
         working_set = None
         if req.session_id:

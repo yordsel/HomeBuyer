@@ -46,7 +46,7 @@ def _make_context_store(context: ResearchContext | None = None) -> ResearchConte
     ctx = context or _make_context()
     store = MagicMock(spec=ResearchContextStore)
     store.load_or_create = AsyncMock(return_value=ctx)
-    store.save = AsyncMock()
+    store.persist = AsyncMock()
     return store
 
 
@@ -207,7 +207,7 @@ class TestTurnOrchestratorRun:
         store = _make_context_store()
         orch = _make_orchestrator(context_store=store)
         await orch.run("user1", "Hello", [])
-        store.save.assert_called_once()
+        store.persist.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_extracts_signals(self):
