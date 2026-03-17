@@ -389,3 +389,127 @@ class TestE7MonthlyCostEstimation:
 
         cost = _estimate_monthly_cost(0, 20.0, rate=6.5)
         assert cost == 0
+
+
+# ---------------------------------------------------------------------------
+# Enhancement boundary & edge case tests
+# ---------------------------------------------------------------------------
+
+
+class TestE1BoundaryYears:
+    """E-1: Earthquake insurance year boundary precision."""
+
+    def test_earthquake_rate_exactly_1940(self):
+        """year_built=1940 → should be mid-century rate (0.0030), not pre-1940."""
+        assert _earthquake_insurance_rate(1940) == 0.0030
+
+    def test_earthquake_rate_exactly_1939(self):
+        """year_built=1939 → pre-1940 rate (0.0040)."""
+        assert _earthquake_insurance_rate(1939) == 0.0040
+
+    def test_earthquake_rate_exactly_1970(self):
+        """year_built=1970 → modern rate (0.0020)."""
+        assert _earthquake_insurance_rate(1970) == 0.0020
+
+    def test_earthquake_rate_exactly_2000(self):
+        """year_built=2000 → new construction rate (0.0015)."""
+        assert _earthquake_insurance_rate(2000) == 0.0015
+
+    def test_earthquake_rate_exactly_1999(self):
+        """year_built=1999 → still modern rate (0.0020)."""
+        assert _earthquake_insurance_rate(1999) == 0.0020
+
+
+class TestE2BoundaryYears:
+    """E-2: Maintenance rate year boundary precision."""
+
+    def test_maintenance_exactly_1940(self):
+        """year_built=1940 → mid-century rate (0.015)."""
+        assert _maintenance_rate(1940) == 0.015
+
+    def test_maintenance_exactly_1939(self):
+        """year_built=1939 → pre-1940 rate (0.020)."""
+        assert _maintenance_rate(1939) == 0.020
+
+    def test_maintenance_exactly_1970(self):
+        """year_built=1970 → baseline rate (0.010)."""
+        assert _maintenance_rate(1970) == 0.010
+
+    def test_maintenance_exactly_2000(self):
+        """year_built=2000 → new construction rate (0.007)."""
+        assert _maintenance_rate(2000) == 0.007
+
+
+class TestE4ShapBoundary:
+    """E-4: SHAP top value drivers filter boundary and edge cases."""
+
+    def test_filter_boundary_exactly_1000(self):
+        """Impact of exactly $1000 → should be included (>= $1000)."""
+        from homebuyer.api import _prediction_to_dict
+        from unittest.mock import MagicMock
+
+        result = MagicMock()
+        result.predicted_price = 1_000_000
+        result.price_lower = 800_000
+        result.price_upper = 1_200_000
+        result.neighborhood = "Berkeley"
+        result.list_price = None
+        result.predicted_premium_pct = None
+        result.base_value = 900_000
+        result.feature_contributions = {"sqft": 1000, "beds": 999}
+
+        d = _prediction_to_dict(result)
+        features = [x["feature"] for x in d["top_value_drivers"]]
+        assert "sqft" in features  # exactly 1000 → included
+        assert "beds" not in features  # 999 → filtered out
+
+    def test_all_negative_contributions(self):
+        """All features decrease value → all have direction='decreases'."""
+        from homebuyer.api import _prediction_to_dict
+        from unittest.mock import MagicMock
+
+        result = MagicMock()
+        result.predicted_price = 800_000
+        result.price_lower = 600_000
+        result.price_upper = 1_000_000
+        result.neighborhood = "Berkeley"
+        result.list_price = None
+        result.predicted_premium_pct = None
+        result.base_value = 1_000_000
+        result.feature_contributions = {
+            "sqft": -50_000,
+            "year_built": -30_000,
+            "lot_size_sqft": -5_000,
+        }
+
+        d = _prediction_to_dict(result)
+        for driver in d["top_value_drivers"]:
+            assert driver["direction"] == "decreases"
+            assert driver["impact"] < 0
+
+
+class TestE7ExtremeValues:
+    """E-7: Monthly cost estimation with extreme rate/down-payment values."""
+
+    def test_very_high_rate(self):
+        """15% rate → much higher monthly cost than normal."""
+        from homebuyer.api import _estimate_monthly_cost
+
+        cost_normal = _estimate_monthly_cost(1_000_000, 20.0, rate=6.5)
+        cost_high = _estimate_monthly_cost(1_000_000, 20.0, rate=15.0)
+        assert cost_high > cost_normal * 1.5
+
+    def test_very_low_down_payment(self):
+        """3% down payment → higher cost than 20% down."""
+        from homebuyer.api import _estimate_monthly_cost
+
+        cost_3 = _estimate_monthly_cost(1_000_000, 3.0, rate=6.5)
+        cost_20 = _estimate_monthly_cost(1_000_000, 20.0, rate=6.5)
+        assert cost_3 > cost_20
+
+    def test_100_pct_down(self):
+        """100% down → zero loan → cost should be 0 (no P&I)."""
+        from homebuyer.api import _estimate_monthly_cost
+
+        cost = _estimate_monthly_cost(1_000_000, 100.0, rate=6.5)
+        assert cost == 0
