@@ -148,7 +148,8 @@ class TestMarketContext:
     def test_returns_empty_for_none(self):
         assert market.render(None) == ""
 
-    def test_skips_none_fields(self):
+    def test_skips_zero_default_fields(self):
+        """Fields that default to 0 (not loaded) should NOT be rendered."""
         mkt = MarketSnapshot(
             mortgage_rate_30yr=6.5,
             berkeley_wide=BerkeleyWideMetrics(median_sale_price=1_300_000),
@@ -156,8 +157,17 @@ class TestMarketContext:
         result = market.render(mkt)
         assert "6.5%" in result
         assert "$1,300,000" in result
-        # Fields that are None should not appear
+        # Zero-default fields should NOT appear (they mean "not loaded")
+        assert "list price" not in result.lower()
+        assert "price/sqft" not in result.lower()
+        assert "days on market" not in result.lower()
+        assert "$0" not in result
         assert "None" not in result
+
+    def test_returns_empty_for_all_zero_market(self):
+        """A default-constructed MarketSnapshot has all zeros — render empty."""
+        mkt = MarketSnapshot()
+        assert market.render(mkt) == ""
 
 
 class TestSegmentContext:
@@ -235,6 +245,9 @@ class TestPreExecuted:
 
     def test_returns_empty_for_empty_string(self):
         assert preexecuted.render("") == ""
+
+    def test_returns_empty_for_whitespace(self):
+        assert preexecuted.render("   ") == ""
 
 
 # ---------------------------------------------------------------------------

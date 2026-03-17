@@ -16,6 +16,10 @@ def render(market: MarketSnapshot | None) -> str:
 
     Provides the LLM with frozen market conditions for this turn.
     Returns empty string if no market data is available.
+
+    Uses truthiness checks (not ``is not None``) because
+    BerkeleyWideMetrics fields default to 0, not None. A zero value
+    means "not loaded" — we must not render "$0" as ground truth.
     """
     if market is None:
         return ""
@@ -24,32 +28,36 @@ def render(market: MarketSnapshot | None) -> str:
 
     parts = ["=== MARKET CONDITIONS (frozen for this interaction) ==="]
 
-    if market.mortgage_rate_30yr is not None:
+    if market.mortgage_rate_30yr:
         parts.append(f"Mortgage rate (30yr fixed): {market.mortgage_rate_30yr}%")
 
-    if market.conforming_limit is not None:
+    if market.conforming_limit:
         parts.append(f"Conforming loan limit (Alameda County): ${market.conforming_limit:,}")
 
-    if bw.median_sale_price is not None:
+    if bw.median_sale_price:
         parts.append(f"Berkeley median sale price: ${bw.median_sale_price:,}")
 
-    if bw.median_list_price is not None:
+    if bw.median_list_price:
         parts.append(f"Berkeley median list price: ${bw.median_list_price:,}")
 
-    if bw.median_ppsf is not None:
+    if bw.median_ppsf:
         parts.append(f"Median price/sqft: ${bw.median_ppsf:.0f}")
 
-    if bw.median_dom is not None:
+    if bw.median_dom:
         parts.append(f"Median days on market: {bw.median_dom}")
 
-    if bw.avg_sale_to_list is not None:
+    if bw.avg_sale_to_list:
         parts.append(f"Sale-to-list ratio: {bw.avg_sale_to_list:.1%}")
 
-    if bw.inventory is not None:
+    if bw.inventory:
         parts.append(f"Active inventory: {bw.inventory} listings")
 
-    if bw.months_of_supply is not None:
+    if bw.months_of_supply:
         parts.append(f"Months of supply: {bw.months_of_supply:.1f}")
+
+    # If no real data was rendered, return empty
+    if len(parts) == 1:  # Only the header
+        return ""
 
     parts.append("")
     parts.append(

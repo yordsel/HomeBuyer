@@ -16,7 +16,7 @@ def render(accumulated_facts: str | None) -> str:
     TurnOrchestrator. For now, it passes through the accumulated
     facts string from the existing AnalysisAccumulator.
     """
-    if not accumulated_facts:
+    if not accumulated_facts or not accumulated_facts.strip():
         return ""
 
     return accumulated_facts  # Already formatted by AnalysisAccumulator

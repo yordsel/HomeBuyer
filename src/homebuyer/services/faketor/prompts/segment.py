@@ -8,8 +8,12 @@ Phase D-1 (#38) of Epic #23.
 
 from __future__ import annotations
 
+import logging
+
 from homebuyer.services.faketor.prompts.templates import get_segment_template
 from homebuyer.services.faketor.state.buyer import BuyerProfile
+
+logger = logging.getLogger(__name__)
 
 
 def render(
@@ -37,6 +41,7 @@ def render(
     # Get the segment-specific template
     template = get_segment_template(segment_id)
     if template is None:
+        logger.warning("No prompt template registered for segment %r", segment_id)
         return ""
 
     return template(
