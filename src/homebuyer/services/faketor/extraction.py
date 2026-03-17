@@ -355,7 +355,7 @@ class SignalExtractor:
                 Signal(
                     evidence=s.get("evidence", ""),
                     implication=s.get("implication", ""),
-                    confidence=float(s.get("confidence", 0.5)),
+                    confidence=_safe_confidence(s.get("confidence", 0.5)),
                 )
                 for s in data.get("signals", [])
                 if isinstance(s, dict)
@@ -382,6 +382,34 @@ class SignalExtractor:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+_CONFIDENCE_WORDS: dict[str, float] = {
+    "high": 0.8,
+    "medium": 0.5,
+    "med": 0.5,
+    "low": 0.3,
+    "very high": 0.9,
+    "very low": 0.2,
+}
+
+
+def _safe_confidence(value: Any) -> float:
+    """Convert a confidence value to float, handling word labels from LLM.
+
+    Haiku sometimes returns "high"/"medium"/"low" instead of numeric values.
+    """
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        lower = value.strip().lower()
+        if lower in _CONFIDENCE_WORDS:
+            return _CONFIDENCE_WORDS[lower]
+        try:
+            return float(lower)
+        except ValueError:
+            return 0.5
+    return 0.5
 
 
 def _safe_int(value: Any) -> int | None:

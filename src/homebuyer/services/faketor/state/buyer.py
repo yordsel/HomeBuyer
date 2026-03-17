@@ -144,7 +144,17 @@ class BuyerProfile:
                 continue
 
             existing_source: FieldSource | None = getattr(self, source_attr)
-            if existing_source is None or source.confidence > existing_source.confidence:
+            # Update if: no existing source, higher confidence, or equal
+            # confidence with a newer timestamp (user corrected themselves).
+            should_update = (
+                existing_source is None
+                or source.confidence > existing_source.confidence
+                or (
+                    source.confidence >= existing_source.confidence
+                    and source.extracted_at > (existing_source.extracted_at or 0)
+                )
+            )
+            if should_update:
                 setattr(self, field_name, value)
                 setattr(self, source_attr, source)
                 updated.append(field_name)
