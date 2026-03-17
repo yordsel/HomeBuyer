@@ -219,6 +219,7 @@ class TestPopulatedRegistry:
             "lookup_glossary_term",
             # Phase F gap tools
             "compute_true_cost",
+            "rent_vs_buy",
         }
         assert registry.names == expected
 

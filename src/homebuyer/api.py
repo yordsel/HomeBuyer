@@ -3845,6 +3845,76 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         )
         return safe_json_dumps(compute_true_cost(params))
 
+    elif tool_name == "rent_vs_buy":
+        from homebuyer.services.faketor.tools.gap.rent_vs_buy import (
+            RentVsBuyParams,
+            compute_rent_vs_buy,
+        )
+        from homebuyer.services.faketor.tools.gap.true_cost import (
+            TrueCostParams,
+            compute_true_cost,
+            _calc_pmi_dropoff_month,
+            _PROPERTY_TAX_RATE,
+        )
+        from homebuyer.utils.mortgage import get_current_mortgage_rate
+
+        rate = tool_input.get("mortgage_rate")
+        if rate is None and _state and _state.db:
+            rate = get_current_mortgage_rate(_state.db)
+        if rate is None:
+            rate = 6.5
+
+        purchase_price = int(tool_input["purchase_price"])
+        down_pct = float(tool_input.get("down_payment_pct", 20.0))
+        current_rent = int(tool_input["current_rent"])
+
+        # Compute ownership cost via true_cost if not provided
+        monthly_ownership = tool_input.get("monthly_ownership_cost")
+        monthly_pmi = int(tool_input.get("monthly_pmi") or 0)
+        pmi_dropoff = None
+
+        if monthly_ownership is None:
+            tc_params = TrueCostParams(
+                purchase_price=purchase_price,
+                down_payment_pct=down_pct,
+                mortgage_rate=float(rate),
+                year_built=tool_input.get("year_built"),
+                hoa_monthly=int(tool_input.get("hoa_monthly") or 0),
+                current_rent=current_rent,
+            )
+            tc = compute_true_cost(tc_params)
+            monthly_ownership = tc["total_monthly_cost"]
+            monthly_pmi = tc["monthly_pmi"]
+
+        # Compute PMI dropoff month
+        down_amount = int(round(purchase_price * down_pct / 100))
+        loan_amount = purchase_price - down_amount
+        if monthly_pmi > 0:
+            pmi_dropoff = _calc_pmi_dropoff_month(
+                loan_amount, purchase_price, float(rate)
+            )
+
+        annual_prop_tax = int(round(purchase_price * _PROPERTY_TAX_RATE))
+
+        rvb_params = RentVsBuyParams(
+            purchase_price=purchase_price,
+            down_payment_pct=down_pct,
+            mortgage_rate=float(rate),
+            annual_appreciation_pct=float(
+                tool_input.get("annual_appreciation_pct", 3.0)
+            ),
+            monthly_ownership_cost=int(monthly_ownership),
+            monthly_pmi=monthly_pmi,
+            pmi_dropoff_month=pmi_dropoff,
+            annual_property_tax=annual_prop_tax,
+            current_rent=current_rent,
+            annual_rent_increase_pct=float(
+                tool_input.get("annual_rent_increase_pct", 4.0)
+            ),
+            horizon_years=int(tool_input.get("horizon_years", 15)),
+        )
+        return safe_json_dumps(compute_rent_vs_buy(rvb_params))
+
     else:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 

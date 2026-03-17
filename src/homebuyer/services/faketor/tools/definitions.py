@@ -20,6 +20,7 @@ from homebuyer.services.faketor.facts import (
     compute_search_facts,
     compute_sell_vs_hold_facts,
     compute_true_cost_facts,
+    compute_rent_vs_buy_facts,
     compute_undo_filter_facts,
 )
 from homebuyer.services.faketor.tools.registry import ToolDefinition
@@ -1062,5 +1063,79 @@ _TOOL_DEFINITIONS: list[ToolDefinition] = [
         },
         "block_type": "true_cost_card",
         "fact_computer": compute_true_cost_facts,
+    },
+    {
+        "name": "rent_vs_buy",
+        "description": (
+            "Compare renting vs. buying over a multi-year horizon. Models rent "
+            "escalation, home appreciation, equity buildup, tax benefits "
+            "(mortgage interest + property tax deductions), PMI drop-off, and "
+            "opportunity cost of the down payment. Produces a crossover year "
+            "(when buying becomes cheaper) and year-by-year comparison. Use this "
+            "for Stretcher and First-Time Buyer segments asking whether to buy "
+            "or keep renting."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "purchase_price": {
+                    "type": "number",
+                    "description": "Purchase price in dollars.",
+                },
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": "Down payment as percent, e.g. 20. Default 20.",
+                },
+                "mortgage_rate": {
+                    "type": "number",
+                    "description": (
+                        "Annual mortgage rate as percent. "
+                        "If omitted, current market rate is used."
+                    ),
+                },
+                "current_rent": {
+                    "type": "number",
+                    "description": "Buyer's current monthly rent in dollars.",
+                },
+                "annual_appreciation_pct": {
+                    "type": "number",
+                    "description": (
+                        "Expected annual home appreciation as percent. Default 3.0."
+                    ),
+                },
+                "annual_rent_increase_pct": {
+                    "type": "number",
+                    "description": (
+                        "Expected annual rent increase as percent. Default 4.0."
+                    ),
+                },
+                "horizon_years": {
+                    "type": "integer",
+                    "description": "Number of years to model. Default 15, max 30.",
+                },
+                "monthly_ownership_cost": {
+                    "type": "number",
+                    "description": (
+                        "Total monthly ownership cost (from compute_true_cost). "
+                        "If omitted, a rough estimate is computed."
+                    ),
+                },
+                "monthly_pmi": {
+                    "type": "number",
+                    "description": "Monthly PMI amount (for PMI drop-off modeling).",
+                },
+                "hoa_monthly": {
+                    "type": "number",
+                    "description": "Monthly HOA dues.",
+                },
+                "year_built": {
+                    "type": "integer",
+                    "description": "Year property was built (for maintenance estimate).",
+                },
+            },
+            "required": ["purchase_price", "current_rent"],
+        },
+        "block_type": "rent_vs_buy_card",
+        "fact_computer": compute_rent_vs_buy_facts,
     },
 ]

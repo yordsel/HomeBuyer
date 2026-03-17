@@ -333,6 +333,23 @@ def compute_true_cost_facts(data: dict) -> dict:
     }
 
 
+def compute_rent_vs_buy_facts(data: dict) -> dict:
+    """Facts for ``rent_vs_buy`` results."""
+    return {
+        "crossover_year": data.get("crossover_year"),
+        "crossover_description": data.get("crossover_description"),
+        "horizon_years": data.get("horizon_years"),
+        "final_annual_rent": data.get("final_annual_rent"),
+        "final_home_value": data.get("final_home_value"),
+        "final_home_equity": data.get("final_home_equity"),
+        "final_buy_advantage": data.get("final_buy_advantage"),
+        "total_rent_paid": data.get("total_rent_paid"),
+        "total_ownership_paid": data.get("total_ownership_paid"),
+        "total_tax_benefit": data.get("total_tax_benefit"),
+        "opportunity_cost_of_down_payment": data.get("opportunity_cost_of_down_payment"),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -352,6 +369,7 @@ _FACT_COMPUTERS: dict[str, callable] = {
     "lookup_regulation": compute_regulation_facts,
     "lookup_glossary_term": compute_glossary_facts,
     "compute_true_cost": compute_true_cost_facts,
+    "rent_vs_buy": compute_rent_vs_buy_facts,
 }
 
 
