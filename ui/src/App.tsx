@@ -14,6 +14,7 @@ import { MarketingPage } from './pages/Marketing';
 import { TermsPage } from './pages/Terms';
 import { AccountSettingsPage } from './pages/AccountSettings';
 import { PropertyProvider } from './context/PropertyContext';
+import { BuyerProvider } from './context/BuyerContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import type { PageId } from './types';
 
@@ -75,18 +76,20 @@ function AuthenticatedApp() {
 
   return (
     <PropertyProvider>
-      <div className="flex h-screen bg-gray-50 overflow-hidden">
-        <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
+      <BuyerProvider>
+        <div className="flex h-screen bg-gray-50 overflow-hidden">
+          <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
 
-        <main className="flex-1 overflow-y-auto">
-          <div className="p-6 lg:p-8">
-            {renderPage()}
-          </div>
-        </main>
+          <main className="flex-1 overflow-y-auto">
+            <div className="p-6 lg:p-8">
+              {renderPage()}
+            </div>
+          </main>
 
-        {/* Right context panel — only visible on Chat page */}
-        {currentPage === 'chat' && <ContextPanel />}
-      </div>
+          {/* Right context panel — only visible on Chat page */}
+          {currentPage === 'chat' && <ContextPanel />}
+        </div>
+      </BuyerProvider>
     </PropertyProvider>
   );
 }

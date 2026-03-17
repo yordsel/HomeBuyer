@@ -1086,6 +1086,48 @@ export interface FaketorChatResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Segment-driven redesign types (Phase H)
+// ---------------------------------------------------------------------------
+
+/** Buyer segment update from the orchestrator. */
+export interface SegmentUpdateData {
+  segment: string;
+  confidence: number;
+  profile_summary: string;
+}
+
+/** Market change in a resume briefing. */
+export interface MarketChange {
+  type: 'mortgage_rate' | 'median_price' | 'inventory';
+  direction: 'up' | 'down';
+  change: number;
+  change_pct: number;
+}
+
+/** Resume briefing for returning users. */
+export interface ResumeBriefingData {
+  market_changes: MarketChange[];
+  focus_property?: {
+    address: string;
+    last_known_status: string;
+  };
+  stale_analyses?: {
+    tool: string;
+    address: string;
+    property_id: number;
+  }[];
+}
+
+/** Buyer context from the intake form. */
+export interface BuyerIntakeData {
+  intent?: 'occupy' | 'invest';
+  capital?: number;
+  income?: number;
+  current_rent?: number;
+  is_first_time_buyer?: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Authentication
 // ---------------------------------------------------------------------------
 

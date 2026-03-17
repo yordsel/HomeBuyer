@@ -454,6 +454,86 @@ class TurnOrchestrator:
         await self._context_store.persist(context)
 
     # ------------------------------------------------------------------
+    # SSE event helpers
+    # ------------------------------------------------------------------
+
+    def _build_resume_briefing_data(
+        self, context: ResearchContext
+    ) -> dict[str, Any] | None:
+        """Build resume briefing data for returning users with material changes."""
+        delta = context.market_delta
+        if delta is None or not delta.any_material:
+            return None
+
+        data: dict[str, Any] = {"market_changes": []}
+
+        if delta.rate_material:
+            direction = "up" if delta.rate_change > 0 else "down"
+            data["market_changes"].append({
+                "type": "mortgage_rate",
+                "direction": direction,
+                "change": round(abs(delta.rate_change), 2),
+                "change_pct": round(delta.rate_change_pct, 1),
+            })
+
+        if delta.price_material:
+            direction = "up" if delta.median_price_change > 0 else "down"
+            data["market_changes"].append({
+                "type": "median_price",
+                "direction": direction,
+                "change": abs(delta.median_price_change),
+                "change_pct": round(delta.median_price_change_pct, 1),
+            })
+
+        if delta.inventory_material:
+            direction = "up" if delta.inventory_change > 0 else "down"
+            data["market_changes"].append({
+                "type": "inventory",
+                "direction": direction,
+                "change": abs(delta.inventory_change),
+                "change_pct": round(delta.inventory_change_pct, 1),
+            })
+
+        # Focus property
+        focus = context.property.focus_property
+        if focus and focus.address:
+            data["focus_property"] = {
+                "address": focus.address,
+                "last_known_status": focus.last_known_status,
+            }
+
+        # Stale analyses
+        try:
+            stale = context.property.get_stale_analyses(
+                context.market.snapshot_at, delta,
+            )
+            if stale:
+                data["stale_analyses"] = [
+                    {"tool": record.tool_name, "address": address, "property_id": prop_id}
+                    for prop_id, address, record in stale
+                ]
+        except Exception:
+            pass  # Non-critical
+
+        return data
+
+    def _build_profile_summary(self, context: ResearchContext) -> str:
+        """Build a human-readable profile summary for the segment_update event."""
+        profile = context.buyer.profile
+        parts = []
+        if profile.intent:
+            parts.append(f"Intent: {profile.intent}")
+        if profile.capital is not None:
+            parts.append(f"Capital: ${profile.capital:,.0f}")
+        if profile.income is not None:
+            parts.append(f"Income: ${profile.income:,.0f}")
+        if profile.is_first_time_buyer is not None:
+            parts.append(
+                "First-time buyer" if profile.is_first_time_buyer else "Not first-time"
+            )
+        return " | ".join(parts) if parts else ""
+
+    # ------------------------------------------------------------------
     # Public API: run (non-streaming)
     # ------------------------------------------------------------------
 
@@ -463,6 +543,26 @@ class TurnOrchestrator:
         """Return the per-request tool executor or the default one."""
         return tool_executor_override or self._tool_executor
 
+    def _apply_buyer_context(
+        self,
+        context: ResearchContext,
+        buyer_context: dict[str, Any] | None,
+    ) -> None:
+        """Seed buyer profile from frontend intake form data."""
+        if not buyer_context:
+            return
+        profile = context.buyer.profile
+        if "intent" in buyer_context and buyer_context["intent"]:
+            profile.intent = buyer_context["intent"]
+        if "capital" in buyer_context and buyer_context["capital"] is not None:
+            profile.capital = buyer_context["capital"]
+        if "income" in buyer_context and buyer_context["income"] is not None:
+            profile.income = buyer_context["income"]
+        if "current_rent" in buyer_context and buyer_context["current_rent"] is not None:
+            profile.current_rent = buyer_context["current_rent"]
+        if "is_first_time_buyer" in buyer_context and buyer_context["is_first_time_buyer"] is not None:
+            profile.is_first_time_buyer = buyer_context["is_first_time_buyer"]
+
     async def run(
         self,
         user_id: str,
@@ -471,6 +571,7 @@ class TurnOrchestrator:
         property_context: dict[str, Any] | None = None,
         working_set_descriptor: str = "",
         tool_executor: ToolExecutor | None = None,
+        buyer_context: dict[str, Any] | None = None,
     ) -> TurnResult:
         """Execute the full 9-step pipeline for a non-streaming turn.
 
@@ -479,6 +580,7 @@ class TurnOrchestrator:
                 Use this to inject a session-aware executor that handles
                 working-set scoping. Falls back to the default executor
                 configured at init time.
+            buyer_context: Optional buyer intake data from frontend form.
         """
         total_start = time.monotonic()
         metrics = TurnMetrics()
@@ -486,6 +588,9 @@ class TurnOrchestrator:
 
         # Step 1: Load context
         context = await self._load_context(user_id)
+
+        # Apply buyer intake if provided (seeds profile for turn 1)
+        self._apply_buyer_context(context, buyer_context)
 
         # Step 2: Extract signals
         self._extract_signals(message, context, metrics)
@@ -550,11 +655,13 @@ class TurnOrchestrator:
         property_context: dict[str, Any] | None = None,
         working_set_descriptor: str = "",
         tool_executor: ToolExecutor | None = None,
+        buyer_context: dict[str, Any] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Execute the 9-step pipeline with SSE streaming events.
 
         Args:
             tool_executor: Optional per-request ToolExecutor override.
+            buyer_context: Optional buyer intake data from frontend form.
 
         Yields events compatible with the existing SSE format:
         - {"event": "tool_start", "data": {"name": "..."}}
@@ -562,6 +669,10 @@ class TurnOrchestrator:
         - {"event": "tool_result", "data": {"name": "...", "block": ...}}
         - {"event": "text_delta", "data": {"text": "..."}}
         - {"event": "working_set", "data": {...}}
+        - {"event": "segment_update", "data": {"segment": "...", "confidence": ...}}
+        - {"event": "resume_briefing", "data": {"market_changes": [...], ...}}
+        - {"event": "pre_execution_start", "data": {"tools": [...]}}
+        - {"event": "pre_execution_complete", "data": {"tools_run": N}}
         - {"event": "discussed_property", "data": {"property_id": ...}}
         - {"event": "done", "data": {"reply": "...", "tool_calls": [...], "blocks": [...]}}
         - {"event": "error", "data": {"message": "..."}}
@@ -570,12 +681,49 @@ class TurnOrchestrator:
         metrics = TurnMetrics()
         effective_executor = self._effective_tool_executor(tool_executor)
 
-        # Steps 1-6: Same as non-streaming
+        # Steps 1-6: Same as non-streaming, but with SSE events for new steps
         context = await self._load_context(user_id)
+
+        # Apply buyer intake if provided (seeds profile for turn 1)
+        self._apply_buyer_context(context, buyer_context)
+
+        # Emit resume_briefing if returning user has material market changes
+        briefing_data = self._build_resume_briefing_data(context)
+        if briefing_data:
+            yield {"event": "resume_briefing", "data": briefing_data}
+
         self._extract_signals(message, context, metrics)
         self._classify_segment(context, metrics)
+
+        # Emit segment_update after classification
+        if context.buyer.segment_id:
+            yield {
+                "event": "segment_update",
+                "data": {
+                    "segment": context.buyer.segment_id,
+                    "confidence": round(context.buyer.segment_confidence, 2),
+                    "profile_summary": self._build_profile_summary(context),
+                },
+            }
+
         plan = self._resolve_jobs(message, context, metrics)
+
+        # Emit pre_execution_start/complete around pre-execution
+        pre_tools = [a.tool_name for a in plan.proactive_analyses]
+        if pre_tools:
+            yield {
+                "event": "pre_execution_start",
+                "data": {"tools": pre_tools},
+            }
+
         pre_result = self._pre_execute(plan, property_context, metrics)
+
+        if pre_tools:
+            yield {
+                "event": "pre_execution_complete",
+                "data": {"tools_run": len(pre_result.results)},
+            }
+
         system_prompt = self._assemble_prompt(
             context=context,
             pre_result=pre_result,
@@ -723,6 +871,7 @@ class TurnOrchestrator:
         reply = "\n\n".join(all_text_parts) or _FALLBACK_REPLY
 
         # Step 8: Post-process
+        pre_segment = context.buyer.segment_id
         llm_result = TurnResult(
             reply=reply,
             tool_calls=tool_calls_log,
@@ -730,6 +879,17 @@ class TurnOrchestrator:
             discussed_properties=discussed_properties,
         )
         self._post_process(llm_result, context, metrics)
+
+        # Emit updated segment if it changed during post-processing
+        if context.buyer.segment_id and context.buyer.segment_id != pre_segment:
+            yield {
+                "event": "segment_update",
+                "data": {
+                    "segment": context.buyer.segment_id,
+                    "confidence": round(context.buyer.segment_confidence, 2),
+                    "profile_summary": self._build_profile_summary(context),
+                },
+            }
 
         # Step 9: Persist
         await self._persist_context(context)

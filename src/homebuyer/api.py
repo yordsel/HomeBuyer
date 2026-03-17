@@ -2387,8 +2387,9 @@ class FaketorChatRequest(BaseModel):
 
     model_config = {"coerce_numbers_to_str": True}
 
-    latitude: float
-    longitude: float
+    # lat/lon optional — conversations work without property focus (Phase H)
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     message: str
     history: list[dict] = []
     session_id: Optional[str] = None
@@ -2404,6 +2405,8 @@ class FaketorChatRequest(BaseModel):
     year_built: Optional[float] = None
     property_type: Optional[str] = "Single Family Residential"
     property_category: Optional[str] = None  # sfr, condo, duplex, etc.
+    # Buyer context from intake form (Phase H)
+    buyer_context: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -4205,6 +4208,12 @@ def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
         }.items() if v is not None
     }
 
+    # If no lat/lon, return minimal context (property-less conversation)
+    if req.latitude is None or req.longitude is None:
+        prop = dict(overrides)
+        prop["property_category"] = req.property_category
+        return prop
+
     prop = _resolve_property_from_db(
         req.latitude, req.longitude,
         overrides, _state.db, _state.geocoder,
@@ -4360,6 +4369,7 @@ async def faketor_chat(
                 working_set.get_descriptor() if working_set else ""
             ),
             tool_executor=session_executor,
+            buyer_context=req.buyer_context,
         )
         response = result.to_dict()
         if working_set is not None:
@@ -4440,6 +4450,7 @@ async def faketor_chat_stream(
                     working_set.get_descriptor() if working_set else ""
                 ),
                 tool_executor=session_executor,
+                buyer_context=req.buyer_context,
             ):
                 event_type = event["event"]
                 data = safe_json_dumps(event["data"])

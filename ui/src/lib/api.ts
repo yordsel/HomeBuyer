@@ -20,6 +20,9 @@ import type {
   WorkingSetPage,
   ResponseBlock,
   WorkingSetMeta,
+  SegmentUpdateData,
+  ResumeBriefingData,
+  BuyerIntakeData,
   AuthResponse,
   AuthActivityEvent,
   LinkedAccountsResponse,
@@ -432,6 +435,11 @@ export interface StreamCallbacks {
   onDone: (reply: string, toolCalls: { name: string; input: Record<string, unknown> }[], blocks: ResponseBlock[]) => void;
   onWorkingSet: (meta: WorkingSetMeta) => void;
   onError: (message: string) => void;
+  // Phase H: segment-driven redesign events
+  onSegmentUpdate?: (data: SegmentUpdateData) => void;
+  onResumeBriefing?: (data: ResumeBriefingData) => void;
+  onPreExecutionStart?: (tools: string[]) => void;
+  onPreExecutionComplete?: (toolsRun: number) => void;
 }
 
 /**
@@ -440,8 +448,8 @@ export interface StreamCallbacks {
  */
 export function streamFaketorMessage(
   payload: {
-    latitude: number;
-    longitude: number;
+    latitude?: number;
+    longitude?: number;
     message: string;
     history?: { role: string; content: string }[];
     session_id?: string;
@@ -455,6 +463,7 @@ export function streamFaketorMessage(
     year_built?: number;
     property_type?: string;
     property_category?: string;
+    buyer_context?: BuyerIntakeData;
   },
   callbacks: StreamCallbacks,
 ): AbortController {
@@ -548,6 +557,19 @@ export function streamFaketorMessage(
                 break;
               case 'error':
                 callbacks.onError(data.message);
+                break;
+              // Phase H: segment-driven redesign events
+              case 'segment_update':
+                callbacks.onSegmentUpdate?.(data as SegmentUpdateData);
+                break;
+              case 'resume_briefing':
+                callbacks.onResumeBriefing?.(data as ResumeBriefingData);
+                break;
+              case 'pre_execution_start':
+                callbacks.onPreExecutionStart?.(data.tools ?? []);
+                break;
+              case 'pre_execution_complete':
+                callbacks.onPreExecutionComplete?.(data.tools_run ?? 0);
                 break;
             }
           } catch {

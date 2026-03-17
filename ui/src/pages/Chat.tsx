@@ -20,10 +20,14 @@ import { toast } from 'sonner';
 import * as api from '../lib/api';
 import { formatToolName } from '../lib/utils';
 import { usePropertyContext } from '../context/PropertyContext';
+import { useBuyerContext } from '../context/BuyerContext';
 import type { PropertyContextData, TrackedProperty } from '../context/PropertyContext';
 import { MarkdownLite } from '../components/chat/MarkdownLite';
 import { BlockRenderer } from '../components/chat/BlockRenderer';
 import { SuggestionChips } from '../components/chat/SuggestionChips';
+import { SegmentBadge } from '../components/chat/SegmentBadge';
+import { ResumeBriefingCard } from '../components/chat/ResumeBriefingCard';
+import { BuyerIntakeForm } from '../components/chat/BuyerIntakeForm';
 import { AddressSearch } from '../components/AddressSearch';
 import { PropertyDetailModal } from '../components/context/PropertyDetailModal';
 import type {
@@ -31,6 +35,7 @@ import type {
   FaketorMessage,
   ToolEvent,
   ResponseBlock,
+  BuyerIntakeData,
 } from '../types';
 
 // Icons for tool chips — gives each tool a recognizable visual
@@ -93,6 +98,24 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
     setSendChatMessage,
     setWorkingSetMeta,
   } = usePropertyContext();
+
+  const {
+    segment,
+    segmentConfidence,
+    resumeBriefing,
+    intakeCompleted,
+    intakeData,
+    updateSegment,
+    setResumeBriefing,
+    completeIntake,
+    setPreExecuting,
+    clearPreExecuting,
+    dismissBriefing,
+    resetBuyer,
+  } = useBuyerContext();
+
+  // Whether intake has been dismissed (skipped) for this conversation
+  const [intakeSkipped, setIntakeSkipped] = useState(false);
 
   // Stable session ID for this conversation
   const [sessionId] = useState(() => crypto.randomUUID());
@@ -166,6 +189,7 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
     clearTrackedProperties();
     setActiveProperty(null);
     setWorkingSetMeta(null);
+    resetBuyer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -302,8 +326,8 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
 
       const controller = api.streamFaketorMessage(
         {
-          latitude: activeProperty?.latitude ?? 37.8716,
-          longitude: activeProperty?.longitude ?? -122.2727,
+          latitude: activeProperty?.latitude,
+          longitude: activeProperty?.longitude,
           message: msg,
           history,
           session_id: sessionId,
@@ -317,6 +341,7 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
           year_built: safeInt(activeProperty?.year_built),
           property_type: activeProperty?.property_type,
           property_category: activeProperty?.property_category,
+          buyer_context: intakeData,
         },
         {
           onTextDelta: (text) => {
@@ -410,12 +435,26 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
             setStreamToolEvents([]);
             setActiveToolLabel(null);
           },
+          // Phase H: segment-driven redesign callbacks
+          onSegmentUpdate: (data) => {
+            updateSegment(data);
+          },
+          onResumeBriefing: (data) => {
+            setResumeBriefing(data);
+          },
+          onPreExecutionStart: (tools) => {
+            setPreExecuting(tools);
+            setActiveToolLabel('Preparing analysis...');
+          },
+          onPreExecutionComplete: () => {
+            clearPreExecuting();
+          },
         },
       );
 
       abortRef.current = controller;
     },
-    [input, streaming, messages, activeProperty, sessionId, processBlocks, setWorkingSetMeta, setTrackedFromServer, persistMessages],
+    [input, streaming, messages, activeProperty, sessionId, processBlocks, setWorkingSetMeta, setTrackedFromServer, persistMessages, intakeData, updateSegment, setResumeBriefing, setPreExecuting, clearPreExecuting],
   );
 
   // ---- Handle address search selection ----
@@ -428,6 +467,15 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
     },
     [setActiveProperty, trackProperty, handleSend],
   );
+
+  // Handle buyer intake form submission
+  const handleIntakeComplete = useCallback((data: BuyerIntakeData) => {
+    completeIntake(data);
+  }, [completeIntake]);
+
+  const handleIntakeSkip = useCallback(() => {
+    setIntakeSkipped(true);
+  }, []);
 
   // Register handleSend in context
   useEffect(() => {
@@ -452,7 +500,12 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
             <Bot size={18} />
           </div>
           <div>
-            <h1 className="text-base font-bold text-gray-900">Faketor</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base font-bold text-gray-900">Faketor</h1>
+              {segment && segmentConfidence != null && (
+                <SegmentBadge segment={segment} confidence={segmentConfidence} />
+              )}
+            </div>
             <p className="text-[11px] text-gray-500">
               {activeProperty
                 ? `Analyzing: ${activeProperty.address}`
@@ -488,6 +541,22 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
             <Loader2 size={32} className="animate-spin text-indigo-400 mb-3" />
             <p className="text-sm text-gray-500">Loading conversation...</p>
           </div>
+        )}
+
+        {/* Resume briefing card for returning users */}
+        {resumeBriefing && (
+          <ResumeBriefingCard
+            briefing={resumeBriefing}
+            onDismiss={dismissBriefing}
+          />
+        )}
+
+        {/* Buyer intake form for new conversations (skippable) */}
+        {messages.length === 0 && !streaming && !loadingConversation && !intakeCompleted && !intakeSkipped && (
+          <BuyerIntakeForm
+            onComplete={handleIntakeComplete}
+            onSkip={handleIntakeSkip}
+          />
         )}
 
         {/* Welcome state */}
