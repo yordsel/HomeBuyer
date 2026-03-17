@@ -20,7 +20,7 @@ from homebuyer.services.faketor.state.buyer import BuyerProfile, FieldSource, Si
 logger = logging.getLogger(__name__)
 
 # Model for extraction — Haiku is fast and cheap
-_EXTRACTION_MODEL = "claude-haiku-4-20250514"
+_EXTRACTION_MODEL = "claude-haiku-4-5-20251001"
 
 # Fields we extract from messages
 _EXTRACTABLE_FIELDS = (

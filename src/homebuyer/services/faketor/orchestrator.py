@@ -186,7 +186,11 @@ class TurnOrchestrator:
         try:
             result = self._classifier.classify(
                 context.buyer.profile,
-                context.market,
+                mortgage_rate=context.market.mortgage_rate_30yr or 6.5,
+                median_price=(
+                    context.market.berkeley_wide.median_sale_price
+                    or 1_300_000
+                ),
             )
             context.buyer.record_transition(
                 context.buyer.segment_id,
