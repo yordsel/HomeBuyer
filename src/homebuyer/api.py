@@ -3817,6 +3817,34 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 pass
             return json.dumps({"error": f"SQL error: {error_msg}", "query": sql})
 
+    elif tool_name == "compute_true_cost":
+        from homebuyer.services.faketor.tools.gap.true_cost import (
+            TrueCostParams,
+            compute_true_cost,
+        )
+        from homebuyer.utils.mortgage import get_current_mortgage_rate
+
+        rate = tool_input.get("mortgage_rate")
+        if rate is None and _state and _state.db:
+            rate = get_current_mortgage_rate(_state.db)
+        if rate is None:
+            rate = 6.5  # hard fallback
+
+        params = TrueCostParams(
+            purchase_price=int(tool_input["purchase_price"]),
+            down_payment_pct=float(tool_input.get("down_payment_pct", 20.0)),
+            mortgage_rate=float(rate),
+            year_built=tool_input.get("year_built"),
+            construction_type=tool_input.get("construction_type", "wood_frame"),
+            hoa_monthly=int(tool_input.get("hoa_monthly") or 0),
+            current_rent=(
+                int(tool_input["current_rent"])
+                if tool_input.get("current_rent")
+                else None
+            ),
+        )
+        return safe_json_dumps(compute_true_cost(params))
+
     else:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 

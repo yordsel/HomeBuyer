@@ -309,6 +309,31 @@ def compute_glossary_facts(data: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Gap tools (Phase F)
+# ---------------------------------------------------------------------------
+
+
+def compute_true_cost_facts(data: dict) -> dict:
+    """Facts for ``compute_true_cost`` results."""
+    return {
+        "total_monthly_cost": data.get("total_monthly_cost"),
+        "monthly_pi": data.get("monthly_principal_and_interest"),
+        "monthly_tax": data.get("monthly_property_tax"),
+        "monthly_insurance": data.get("monthly_hoi"),
+        "monthly_earthquake": data.get("monthly_earthquake_insurance"),
+        "monthly_maintenance": data.get("monthly_maintenance_reserve"),
+        "monthly_pmi": data.get("monthly_pmi"),
+        "monthly_hoa": data.get("monthly_hoa"),
+        "is_pmi_applicable": data.get("is_pmi_applicable"),
+        "down_payment_amount": data.get("down_payment_amount"),
+        "loan_amount": data.get("loan_amount"),
+        "monthly_delta_vs_rent": data.get("monthly_delta_vs_rent"),
+        "delta_direction": data.get("delta_direction"),
+        "pmi_note": data.get("pmi_note"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -326,6 +351,7 @@ _FACT_COMPUTERS: dict[str, callable] = {
     "undo_filter": compute_undo_filter_facts,
     "lookup_regulation": compute_regulation_facts,
     "lookup_glossary_term": compute_glossary_facts,
+    "compute_true_cost": compute_true_cost_facts,
 }
 
 

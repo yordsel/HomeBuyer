@@ -19,6 +19,7 @@ from homebuyer.services.faketor.facts import (
     compute_rental_facts,
     compute_search_facts,
     compute_sell_vs_hold_facts,
+    compute_true_cost_facts,
     compute_undo_filter_facts,
 )
 from homebuyer.services.faketor.tools.registry import ToolDefinition
@@ -996,5 +997,70 @@ _TOOL_DEFINITIONS: list[ToolDefinition] = [
         },
         "block_type": "glossary_info",
         "fact_computer": compute_glossary_facts,
+    },
+    # ------------------------------------------------------------------
+    # Phase F gap tools
+    # ------------------------------------------------------------------
+    {
+        "name": "compute_true_cost",
+        "description": (
+            "Compute the all-in monthly ownership cost for a Berkeley property. "
+            "Includes principal & interest, property tax, hazard insurance, "
+            "earthquake insurance (construction-type-aware), maintenance reserve "
+            "(age-based), PMI (if LTV > 80%), and HOA. Optionally compares to "
+            "the buyer's current rent. Use this when the buyer asks about "
+            "monthly costs, affordability, or rent-vs-own comparisons."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "purchase_price": {
+                    "type": "number",
+                    "description": "Purchase price in dollars.",
+                },
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": (
+                        "Down payment as percent of price, e.g. 10 for 10%. "
+                        "Default 20."
+                    ),
+                },
+                "mortgage_rate": {
+                    "type": "number",
+                    "description": (
+                        "Annual mortgage rate as percent, e.g. 7.25. "
+                        "If omitted, current market rate is used."
+                    ),
+                },
+                "year_built": {
+                    "type": "integer",
+                    "description": (
+                        "Year the property was built. Used to compute "
+                        "age-based maintenance reserve."
+                    ),
+                },
+                "construction_type": {
+                    "type": "string",
+                    "enum": ["wood_frame", "masonry", "soft_story", "concrete"],
+                    "description": (
+                        "Construction type for earthquake insurance estimate. "
+                        "Defaults to wood_frame."
+                    ),
+                },
+                "hoa_monthly": {
+                    "type": "number",
+                    "description": "Monthly HOA dues, 0 if none.",
+                },
+                "current_rent": {
+                    "type": "number",
+                    "description": (
+                        "Buyer's current monthly rent, for rent-vs-own comparison."
+                    ),
+                },
+            },
+            "required": ["purchase_price"],
+        },
+        "block_type": "true_cost_card",
+        "fact_computer": compute_true_cost_facts,
     },
 ]
