@@ -4,22 +4,34 @@ ResearchContext is the persistent state — one per authenticated user or
 one per anonymous session. TurnState is ephemeral per-turn state that
 accumulates facts and promotes them to ResearchContext at end of turn.
 ResearchContextStore manages the lifecycle.
+
+Phase G (#65-69) adds DB persistence for authenticated users:
+- persist() writes serialized state to research_contexts table
+- load_or_create() loads from DB on cache miss, applies confidence decay
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
 from homebuyer.services.faketor.accumulator import AnalysisAccumulator
 from homebuyer.services.faketor.state.buyer import BuyerState, Signal
 from homebuyer.services.faketor.state.market import MarketDelta, MarketSnapshot
 from homebuyer.services.faketor.state.property import PropertyState
 
+if TYPE_CHECKING:
+    from homebuyer.storage.database import Database
+
 logger = logging.getLogger(__name__)
+
+# Staleness threshold — same as MarketSnapshot._STALE_SECONDS
+_STALE_SECONDS = 4 * 3600
 
 
 # ---------------------------------------------------------------------------
@@ -195,14 +207,21 @@ class TurnState:
 class ResearchContextStore:
     """Manages research context lifecycle.
 
-    For authenticated users: one context per user_id (in-memory for now,
-    Phase G adds DB persistence). For anonymous users: in-memory cache
+    For authenticated users: persists to DB (research_contexts table) with
+    in-memory cache for fast access. For anonymous users: in-memory cache
     keyed by session_id with TTL-based eviction.
+
+    Phase G (#65-69): DB persistence for authenticated users.
     """
 
-    def __init__(self, ttl_seconds: int = 1800) -> None:
+    def __init__(
+        self,
+        ttl_seconds: int = 1800,
+        db: Database | None = None,
+    ) -> None:
         self._ttl_seconds = ttl_seconds
-        # In-memory stores (Phase G will add DB persistence for authenticated users)
+        self._db = db
+        # In-memory stores — cache for authenticated users, primary for anonymous
         self._by_user: dict[str, ResearchContext] = {}
         self._by_session: dict[str, ResearchContext] = {}
         # Code review fix for #30: guard shared dicts in async context.
@@ -219,8 +238,10 @@ class ResearchContextStore:
         """Load an existing research context or create a new one.
 
         For authenticated users:
-        - Load by user_id from in-memory store
-        - Apply confidence decay if stale (>4 hours since last_active)
+        1. Check in-memory cache
+        2. If miss, check DB (Phase G)
+        3. If found, apply confidence decay if stale (>4 hours)
+        4. If not found, create new empty context
 
         For anonymous users:
         - Look up by session_id in in-memory cache
@@ -235,9 +256,15 @@ class ResearchContextStore:
             # Authenticated user path
             if user_id:
                 ctx = self._by_user.get(user_id)
+                if not ctx:
+                    # Cache miss — try loading from DB
+                    ctx = self._load_from_db(user_id)
+                    if ctx:
+                        self._by_user[user_id] = ctx
+
                 if ctx:
                     # Check if the buyer profile needs confidence decay
-                    if ctx.last_active and (now - ctx.last_active) > (4 * 3600):
+                    if ctx.last_active and (now - ctx.last_active) > _STALE_SECONDS:
                         ctx.buyer.profile.apply_confidence_decay()
                         logger.info(
                             "Applied confidence decay for user %s (%.1fh stale)",
@@ -278,14 +305,109 @@ class ResearchContextStore:
     async def persist(self, context: ResearchContext) -> None:
         """Persist research context.
 
-        Phase A-G: in-memory only. Phase G will add DB persistence
-        for authenticated users.
+        For authenticated users: writes to both in-memory cache and DB.
+        For anonymous users: in-memory cache only.
         """
         async with self._lock:
             if context.user_id:
                 self._by_user[context.user_id] = context
+                self._persist_to_db(context)
             elif context.session_id:
                 self._by_session[context.session_id] = context
+
+    # ------------------------------------------------------------------
+    # DB persistence helpers (Phase G)
+    # ------------------------------------------------------------------
+
+    def _persist_to_db(self, context: ResearchContext) -> None:
+        """Write context to the research_contexts table.
+
+        Uses INSERT OR REPLACE (upsert) since user_id is the PK.
+        Only called for authenticated users. Anonymous users are
+        never persisted to DB.
+        """
+        if not self._db or not context.user_id:
+            return
+
+        try:
+            user_id_int = int(context.user_id)
+        except (ValueError, TypeError):
+            logger.warning("Cannot persist: user_id %r is not a valid int", context.user_id)
+            return
+
+        now = time.time()
+        last_active_ts = _epoch_to_iso(context.last_active) if context.last_active else _epoch_to_iso(now)
+        created_ts = _epoch_to_iso(context.created_at) if context.created_at else last_active_ts
+
+        buyer_json = json.dumps(context.buyer.to_dict())
+        market_json = json.dumps(context.market.to_dict())
+        property_json = json.dumps(context.property.to_dict())
+
+        try:
+            self._db.execute(
+                "INSERT OR REPLACE INTO research_contexts "
+                "(user_id, session_id, created_at, last_active, "
+                "buyer_state, market_snapshot, property_state) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    user_id_int,
+                    context.session_id,
+                    created_ts,
+                    last_active_ts,
+                    buyer_json,
+                    market_json,
+                    property_json,
+                ),
+            )
+            self._db.commit()
+            logger.debug("Persisted research context for user %s", context.user_id)
+        except Exception:
+            logger.exception("Failed to persist research context for user %s", context.user_id)
+
+    def _load_from_db(self, user_id: str) -> ResearchContext | None:
+        """Load research context from the DB for a returning user.
+
+        Returns None if no saved context exists or if DB is unavailable.
+        """
+        if not self._db:
+            return None
+
+        try:
+            user_id_int = int(user_id)
+        except (ValueError, TypeError):
+            return None
+
+        try:
+            row = self._db.fetchone(
+                "SELECT * FROM research_contexts WHERE user_id = ?",
+                (user_id_int,),
+            )
+        except Exception:
+            logger.exception("Failed to load research context for user %s", user_id)
+            return None
+
+        if not row:
+            return None
+
+        try:
+            buyer_data = json.loads(row["buyer_state"]) if row["buyer_state"] else {}
+            market_data = json.loads(row["market_snapshot"]) if row["market_snapshot"] else {}
+            property_data = json.loads(row["property_state"]) if row["property_state"] else {}
+
+            ctx = ResearchContext(
+                user_id=user_id,
+                session_id=row.get("session_id"),
+                created_at=_iso_to_epoch(row["created_at"]) if row["created_at"] else 0.0,
+                last_active=_iso_to_epoch(row["last_active"]) if row["last_active"] else 0.0,
+                buyer=BuyerState.from_dict(buyer_data),
+                market=MarketSnapshot.from_dict(market_data),
+                property=PropertyState.from_dict(property_data),
+            )
+            logger.info("Loaded research context from DB for user %s", user_id)
+            return ctx
+        except Exception:
+            logger.exception("Failed to deserialize research context for user %s", user_id)
+            return None
 
     def _evict_expired(self) -> None:
         """Remove anonymous sessions that have exceeded TTL."""
@@ -299,3 +421,23 @@ class ResearchContextStore:
             del self._by_session[sid]
         if expired:
             logger.debug("Evicted %d expired anonymous sessions", len(expired))
+
+
+# ---------------------------------------------------------------------------
+# Timestamp helpers
+# ---------------------------------------------------------------------------
+
+
+def _epoch_to_iso(epoch: float) -> str:
+    """Convert epoch seconds to ISO 8601 string (UTC, no timezone suffix)."""
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _iso_to_epoch(iso_str: str) -> float:
+    """Convert ISO 8601 string to epoch seconds."""
+    try:
+        dt = datetime.strptime(iso_str, "%Y-%m-%d %H:%M:%S")
+        dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except (ValueError, TypeError):
+        return 0.0

@@ -614,7 +614,7 @@ class AppState:
         from homebuyer.services.faketor.state.context import ResearchContextStore
 
         self.segment_classifier = SegmentClassifier()
-        self.context_store = ResearchContextStore(ttl_seconds=1800)
+        self.context_store = ResearchContextStore(ttl_seconds=1800, db=self.db)
 
         # SignalExtractor needs the Anthropic client — reuse faketor's
         if self.faketor.enabled and hasattr(self.faketor, "_client"):
