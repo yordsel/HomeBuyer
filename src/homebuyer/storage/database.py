@@ -53,7 +53,7 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 # Schema DDL (SQLite dialect — translated at runtime for Postgres)
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _SCHEMA_SQL_SQLITE = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -484,6 +484,59 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_pw_reset_user ON password_reset_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_pw_reset_hash ON password_reset_tokens(token_hash);
+
+-- ---------------------------------------------------------------------------
+-- Faketor research context persistence (Phase G, schema v5)
+--
+-- One row per authenticated user. Anonymous users are in-memory only.
+-- All complex state is JSON-serialized using the containers' to_dict()
+-- methods (BuyerState, MarketSnapshot, PropertyState).
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS research_contexts (
+    user_id         INTEGER PRIMARY KEY,
+    session_id      TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    last_active     TEXT NOT NULL DEFAULT (datetime('now')),
+    buyer_state     TEXT NOT NULL DEFAULT '{}',
+    market_snapshot TEXT NOT NULL DEFAULT '{}',
+    property_state  TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS buyer_profiles (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL UNIQUE,
+    segment_id      TEXT,
+    segment_confidence REAL NOT NULL DEFAULT 0.0,
+    intent          TEXT,
+    capital         INTEGER,
+    equity          INTEGER,
+    income          INTEGER,
+    current_rent    INTEGER,
+    profile_json    TEXT NOT NULL DEFAULT '{}',
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_buyer_profiles_segment ON buyer_profiles(segment_id);
+
+CREATE TABLE IF NOT EXISTS property_analyses (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    property_id     INTEGER NOT NULL,
+    address         TEXT NOT NULL,
+    tool_name       TEXT NOT NULL,
+    result_summary  TEXT,
+    conclusion      TEXT,
+    computed_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    market_snapshot_at REAL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE(user_id, property_id, tool_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_prop_analyses_user ON property_analyses(user_id);
+CREATE INDEX IF NOT EXISTS idx_prop_analyses_property ON property_analyses(user_id, property_id);
 """
 
 
