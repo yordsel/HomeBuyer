@@ -2860,6 +2860,9 @@ def _execute_update_working_set(tool_input: dict) -> str:
     requested_limit = min(tool_input.get("limit", 10), 25)
     adu_filter = tool_input.get("adu_eligible")
     sb9_filter = tool_input.get("sb9_eligible")
+    # E-7 (#64): Affordability filtering
+    max_monthly_cost = tool_input.get("max_monthly_cost")
+    affordability_dp_pct = tool_input.get("down_payment_pct", 20.0)
 
     if sql:
         # --- SQL mode ---
@@ -2934,8 +2937,9 @@ def _execute_update_working_set(tool_input: dict) -> str:
         # Get true total count
         total_matching = _state.db.count_properties_advanced(**_search_filters)
 
-        # Over-fetch when post-filtering on dev potential flags
-        sql_limit = requested_limit * 4 if (adu_filter or sb9_filter) else requested_limit
+        # Over-fetch when post-filtering on dev potential or affordability flags
+        needs_overfetch = adu_filter or sb9_filter or max_monthly_cost
+        sql_limit = requested_limit * 4 if needs_overfetch else requested_limit
 
         rows = _state.db.search_properties_advanced(
             **_search_filters,
@@ -3032,6 +3036,19 @@ def _execute_update_working_set(tool_input: dict) -> str:
                 data_quality = "shared_lot_no_size"
                 data_quality_note = "Condo unit with shared lot — lot size may be zero or shared."
 
+            # E-7 (#64): Compute estimated monthly cost for affordability filtering
+            est_monthly_cost = None
+            price_for_cost = predicted_price or row.get("last_sale_price")
+            if price_for_cost:
+                est_monthly_cost = _estimate_monthly_cost(
+                    int(price_for_cost), affordability_dp_pct,
+                )
+
+            # E-7: Skip properties exceeding monthly cost limit
+            if max_monthly_cost and est_monthly_cost is not None:
+                if est_monthly_cost > int(max_monthly_cost):
+                    continue
+
             results.append({
                 "id": row.get("id"),
                 "address": row.get("address"),
@@ -3054,6 +3071,7 @@ def _execute_update_working_set(tool_input: dict) -> str:
                 "last_sale_date": row.get("last_sale_date"),
                 "predicted_price": predicted_price,
                 "prediction_confidence": prediction_confidence,
+                "estimated_monthly_cost": est_monthly_cost,
                 "data_quality": data_quality,
                 "data_quality_note": data_quality_note,
                 "development": dev_summary,
@@ -3226,6 +3244,55 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             return safe_json_dumps(cached)
         analyzer = _state.get_analyzer()
         result_dict = analyzer.generate_summary_report()
+
+        # E-5 (#64): Add rate sensitivity / affordability context
+        median_price = None
+        rate_30yr = None
+        cm = result_dict.get("current_market", {})
+        if cm:
+            median_price = cm.get("median_sale_price")
+            rate_30yr = cm.get("mortgage_rate_30yr")
+
+        if median_price and rate_30yr:
+            monthly_rate = (rate_30yr / 100) / 12
+            affordability_snapshots = []
+            for dp_pct, dp_label in [
+                (20.0, "20% down"), (10.0, "10% down"),
+                (5.0, "5% down"), (3.5, "3.5% down (FHA)"),
+            ]:
+                dp_amount = int(median_price * dp_pct / 100)
+                loan = median_price - dp_amount
+                if monthly_rate > 0:
+                    n = 360  # 30-year
+                    monthly_pi = int(
+                        loan * (monthly_rate * (1 + monthly_rate) ** n)
+                        / ((1 + monthly_rate) ** n - 1)
+                    )
+                else:
+                    monthly_pi = int(loan / 360)
+                # Rough PITI: add ~25% for taxes + insurance
+                monthly_piti = int(monthly_pi * 1.25)
+                # Income required at 28% front-end DTI
+                income_required_annual = int(monthly_piti * 12 / 0.28)
+                affordability_snapshots.append({
+                    "down_payment_pct": dp_pct,
+                    "down_payment_label": dp_label,
+                    "down_payment_amount": dp_amount,
+                    "loan_amount": int(loan),
+                    "monthly_pi": monthly_pi,
+                    "monthly_piti_estimate": monthly_piti,
+                    "income_required_28pct_dti": income_required_annual,
+                })
+            result_dict["rate_sensitivity"] = {
+                "median_price": int(median_price),
+                "mortgage_rate_30yr": rate_30yr,
+                "note": (
+                    f"At {rate_30yr}% rate on a ${int(median_price):,} median home, "
+                    f"here's what different down payments look like:"
+                ),
+                "scenarios": affordability_snapshots,
+            }
+
         _state.cache_set(cache_key, result_dict)
         logger.info("TTL cache MISS for %s — stored", cache_key)
         return safe_json_dumps(result_dict)
@@ -3296,8 +3363,11 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             neighborhood=neighborhood,
             property_value=current_value,
         )
+        _yb = tool_input.get("year_built")
+        _year_built = int(_yb) if _yb is not None else None
         expenses = _state.rental_analyzer.calculate_expenses(
             expense_basis, rent_est.annual_rent,
+            year_built=_year_built,
         )
         noi = rent_est.annual_rent - expenses.total_annual
         cap_rate = round(noi / current_value * 100, 2) if current_value > 0 else 0
@@ -3339,6 +3409,53 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 )
         if purchase_date:
             result["purchase_date"] = purchase_date
+
+        # E-6 (#64): Rate penalty dimension for homeowners considering selling
+        # Shows monthly payment increase from selling current and buying new
+        owner_rate = mortgage_rate_override
+        if owner_rate is not None and mortgage_rate is not None:
+            owner_rate_float = float(owner_rate)
+            current_rate_float = float(mortgage_rate)
+            if owner_rate_float < current_rate_float and purchase_price:
+                pp = int(purchase_price)
+                remaining_loan = pp * 0.8  # approximate remaining balance
+                # Current payment at owner's locked rate
+                old_monthly_r = (owner_rate_float / 100) / 12
+                if old_monthly_r > 0:
+                    old_pi = int(
+                        remaining_loan * (old_monthly_r * (1 + old_monthly_r) ** 360)
+                        / ((1 + old_monthly_r) ** 360 - 1)
+                    )
+                else:
+                    old_pi = int(remaining_loan / 360)
+                # New payment at today's rate on current value with 20% down
+                new_loan = int(current_value * 0.80)
+                new_monthly_r = (current_rate_float / 100) / 12
+                if new_monthly_r > 0:
+                    new_pi = int(
+                        new_loan * (new_monthly_r * (1 + new_monthly_r) ** 360)
+                        / ((1 + new_monthly_r) ** 360 - 1)
+                    )
+                else:
+                    new_pi = int(new_loan / 360)
+
+                monthly_penalty = new_pi - old_pi
+                annual_penalty = monthly_penalty * 12
+                result["rate_penalty"] = {
+                    "current_rate": owner_rate_float,
+                    "new_rate": current_rate_float,
+                    "rate_difference_pct": round(current_rate_float - owner_rate_float, 2),
+                    "current_monthly_pi": old_pi,
+                    "new_monthly_pi": new_pi,
+                    "monthly_penalty": monthly_penalty,
+                    "annual_penalty": annual_penalty,
+                    "note": (
+                        f"Selling and buying at today's {current_rate_float}% rate "
+                        f"(vs your {owner_rate_float}% locked rate) would increase "
+                        f"your monthly P&I by ${monthly_penalty:,} "
+                        f"(${annual_penalty:,}/year)"
+                    ),
+                }
 
         return safe_json_dumps(result)
 
@@ -3572,6 +3689,9 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         requested_limit = min(tool_input.get("limit", 10), 25)
         adu_filter = tool_input.get("adu_eligible")
         sb9_filter = tool_input.get("sb9_eligible")
+        # E-7 (#64): Affordability filtering by estimated monthly cost
+        max_monthly_cost = tool_input.get("max_monthly_cost")
+        affordability_dp_pct = tool_input.get("down_payment_pct", 20.0)
 
         # Shared filter kwargs for both count and search
         _search_filters = dict(
@@ -3599,8 +3719,9 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         # Get true total count (before LIMIT)
         total_matching = _state.db.count_properties_advanced(**_search_filters)
 
-        # Over-fetch when post-filtering on dev potential flags
-        sql_limit = requested_limit * 4 if (adu_filter or sb9_filter) else requested_limit
+        # Over-fetch when post-filtering on dev potential or affordability flags
+        needs_overfetch = adu_filter or sb9_filter or max_monthly_cost
+        sql_limit = requested_limit * 4 if needs_overfetch else requested_limit
 
         rows = _state.db.search_properties_advanced(
             **_search_filters,
@@ -3698,6 +3819,19 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 data_quality = "shared_lot_no_size"
                 data_quality_note = "Condo unit with shared lot — lot size may be zero or shared across units."
 
+            # E-7 (#64): Compute estimated monthly cost for affordability filtering
+            est_monthly_cost = None
+            price_for_cost = predicted_price or row.get("last_sale_price")
+            if price_for_cost:
+                est_monthly_cost = _estimate_monthly_cost(
+                    int(price_for_cost), affordability_dp_pct,
+                )
+
+            # E-7: Skip properties exceeding monthly cost limit
+            if max_monthly_cost and est_monthly_cost is not None:
+                if est_monthly_cost > int(max_monthly_cost):
+                    continue
+
             results.append({
                 "id": row.get("id"),
                 "address": row.get("address"),
@@ -3720,6 +3854,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 "last_sale_date": row.get("last_sale_date"),
                 "predicted_price": predicted_price,
                 "prediction_confidence": prediction_confidence,
+                "estimated_monthly_cost": est_monthly_cost,
                 "data_quality": data_quality,
                 "data_quality_note": data_quality_note,
                 "development": dev_summary,
@@ -4745,8 +4880,79 @@ def _get_or_compute_prediction(tool_input: dict, source: str = "chat") -> dict:
     return pred_dict
 
 
+def _estimate_monthly_cost(
+    price: int,
+    down_payment_pct: float = 20.0,
+    rate: float | None = None,
+) -> int:
+    """Quick estimate of monthly housing cost (P&I + 25% for taxes/insurance).
+
+    E-7 (#64): Used by search_properties and update_working_set for
+    affordability post-filtering.
+    """
+    if rate is None:
+        # Try to pull cached market rate
+        try:
+            mkt = _state.cache_get("market_summary") if _state else None
+            if mkt:
+                rate = mkt.get("current_market", {}).get("mortgage_rate_30yr")
+        except Exception:
+            pass
+        rate = rate or 6.5
+    dp = int(price * down_payment_pct / 100)
+    loan = price - dp
+    monthly_r = (rate / 100) / 12
+    if monthly_r > 0 and loan > 0:
+        n = 360
+        pi = int(
+            loan * (monthly_r * (1 + monthly_r) ** n)
+            / ((1 + monthly_r) ** n - 1)
+        )
+    else:
+        pi = int(loan / 360) if loan > 0 else 0
+    # Add ~25% for property tax + insurance + maintenance
+    return int(pi * 1.25)
+
+
 def _prediction_to_dict(result) -> dict:
-    """Convert PredictionResult to JSON-serializable dict."""
+    """Convert PredictionResult to JSON-serializable dict.
+
+    E-4 (#64): Adds top_value_drivers — sorted, human-readable summary of
+    the most impactful SHAP feature contributions for prominent surfacing.
+    """
+    contributions = result.feature_contributions or {}
+
+    # Build sorted list of top value drivers from SHAP
+    top_drivers: list[dict] = []
+    if contributions:
+        _FEATURE_LABELS: dict[str, str] = {
+            "sqft": "Living area (sqft)",
+            "lot_size_sqft": "Lot size",
+            "beds": "Bedrooms",
+            "baths": "Bathrooms",
+            "year_built": "Year built",
+            "latitude": "Location (latitude)",
+            "longitude": "Location (longitude)",
+            "property_type": "Property type",
+            "neighborhood": "Neighborhood",
+            "zip_code": "ZIP code",
+            "days_on_market": "Days on market",
+            "sale_to_list_ratio": "Sale-to-list ratio",
+            "mortgage_rate_30yr": "Mortgage rate",
+        }
+        for feature, impact in sorted(
+            contributions.items(), key=lambda x: abs(x[1]), reverse=True
+        ):
+            if abs(impact) < 1000:  # skip negligible contributions
+                continue
+            top_drivers.append({
+                "feature": feature,
+                "label": _FEATURE_LABELS.get(feature, feature.replace("_", " ").title()),
+                "impact": int(round(impact)),
+                "direction": "increases" if impact > 0 else "decreases",
+                "impact_formatted": f"${abs(int(round(impact))):,}",
+            })
+
     return {
         "predicted_price": result.predicted_price,
         "price_lower": result.price_lower,
@@ -4755,7 +4961,8 @@ def _prediction_to_dict(result) -> dict:
         "list_price": result.list_price,
         "predicted_premium_pct": result.predicted_premium_pct,
         "base_value": result.base_value,
-        "feature_contributions": result.feature_contributions,
+        "feature_contributions": contributions,
+        "top_value_drivers": top_drivers[:8],  # top 8 most impactful features
     }
 
 

@@ -204,7 +204,9 @@ def test_investment_scenarios_generated(tmp_db: Database):
     assert p.best_scenario_name != ""
 
     # Key investment metrics should be populated
-    assert p.cap_rate_pct >= 0
+    # Note: Berkeley cap rates can be negative with realistic expenses
+    # (earthquake insurance + age-adjusted maintenance — E-1/E-2 #64)
+    assert p.cap_rate_pct is not None
     assert p.cash_on_cash_pct is not None
 
 
