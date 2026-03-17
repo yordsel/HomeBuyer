@@ -19,6 +19,10 @@ from typing import Any, Literal
 # all profile data through repeated stale reloads. See review fix for #28.
 _MIN_CONFIDENCE = 0.1
 
+# Maximum segment transition history entries per user — prevents unbounded
+# growth of the buyer_state JSON blob in the DB. Oldest entries are dropped.
+_MAX_SEGMENT_HISTORY = 50
+
 
 # ---------------------------------------------------------------------------
 # Signal — raw evidence extracted from user messages
@@ -308,6 +312,9 @@ class BuyerState:
                 triggered_at=time.time(),
             )
         )
+        # Cap history to prevent unbounded growth in serialized JSON
+        if len(self.segment_history) > _MAX_SEGMENT_HISTORY:
+            self.segment_history = self.segment_history[-_MAX_SEGMENT_HISTORY:]
 
     # ------------------------------------------------------------------
     # Serialization

@@ -197,11 +197,13 @@ class PostProcessor:
                     or 1_300_000
                 ),
             )
-            context.buyer.record_transition(
-                context.buyer.segment_id,
-                classification.segment_id,
-                classification.confidence,
-                factor_coverage=classification.factor_coverage,
-            )
+            # Guard: only record transition when classifier returns a segment
+            if classification.segment_id is not None:
+                context.buyer.record_transition(
+                    context.buyer.segment_id,
+                    classification.segment_id,
+                    classification.confidence,
+                    factor_coverage=classification.factor_coverage,
+                )
         except Exception as e:
             logger.warning("PostProcessor: re-classification failed: %s", e)

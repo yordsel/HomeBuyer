@@ -474,22 +474,29 @@ class SegmentClassifier:
             )
 
         # --- Leveraged Investor ---
-        # Simplified: if they have some capital and income to service debt
+        # Has capital + income to service debt, using leverage to invest.
+        # Note: leverage spread (cap rate vs borrowing cost) informs advice
+        # framing, not segment eligibility — in high-rate environments the
+        # spread is negative but investors still use leverage intentionally.
         if capital > 0 and profile.income and profile.income > 0:
-            # Rough cap rate estimate: Berkeley rental yield ~3-4%
             estimated_cap_rate = 0.035
             leverage_spread = estimated_cap_rate - (rate / 100)
-            if leverage_spread > 0:
-                return SegmentResult(
-                    segment_id=LEVERAGED_INVESTOR,
-                    confidence=self._base_confidence(factor_coverage),
-                    reasoning=(
-                        f"Positive leverage spread: estimated cap rate "
-                        f"{estimated_cap_rate:.1%} > borrowing cost {rate / 100:.1%}. "
-                        f"Leverage amplifies returns."
-                    ),
-                    factor_coverage=factor_coverage,
+            spread_note = (
+                f"Positive leverage spread ({estimated_cap_rate:.1%} cap > "
+                f"{rate / 100:.1%} rate) — leverage amplifies returns."
+                if leverage_spread > 0
+                else (
+                    f"Negative leverage spread ({estimated_cap_rate:.1%} cap < "
+                    f"{rate / 100:.1%} rate) — cash flow negative but may "
+                    f"benefit from appreciation and tax advantages."
                 )
+            )
+            return SegmentResult(
+                segment_id=LEVERAGED_INVESTOR,
+                confidence=self._base_confidence(factor_coverage),
+                reasoning=spread_note,
+                factor_coverage=factor_coverage,
+            )
 
         # --- Value-Add Investor ---
         # Detected from signals about development, renovation, ADU

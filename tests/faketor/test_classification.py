@@ -293,13 +293,17 @@ class TestAppreciationBettor:
         assert result.segment_id == APPRECIATION_BETTOR
         assert "appreciation" in result.reasoning.lower()
 
-    def test_negative_leverage_spread(self):
-        """High rate makes leverage unattractive → appreciation bettor."""
+    def test_negative_leverage_spread_still_leveraged(self):
+        """High rate with capital+income → leveraged investor (spread informs advice, not eligibility)."""
         result = classifier.classify(
             _profile(intent="invest", capital=200_000, income=150_000),
             mortgage_rate=7.0,  # High rate → negative leverage spread
         )
-        assert result.segment_id == APPRECIATION_BETTOR
+        # Fix #6: Leverage spread no longer gates segment eligibility.
+        # Investors with capital + income are classified as leveraged_investor
+        # regardless of rate environment; the spread informs advice framing.
+        assert result.segment_id == LEVERAGED_INVESTOR
+        assert "negative leverage spread" in result.reasoning.lower()
 
 
 # ---------------------------------------------------------------------------

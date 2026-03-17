@@ -98,9 +98,20 @@ class TestTimestampHelpers:
     def test_epoch_to_iso_roundtrip(self):
         epoch = 1710000000.0  # 2024-03-09 16:00:00 UTC
         iso = _epoch_to_iso(epoch)
-        assert iso == "2024-03-09 16:00:00"
+        # Now uses isoformat() for robust round-trip fidelity
+        assert iso == "2024-03-09T16:00:00+00:00"
         back = _iso_to_epoch(iso)
         assert back == pytest.approx(epoch)
+
+    def test_iso_to_epoch_legacy_format(self):
+        """Bare timestamps (legacy DB rows) still parse correctly."""
+        epoch = _iso_to_epoch("2024-03-09 16:00:00")
+        assert epoch == pytest.approx(1710000000.0)
+
+    def test_iso_to_epoch_with_timezone(self):
+        """ISO strings with timezone offsets parse correctly."""
+        epoch = _iso_to_epoch("2024-03-09T16:00:00+00:00")
+        assert epoch == pytest.approx(1710000000.0)
 
     def test_iso_to_epoch_invalid(self):
         assert _iso_to_epoch("not-a-date") == 0.0

@@ -257,7 +257,9 @@ class ResearchContextStore:
             if user_id:
                 ctx = self._by_user.get(user_id)
                 if not ctx:
-                    # Cache miss — try loading from DB
+                    # Cache miss — try loading from DB.
+                    # This is a fast local read (single row by PK) so we keep
+                    # it synchronous within the lock to avoid SQLite thread issues.
                     ctx = self._load_from_db(user_id)
                     if ctx:
                         self._by_user[user_id] = ctx
@@ -307,13 +309,18 @@ class ResearchContextStore:
 
         For authenticated users: writes to both in-memory cache and DB.
         For anonymous users: in-memory cache only.
+        DB write runs outside the async lock to minimize lock contention.
         """
         async with self._lock:
             if context.user_id:
                 self._by_user[context.user_id] = context
-                self._persist_to_db(context)
             elif context.session_id:
                 self._by_session[context.session_id] = context
+
+        # DB write outside the lock — still synchronous since SQLite
+        # connections are not thread-safe, but lock hold time is minimized.
+        if context.user_id:
+            self._persist_to_db(context)
 
     # ------------------------------------------------------------------
     # DB persistence helpers (Phase G)
@@ -429,15 +436,27 @@ class ResearchContextStore:
 
 
 def _epoch_to_iso(epoch: float) -> str:
-    """Convert epoch seconds to ISO 8601 string (UTC, no timezone suffix)."""
-    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    """Convert epoch seconds to ISO 8601 string (UTC)."""
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
 
 
 def _iso_to_epoch(iso_str: str) -> float:
-    """Convert ISO 8601 string to epoch seconds."""
+    """Convert ISO 8601 string to epoch seconds.
+
+    Handles both bare timestamps ('2025-01-01 00:00:00') and those with
+    timezone offsets ('2025-01-01T00:00:00+00:00'). Uses fromisoformat()
+    for robust round-trip fidelity.
+    """
     try:
-        dt = datetime.strptime(iso_str, "%Y-%m-%d %H:%M:%S")
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
         return dt.timestamp()
     except (ValueError, TypeError):
-        return 0.0
+        # Fallback: try strptime for legacy bare-timestamp rows
+        try:
+            dt = datetime.strptime(iso_str, "%Y-%m-%d %H:%M:%S")
+            dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except (ValueError, TypeError):
+            return 0.0

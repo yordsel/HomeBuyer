@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path as _Path
@@ -4484,7 +4485,7 @@ async def faketor_chat(
 
     # --- Orchestrated path (Phase E, feature-flag-gated) ---
     if _state.turn_orchestrator is not None:
-        user_id = str(auth_user_id) if auth_user_id else (req.session_id or "anonymous")
+        user_id = str(auth_user_id) if auth_user_id else (req.session_id or str(uuid.uuid4()))
         property_context = _resolve_faketor_context(req)
         working_set = None
         if req.session_id:
@@ -4564,7 +4565,7 @@ async def faketor_chat_stream(
 
     # --- Orchestrated path (Phase E, feature-flag-gated) ---
     if _state.turn_orchestrator is not None:
-        user_id = str(auth_user_id) if auth_user_id else (req.session_id or "anonymous")
+        user_id = str(auth_user_id) if auth_user_id else (req.session_id or str(uuid.uuid4()))
         property_context = _resolve_faketor_context(req)
         working_set = None
         if req.session_id:

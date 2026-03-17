@@ -16,6 +16,7 @@ Phase E-6 (#50) of Epic #23.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -188,17 +189,24 @@ class TurnOrchestrator:
     # Step 2: Extract buyer signals
     # ------------------------------------------------------------------
 
-    def _extract_signals(
+    async def _extract_signals(
         self,
         message: str,
         context: ResearchContext,
         metrics: TurnMetrics,
     ) -> None:
-        """Extract buyer signals from user message and merge into context."""
+        """Extract buyer signals from user message and merge into context.
+
+        Runs the synchronous Haiku LLM call in a thread executor to avoid
+        blocking the async event loop (~200ms per call).
+        """
         start = time.monotonic()
         try:
-            extraction = self._extractor.extract(message)
-            if extraction:
+            loop = asyncio.get_running_loop()
+            extraction = await loop.run_in_executor(
+                None, self._extractor.extract, message
+            )
+            if extraction and not extraction.is_empty():
                 extractions = extraction.to_extractions()
                 context.buyer.profile.apply_extraction(extractions)
         except Exception as e:
@@ -225,12 +233,14 @@ class TurnOrchestrator:
                     or 1_300_000
                 ),
             )
-            context.buyer.record_transition(
-                context.buyer.segment_id,
-                result.segment_id,
-                result.confidence,
-                factor_coverage=result.factor_coverage,
-            )
+            # Guard: only record transition when classifier returns a segment
+            if result.segment_id is not None:
+                context.buyer.record_transition(
+                    context.buyer.segment_id,
+                    result.segment_id,
+                    result.confidence,
+                    factor_coverage=result.factor_coverage,
+                )
         except Exception as e:
             logger.warning("Segment classification failed: %s", e)
         metrics.classification_ms = (time.monotonic() - start) * 1000
@@ -625,8 +635,8 @@ class TurnOrchestrator:
         # Apply buyer intake if provided (seeds profile for turn 1)
         self._apply_buyer_context(context, buyer_context)
 
-        # Step 2: Extract signals
-        self._extract_signals(message, context, metrics)
+        # Step 2: Extract signals (async — runs Haiku in thread pool)
+        await self._extract_signals(message, context, metrics)
 
         # Step 3: Classify segment
         self._classify_segment(context, metrics)
@@ -725,7 +735,7 @@ class TurnOrchestrator:
         if briefing_data:
             yield {"event": "resume_briefing", "data": briefing_data}
 
-        self._extract_signals(message, context, metrics)
+        await self._extract_signals(message, context, metrics)
         self._classify_segment(context, metrics)
 
         # Emit segment_update after classification
@@ -778,131 +788,140 @@ class TurnOrchestrator:
         discussed_properties: list[int] = []
 
         llm_start = time.monotonic()
+        llm_error = False
 
-        for iteration in range(self._max_iterations):
-            metrics.llm_iterations = iteration + 1
+        try:
+            for iteration in range(self._max_iterations):
+                metrics.llm_iterations = iteration + 1
 
-            try:
-                with self._client.messages.stream(
-                    model=self._model,
-                    max_tokens=4096,
-                    system=system_prompt,
-                    messages=messages,
-                    tools=tool_schemas,
-                ) as stream:
-                    # Stream text deltas in real time as they arrive
-                    iteration_text: list[str] = []
-                    for text_chunk in stream.text_stream:
-                        yield {"event": "text_delta", "data": {"text": text_chunk}}
-                        iteration_text.append(text_chunk)
+                try:
+                    with self._client.messages.stream(
+                        model=self._model,
+                        max_tokens=4096,
+                        system=system_prompt,
+                        messages=messages,
+                        tools=tool_schemas,
+                    ) as stream:
+                        # Stream text deltas in real time as they arrive
+                        iteration_text: list[str] = []
+                        for text_chunk in stream.text_stream:
+                            yield {"event": "text_delta", "data": {"text": text_chunk}}
+                            iteration_text.append(text_chunk)
 
-                    # Get the full response for tool block extraction
-                    response = stream.get_final_message()
+                        # Get the full response for tool block extraction
+                        response = stream.get_final_message()
 
-            except Exception as e:
-                logger.error("Claude API stream error: %s", e)
-                yield {"event": "error", "data": {"message": f"AI service error: {e}"}}
-                return
+                except Exception as e:
+                    logger.error("Claude API stream error: %s", e)
+                    yield {"event": "error", "data": {"message": f"AI service error: {e}"}}
+                    llm_error = True
+                    break
 
-            # Check if Claude is done (no tool use)
-            if response.stop_reason == "end_turn":
-                all_text_parts.extend(iteration_text)
-                break
+                # Check if Claude is done (no tool use)
+                if response.stop_reason == "end_turn":
+                    all_text_parts.extend(iteration_text)
+                    break
 
-            # Check for tool use blocks
-            tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-            if not tool_use_blocks:
-                all_text_parts.extend(iteration_text)
-                break
+                # Check for tool use blocks
+                tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
+                if not tool_use_blocks:
+                    all_text_parts.extend(iteration_text)
+                    break
 
-            # Mid-loop: add paragraph break between pre-tool text and
-            # post-tool text so they don't jam together in rendering
-            if iteration_text:
-                all_text_parts.extend(iteration_text)
-                all_text_parts.append("\n\n")
-                yield {"event": "text_delta", "data": {"text": "\n\n"}}
+                # Mid-loop: add paragraph break between pre-tool text and
+                # post-tool text so they don't jam together in rendering
+                if iteration_text:
+                    all_text_parts.extend(iteration_text)
+                    all_text_parts.append("\n\n")
+                    yield {"event": "text_delta", "data": {"text": "\n\n"}}
 
-            # Append assistant response
-            messages.append({"role": "assistant", "content": response.content})
+                # Append assistant response
+                messages.append({"role": "assistant", "content": response.content})
 
-            # Execute tools
-            tool_results_for_api = []
-            for tool_block in tool_use_blocks:
-                yield {
-                    "event": "tool_start",
-                    "data": {
-                        "name": tool_block.name,
-                        "label": _TOOL_LABELS.get(
-                            tool_block.name,
-                            f"Using {tool_block.name}...",
-                        ),
-                        "input": tool_block.input,
-                    },
-                }
-
-                tool_result = effective_executor.execute(
-                    tool_block.name, tool_block.input
-                )
-                metrics.tools_used.append(tool_block.name)
-                tool_calls_log.append({
-                    "name": tool_block.name,
-                    "input": tool_block.input,
-                })
-
-                yield {
-                    "event": "tool_end",
-                    "data": {
-                        "name": tool_block.name,
-                    },
-                }
-
-                # Record facts
-                if tool_result.has_facts:
-                    accumulator.record(
-                        tool_block.name, tool_block.input, tool_result.facts
-                    )
-
-                # Emit tool result with block
-                block = tool_result.to_block()
-                if block:
-                    blocks.append(block)
-
-                yield {
-                    "event": "tool_result",
-                    "data": {
-                        "name": tool_block.name,
-                        "block": block,
-                    },
-                }
-
-                # Track discussed properties
-                if tool_result.discussed_property_id:
-                    discussed_properties.append(tool_result.discussed_property_id)
+                # Execute tools
+                tool_results_for_api = []
+                for tool_block in tool_use_blocks:
                     yield {
-                        "event": "discussed_property",
+                        "event": "tool_start",
                         "data": {
-                            "property_id": tool_result.discussed_property_id,
+                            "name": tool_block.name,
+                            "label": _TOOL_LABELS.get(
+                                tool_block.name,
+                                f"Using {tool_block.name}...",
+                            ),
+                            "input": tool_block.input,
                         },
                     }
 
-                tool_results_for_api.append(
-                    tool_result.to_anthropic_result(tool_block.id)
-                )
+                    tool_result = effective_executor.execute(
+                        tool_block.name, tool_block.input
+                    )
+                    metrics.tools_used.append(tool_block.name)
+                    tool_calls_log.append({
+                        "name": tool_block.name,
+                        "input": tool_block.input,
+                    })
 
-            # Append tool results
-            messages.append({"role": "user", "content": tool_results_for_api})
+                    yield {
+                        "event": "tool_end",
+                        "data": {
+                            "name": tool_block.name,
+                        },
+                    }
 
-            # Update system prompt with facts
-            summary = accumulator.get_summary()
-            if summary:
-                system_prompt = self._update_system_prompt_with_facts(
-                    system_prompt, summary, iteration
-                )
+                    # Record facts
+                    if tool_result.has_facts:
+                        accumulator.record(
+                            tool_block.name, tool_block.input, tool_result.facts
+                        )
 
-            if response.stop_reason == "end_turn":
-                break
+                    # Emit tool result with block
+                    block = tool_result.to_block()
+                    if block:
+                        blocks.append(block)
 
-        metrics.llm_loop_ms = (time.monotonic() - llm_start) * 1000
+                    yield {
+                        "event": "tool_result",
+                        "data": {
+                            "name": tool_block.name,
+                            "block": block,
+                        },
+                    }
+
+                    # Track discussed properties
+                    if tool_result.discussed_property_id:
+                        discussed_properties.append(tool_result.discussed_property_id)
+                        yield {
+                            "event": "discussed_property",
+                            "data": {
+                                "property_id": tool_result.discussed_property_id,
+                            },
+                        }
+
+                    tool_results_for_api.append(
+                        tool_result.to_anthropic_result(tool_block.id)
+                    )
+
+                # Append tool results
+                messages.append({"role": "user", "content": tool_results_for_api})
+
+                # Update system prompt with facts
+                summary = accumulator.get_summary()
+                if summary:
+                    system_prompt = self._update_system_prompt_with_facts(
+                        system_prompt, summary, iteration
+                    )
+
+                if response.stop_reason == "end_turn":
+                    break
+        finally:
+            # Always persist context — even on LLM errors — so that signals
+            # extracted in steps 2-3 are not lost for authenticated users.
+            metrics.llm_loop_ms = (time.monotonic() - llm_start) * 1000
+            await self._persist_context(context)
+
+        if llm_error:
+            return
 
         # Final text — already streamed as text_delta events above
         reply = "\n\n".join(all_text_parts) or _FALLBACK_REPLY
@@ -928,7 +947,7 @@ class TurnOrchestrator:
                 },
             }
 
-        # Step 9: Persist
+        # Step 9: Persist (post-processing updates)
         await self._persist_context(context)
 
         metrics.total_ms = (time.monotonic() - total_start) * 1000
