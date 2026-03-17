@@ -98,11 +98,15 @@ def _normalize_score(value: float, hot_bound: float, cold_bound: float) -> float
 
 
 def _score_label(score: float) -> str:
-    """Return human-readable label for competition score."""
+    """Return human-readable label for competition score.
+
+    Always matches since _SCORE_LABELS includes threshold 0 and scores
+    are clamped to [0, 100]. Fallback is defensive only.
+    """
     for threshold, label in _SCORE_LABELS:
         if score >= threshold:
             return label
-    return "Very Buyer-Friendly"
+    return "Very Buyer-Friendly"  # defensive: unreachable with clamped scores
 
 
 def _compute_dom_distribution(dom_values: list[int]) -> dict:

@@ -13,7 +13,7 @@ Phase F-6 (#59) of Epic #23.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from homebuyer.utils.mortgage import calc_monthly_payment
 
@@ -228,7 +228,7 @@ def _run_stress_tests(
 
     # 1. High vacancy (15%)
     high_vac_params = DualPropertyParams(
-        **{**_params_to_dict(params), "vacancy_rate": 0.15}
+        **{**asdict(params), "vacancy_rate": 0.15}
     )
     high_vac_inv = _compute_investment_cashflow(high_vac_params)
     high_vac_cf = high_vac_inv["monthly_net_cash_flow"] - base_extraction["monthly_increase"]
@@ -242,7 +242,7 @@ def _run_stress_tests(
 
     # 2. Rate increase (+2% on investment)
     rate_up_params = DualPropertyParams(
-        **{**_params_to_dict(params), "investment_rate": params.investment_rate + 2.0}
+        **{**asdict(params), "investment_rate": params.investment_rate + 2.0}
     )
     rate_up_inv = _compute_investment_cashflow(rate_up_params)
     rate_up_cf = rate_up_inv["monthly_net_cash_flow"] - base_extraction["monthly_increase"]
@@ -256,7 +256,7 @@ def _run_stress_tests(
 
     # 3. Maintenance spike (3% of value)
     maint_spike_params = DualPropertyParams(
-        **{**_params_to_dict(params), "maintenance_pct": 0.03}
+        **{**asdict(params), "maintenance_pct": 0.03}
     )
     maint_spike_inv = _compute_investment_cashflow(maint_spike_params)
     maint_spike_cf = maint_spike_inv["monthly_net_cash_flow"] - base_extraction["monthly_increase"]
@@ -271,7 +271,7 @@ def _run_stress_tests(
     # 4. Combined: high vacancy + rate increase
     combined_params = DualPropertyParams(
         **{
-            **_params_to_dict(params),
+            **asdict(params),
             "vacancy_rate": 0.15,
             "investment_rate": params.investment_rate + 2.0,
         }
@@ -288,28 +288,6 @@ def _run_stress_tests(
 
     return tests
 
-
-def _params_to_dict(params: DualPropertyParams) -> dict:
-    """Convert dataclass to dict for override-based cloning."""
-    return {
-        "primary_value": params.primary_value,
-        "primary_mortgage_balance": params.primary_mortgage_balance,
-        "primary_mortgage_rate": params.primary_mortgage_rate,
-        "primary_mortgage_remaining_months": params.primary_mortgage_remaining_months,
-        "extraction_method": params.extraction_method,
-        "extraction_amount": params.extraction_amount,
-        "heloc_rate": params.heloc_rate,
-        "heloc_term_months": params.heloc_term_months,
-        "cashout_refi_rate": params.cashout_refi_rate,
-        "investment_price": params.investment_price,
-        "investment_down_payment_pct": params.investment_down_payment_pct,
-        "investment_rate": params.investment_rate,
-        "investment_monthly_rent": params.investment_monthly_rent,
-        "investment_hoa": params.investment_hoa,
-        "vacancy_rate": params.vacancy_rate,
-        "management_fee_pct": params.management_fee_pct,
-        "maintenance_pct": params.maintenance_pct,
-    }
 
 
 # ---------------------------------------------------------------------------

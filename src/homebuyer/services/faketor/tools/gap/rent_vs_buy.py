@@ -140,27 +140,32 @@ def compute_rent_vs_buy(params: RentVsBuyParams) -> dict:
         cumulative_rent_net = cumulative_rent - opportunity_gain
 
         # --- Buying side ---
-        # Ownership cost for this year (adjust for PMI drop-off)
-        base_monthly = params.monthly_ownership_cost
-        if params.pmi_dropoff_month is not None and params.monthly_pmi > 0:
-            # How many months of this year still have PMI?
-            year_start_month = (year - 1) * 12 + 1
-            year_end_month = year * 12
-            if year_start_month > params.pmi_dropoff_month:
-                # PMI already dropped — reduce monthly cost
-                base_monthly = params.monthly_ownership_cost - params.monthly_pmi
-            elif year_end_month > params.pmi_dropoff_month:
-                # PMI drops partway through this year
-                pmi_months = params.pmi_dropoff_month - year_start_month + 1
-                no_pmi_months = 12 - pmi_months
-                annual_own = (
-                    pmi_months * params.monthly_ownership_cost
-                    + no_pmi_months * (params.monthly_ownership_cost - params.monthly_pmi)
-                )
-                cumulative_ownership += annual_own
-                base_monthly = 0  # already counted
-        if base_monthly > 0:
-            cumulative_ownership += base_monthly * 12
+        # Ownership cost for this year (adjust for PMI drop-off mid-year)
+        year_start_month = (year - 1) * 12 + 1
+        year_end_month = year * 12
+        if (
+            params.pmi_dropoff_month is not None
+            and params.monthly_pmi > 0
+            and year_end_month > params.pmi_dropoff_month
+            and year_start_month <= params.pmi_dropoff_month
+        ):
+            # PMI drops partway through this year
+            pmi_months = params.pmi_dropoff_month - year_start_month + 1
+            no_pmi_months = 12 - pmi_months
+            annual_own = (
+                pmi_months * params.monthly_ownership_cost
+                + no_pmi_months * (params.monthly_ownership_cost - params.monthly_pmi)
+            )
+        elif (
+            params.pmi_dropoff_month is not None
+            and params.monthly_pmi > 0
+            and year_start_month > params.pmi_dropoff_month
+        ):
+            # PMI already dropped for full year
+            annual_own = (params.monthly_ownership_cost - params.monthly_pmi) * 12
+        else:
+            annual_own = params.monthly_ownership_cost * 12
+        cumulative_ownership += annual_own
 
         # Home equity: appreciation
         home_value = int(round(params.purchase_price * (1 + appreciation_rate) ** year))
@@ -215,9 +220,7 @@ def compute_rent_vs_buy(params: RentVsBuyParams) -> dict:
             "cumulative_rent": cumulative_rent,
             "opportunity_gain": opportunity_gain,
             "cumulative_rent_net": cumulative_rent_net,
-            "annual_ownership_cost": base_monthly * 12 if base_monthly > 0 else (
-                cumulative_ownership - sum(s.get("annual_ownership_cost", 0) for s in snapshots)
-            ),
+            "annual_ownership_cost": annual_own,
             "cumulative_ownership": cumulative_ownership,
             "home_value": home_value,
             "home_equity": home_equity,

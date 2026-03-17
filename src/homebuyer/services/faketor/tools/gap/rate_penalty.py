@@ -90,9 +90,9 @@ def _find_breakeven_rate(
             hi = mid
 
     result = round((lo + hi) / 2, 2)
-    # Verify the result is actually close
+    # Verify the result is within 1% of the target payment
     check = calc_monthly_payment(new_loan, result, term_months)
-    if abs(check - target_payment) > 50:  # within $50 tolerance
+    if target_payment > 0 and abs(check - target_payment) / target_payment > 0.01:
         return None
     return result
 

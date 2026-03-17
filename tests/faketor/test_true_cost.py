@@ -3,8 +3,6 @@
 Phase F-1 (#54) of Epic #23.
 """
 
-import pytest
-
 from homebuyer.services.faketor.facts import compute_true_cost_facts
 from homebuyer.services.faketor.tools.gap.true_cost import (
     TrueCostParams,
@@ -12,7 +10,7 @@ from homebuyer.services.faketor.tools.gap.true_cost import (
     _calc_monthly_maintenance,
     _calc_monthly_pi,
     _calc_monthly_pmi,
-    _calc_pmi_dropoff_month,
+    calc_pmi_dropoff_month,
     compute_true_cost,
 )
 
@@ -65,15 +63,15 @@ class TestMonthlyPMI:
         assert _calc_monthly_pmi(960_000, 1_200_000) == 0
 
     def test_pmi_at_10_percent(self):
-        """10% down → PMI on $1.08M loan."""
+        """10% down → PMI on $1.08M loan at 1.10% (LTV 90%)."""
         pmi = _calc_monthly_pmi(1_080_000, 1_200_000)
-        # 0.75% of $1.08M / 12 = $675
-        assert pmi == 675
+        # 1.10% of $1.08M / 12 = $990
+        assert pmi == 990
 
     def test_pmi_at_5_percent(self):
-        """5% down → PMI on $1.14M loan."""
+        """5% down → PMI on $1.14M loan at 1.10% (LTV 95%)."""
         pmi = _calc_monthly_pmi(1_140_000, 1_200_000)
-        assert pmi == 712  # round(1_140_000 * 0.0075 / 12) = 712
+        assert pmi == 1045  # round(1_140_000 * 0.011 / 12) = 1045
 
     def test_pmi_exactly_at_threshold(self):
         """Exactly 80% LTV → no PMI (threshold is <=)."""
@@ -83,18 +81,18 @@ class TestMonthlyPMI:
 class TestPMIDropoff:
     def test_no_dropoff_when_no_pmi(self):
         """20% down → no PMI dropoff."""
-        assert _calc_pmi_dropoff_month(960_000, 1_200_000, 7.0) is None
+        assert calc_pmi_dropoff_month(960_000, 1_200_000, 7.0) is None
 
     def test_dropoff_exists_for_10_percent(self):
         """10% down should have a dropoff month."""
-        month = _calc_pmi_dropoff_month(1_080_000, 1_200_000, 7.0)
+        month = calc_pmi_dropoff_month(1_080_000, 1_200_000, 7.0)
         assert month is not None
         assert 60 < month < 180  # reasonable range
 
     def test_lower_rate_drops_sooner(self):
         """Lower rate means faster principal paydown."""
-        high = _calc_pmi_dropoff_month(1_080_000, 1_200_000, 8.0)
-        low = _calc_pmi_dropoff_month(1_080_000, 1_200_000, 4.0)
+        high = calc_pmi_dropoff_month(1_080_000, 1_200_000, 8.0)
+        low = calc_pmi_dropoff_month(1_080_000, 1_200_000, 4.0)
         assert low < high
 
 

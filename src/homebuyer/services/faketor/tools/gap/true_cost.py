@@ -20,6 +20,8 @@ Phase F-1 (#54) of Epic #23.
 
 from __future__ import annotations
 
+import datetime
+
 import math
 from dataclasses import dataclass
 
@@ -30,7 +32,7 @@ from homebuyer.utils.mortgage import calc_monthly_payment
 # ---------------------------------------------------------------------------
 
 # Effective property tax rate (base 1% + Alameda County + Berkeley specials)
-_PROPERTY_TAX_RATE = 0.0118  # 1.18% annual
+PROPERTY_TAX_RATE = 0.0118  # 1.18% annual
 
 # Hazard / homeowner's insurance (HOI)
 _HOI_RATE = 0.0035  # 0.35% of value annually
@@ -45,9 +47,13 @@ _EQ_RATES: dict[str, float] = {
 }
 _EQ_DWELLING_COVERAGE_RATIO = 0.80  # land excluded from dwelling coverage
 
-# PMI (private mortgage insurance) — conventional BPMI
-_PMI_RATE = 0.0075          # 0.75% of loan balance annually (mid-range for 10-19.9% down)
+# PMI (private mortgage insurance) — uses tiered rates consistent with pmi_model.py
 _PMI_LTV_THRESHOLD = 0.80   # PMI required when LTV > 80%
+# Tiered rate table: (ltv_min_exclusive, ltv_max_inclusive, annual_rate)
+_PMI_RATE_TABLE: list[tuple[float, float, float]] = [
+    (0.850, 0.950, 0.0110),  # 85.01–95% LTV: 1.10%
+    (0.800, 0.850, 0.0075),  # 80.01–85% LTV: 0.75%
+]
 
 # Maintenance reserve — age brackets (max_age, annual rate)
 _MAINTENANCE_RATES: list[tuple[int, float]] = [
@@ -58,7 +64,6 @@ _MAINTENANCE_RATES: list[tuple[int, float]] = [
 ]
 _MAINTENANCE_DEFAULT = 0.0100  # when year_built is unknown
 
-_CURRENT_YEAR = 2026
 _LOAN_TERM_MONTHS = 360  # 30-year fixed
 
 
@@ -95,17 +100,26 @@ def _calc_monthly_pi(loan_amount: int, annual_rate_pct: float) -> int:
     return int(math.ceil(calc_monthly_payment(loan_amount, annual_rate_pct, _LOAN_TERM_MONTHS)))
 
 
+def _pmi_rate_for_ltv(ltv: float) -> float:
+    """Return annual PMI rate for a given LTV, using tiered table."""
+    for ltv_min, ltv_max, rate in _PMI_RATE_TABLE:
+        if ltv_min < ltv <= ltv_max:
+            return rate
+    return 0.0
+
+
 def _calc_monthly_pmi(loan_amount: int, purchase_price: int) -> int:
-    """Monthly PMI cost. Returns 0 if LTV <= 80%."""
+    """Monthly PMI cost using tiered rates. Returns 0 if LTV <= 80%."""
     if purchase_price <= 0:
         return 0
     ltv = loan_amount / purchase_price
-    if ltv <= _PMI_LTV_THRESHOLD:
+    rate = _pmi_rate_for_ltv(ltv)
+    if rate <= 0:
         return 0
-    return int(round(loan_amount * _PMI_RATE / 12))
+    return int(round(loan_amount * rate / 12))
 
 
-def _calc_pmi_dropoff_month(
+def calc_pmi_dropoff_month(
     loan_amount: int,
     purchase_price: int,
     annual_rate_pct: float,
@@ -155,7 +169,7 @@ def _calc_monthly_maintenance(purchase_price: int, year_built: int | None) -> in
     if year_built is None:
         rate = _MAINTENANCE_DEFAULT
     else:
-        age = max(0, _CURRENT_YEAR - year_built)
+        age = max(0, datetime.date.today().year - year_built)
         rate = _MAINTENANCE_DEFAULT
         for max_age, bracket_rate in _MAINTENANCE_RATES:
             if age < max_age:
@@ -182,7 +196,7 @@ def compute_true_cost(params: TrueCostParams) -> dict:
 
     # --- Component costs ---
     monthly_pi = _calc_monthly_pi(loan_amount, params.mortgage_rate)
-    monthly_tax = int(round(purchase_price * _PROPERTY_TAX_RATE / 12))
+    monthly_tax = int(round(purchase_price * PROPERTY_TAX_RATE / 12))
     monthly_hoi = int(round(purchase_price * _HOI_RATE / 12))
     monthly_eq = _calc_monthly_earthquake(purchase_price, params.construction_type)
     monthly_maintenance = _calc_monthly_maintenance(purchase_price, params.year_built)
@@ -205,7 +219,7 @@ def compute_true_cost(params: TrueCostParams) -> dict:
     is_pmi_applicable = monthly_pmi > 0
     pmi_note: str | None = None
     if is_pmi_applicable:
-        dropoff = _calc_pmi_dropoff_month(loan_amount, purchase_price, params.mortgage_rate)
+        dropoff = calc_pmi_dropoff_month(loan_amount, purchase_price, params.mortgage_rate)
         if dropoff:
             target_balance = int(round(purchase_price * _PMI_LTV_THRESHOLD))
             years = dropoff // 12

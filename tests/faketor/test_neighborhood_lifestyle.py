@@ -37,7 +37,7 @@ class TestNeighborhoodLifestyle:
 
     def test_weighted_priorities(self):
         """Heavy school weight should favor school-strong neighborhoods."""
-        compute_neighborhood_lifestyle(NeighborhoodLifestyleParams())
+        equal_weight = compute_neighborhood_lifestyle(NeighborhoodLifestyleParams())
         school_heavy = compute_neighborhood_lifestyle(NeighborhoodLifestyleParams(
             priority_schools=5.0,
             priority_walkability=0.0,
@@ -46,9 +46,21 @@ class TestNeighborhoodLifestyle:
             priority_parks=0.0,
             priority_safety=0.0,
         ))
-        # School-heavy best should differ from equal-weight best
-        # (or at minimum, the scores should differ)
-        assert school_heavy["best_overall"] is not None
+        # School-only weighting should produce different ranking than equal weight
+        equal_scores = {
+            c["neighborhood"]: c["composite_score"]
+            for c in equal_weight["comparisons"]
+        }
+        school_scores = {
+            c["neighborhood"]: c["composite_score"]
+            for c in school_heavy["comparisons"]
+        }
+        # The top-ranked neighborhood should have the highest school score (9)
+        # Claremont and North Berkeley both have schools=9
+        top_school = school_heavy["comparisons"][0]
+        assert top_school["scores"]["schools"] == 9
+        # Scores should differ between the two weightings
+        assert equal_scores != school_scores
 
     def test_best_per_factor(self):
         """Should identify best neighborhood per factor."""

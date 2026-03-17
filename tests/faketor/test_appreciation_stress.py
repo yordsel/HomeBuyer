@@ -46,11 +46,15 @@ class TestAppreciationStress:
         assert exit_10["is_profitable"] is True
 
     def test_crash_scenario_unprofitable(self):
-        """Crash scenario (-15%) should be unprofitable."""
+        """Crash scenario (-15%) should show significant losses."""
         result = compute_appreciation_stress(_default_params())
         crash = next(s for s in result["scenarios"] if "Crash" in s["scenario_name"])
         for exit_data in crash["exits"]:
             assert exit_data["is_profitable"] is False
+            # Should have meaningful negative profit (at least -$100k loss)
+            assert exit_data["profit"] < -100_000
+            # ROI should be negative
+            assert exit_data["annualized_roi_pct"] < 0
 
     def test_rental_income_reduces_carry(self):
         """Rental income should reduce carry cost."""

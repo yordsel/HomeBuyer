@@ -95,22 +95,21 @@ def _compute_exit(
     # Home value at exit
     home_value = int(round(purchase_price * (1 + appreciation_rate) ** year))
 
-    # Remaining balance via amortization
+    # Remaining balance via closed-form formula
     if loan_amount > 0 and rate_pct > 0:
         monthly_rate = (rate_pct / 100) / 12
-        monthly_payment = calc_monthly_payment(loan_amount, rate_pct, _LOAN_TERM_MONTHS)
-        balance = float(loan_amount)
-        for _ in range(year * 12):
-            if balance <= 0:
-                break
-            interest = balance * monthly_rate
-            principal = monthly_payment - interest
-            if principal > balance:
-                principal = balance
-            balance -= principal
-        remaining_balance = max(0, int(round(balance)))
+        n_payments = year * 12
+        # B(n) = P * [(1+r)^N - (1+r)^n] / [(1+r)^N - 1]
+        # where P = original balance, N = total term, n = payments made
+        factor_N = (1 + monthly_rate) ** _LOAN_TERM_MONTHS
+        factor_n = (1 + monthly_rate) ** n_payments
+        remaining_balance = max(
+            0, int(round(loan_amount * (factor_N - factor_n) / (factor_N - 1)))
+        )
     else:
-        remaining_balance = 0
+        remaining_balance = max(
+            0, loan_amount - int(round(loan_amount / _LOAN_TERM_MONTHS * year * 12))
+        ) if loan_amount > 0 else 0
 
     # Selling costs
     selling_costs = int(round(home_value * _SELLING_COST_PCT))

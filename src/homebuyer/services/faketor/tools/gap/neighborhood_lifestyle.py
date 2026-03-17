@@ -16,6 +16,9 @@ from dataclasses import dataclass, field
 
 # ---------------------------------------------------------------------------
 # Neighborhood data — curated Berkeley-specific
+#
+# TODO(#64 E-9): Migrate to data/neighborhoods.json or DB table so data
+# can be updated without code changes. See also Phase G persistence layer.
 # ---------------------------------------------------------------------------
 
 # Scores are 1-10 (10 = best)

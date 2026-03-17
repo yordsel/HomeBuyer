@@ -130,17 +130,22 @@ class TestRentVsBuyScenarios:
         assert "Renting is cheaper" in result["crossover_description"]
 
     def test_with_pmi_dropoff(self):
-        """PMI drop-off should reduce ownership cost mid-horizon."""
-        compute_rent_vs_buy(_default_params(
+        """PMI drop-off should reduce cumulative ownership vs no-dropoff."""
+        with_pmi = compute_rent_vs_buy(_default_params(
+            monthly_ownership_cost=9_675,  # 7500 base + 675 PMI built into cost
+            monthly_pmi=675,
+            pmi_dropoff_month=87,  # ~7 years
+        ))
+        # After PMI drops, cumulative ownership should be lower than
+        # scenario where ownership cost stays flat at the higher rate
+        flat_high = compute_rent_vs_buy(_default_params(
+            monthly_ownership_cost=9_675,  # stays at PMI-inclusive rate
             monthly_pmi=0, pmi_dropoff_month=None,
         ))
-        with_pmi = compute_rent_vs_buy(_default_params(
-            monthly_ownership_cost=9_675,  # 9000 base + 675 PMI
-            monthly_pmi=675,
-            pmi_dropoff_month=87,
-        ))
-        # Both should complete without error
-        assert with_pmi["crossover_year"] is not None or with_pmi["crossover_year"] is None
+        # At year 15, with-PMI-dropoff should have lower cumulative cost
+        with_pmi_y15 = with_pmi["yearly_comparison"][-1]["cumulative_ownership"]
+        flat_y15 = flat_high["yearly_comparison"][-1]["cumulative_ownership"]
+        assert with_pmi_y15 < flat_y15
 
     def test_all_cash_purchase(self):
         """100% down: no loan, ownership is just taxes + insurance + maintenance.

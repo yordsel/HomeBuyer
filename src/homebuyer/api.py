@@ -3853,8 +3853,8 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         from homebuyer.services.faketor.tools.gap.true_cost import (
             TrueCostParams,
             compute_true_cost,
-            _calc_pmi_dropoff_month,
-            _PROPERTY_TAX_RATE,
+            calc_pmi_dropoff_month,
+            PROPERTY_TAX_RATE,
         )
         from homebuyer.utils.mortgage import get_current_mortgage_rate
 
@@ -3890,11 +3890,11 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         down_amount = int(round(purchase_price * down_pct / 100))
         loan_amount = purchase_price - down_amount
         if monthly_pmi > 0:
-            pmi_dropoff = _calc_pmi_dropoff_month(
+            pmi_dropoff = calc_pmi_dropoff_month(
                 loan_amount, purchase_price, float(rate)
             )
 
-        annual_prop_tax = int(round(purchase_price * _PROPERTY_TAX_RATE))
+        annual_prop_tax = int(round(purchase_price * PROPERTY_TAX_RATE))
 
         rvb_params = RentVsBuyParams(
             purchase_price=purchase_price,
@@ -4030,12 +4030,22 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
 
             # Active listings count
             try:
+                # Apply same price-band filter to active listings
+                active_price_clause = ""
+                active_params: list = [neighborhood]
+                if price_min is not None:
+                    active_price_clause += " AND last_sale_price >= ?"
+                    active_params.append(int(price_min))
+                if price_max is not None:
+                    active_price_clause += " AND last_sale_price <= ?"
+                    active_params.append(int(price_max))
                 active_row = db.execute(
-                    """
+                    f"""
                     SELECT COUNT(*) FROM sales
                     WHERE neighborhood = ? AND status = 'Active'
+                    {active_price_clause}
                     """,
-                    [neighborhood],
+                    active_params,
                 ).fetchone()
                 active_listings = active_row[0] if active_row else 0
             except Exception:

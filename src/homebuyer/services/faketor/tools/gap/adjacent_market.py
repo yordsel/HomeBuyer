@@ -16,6 +16,9 @@ from dataclasses import dataclass, field
 
 # ---------------------------------------------------------------------------
 # Market data — curated East Bay comparisons
+#
+# TODO(#64 E-10): Migrate to data/markets.json or derive from DB aggregates
+# so prices stay current. These are baseline estimates as of 2025 Q4.
 # ---------------------------------------------------------------------------
 
 # Median home prices and typical property attributes by market
