@@ -3944,6 +3944,38 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         )
         return safe_json_dumps(compute_pmi_model(params))
 
+    elif tool_name == "rate_penalty":
+        from homebuyer.services.faketor.tools.gap.rate_penalty import (
+            RatePenaltyParams,
+            compute_rate_penalty,
+        )
+        from homebuyer.utils.mortgage import get_current_mortgage_rate
+
+        new_rate = tool_input.get("new_rate")
+        if new_rate is None and _state and _state.db:
+            new_rate = get_current_mortgage_rate(_state.db)
+        if new_rate is None:
+            new_rate = 7.0
+
+        params = RatePenaltyParams(
+            existing_balance=int(tool_input["existing_balance"]),
+            existing_rate=float(tool_input["existing_rate"]),
+            existing_remaining_months=int(
+                tool_input.get("existing_remaining_months", 360)
+            ),
+            new_purchase_price=int(tool_input["new_purchase_price"]),
+            new_down_payment_pct=float(
+                tool_input.get("new_down_payment_pct", 20.0)
+            ),
+            new_rate=float(new_rate),
+            annual_gross_income=(
+                int(tool_input["annual_gross_income"])
+                if tool_input.get("annual_gross_income") is not None
+                else None
+            ),
+        )
+        return safe_json_dumps(compute_rate_penalty(params))
+
     else:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 

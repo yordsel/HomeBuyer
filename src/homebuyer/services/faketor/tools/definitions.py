@@ -22,6 +22,7 @@ from homebuyer.services.faketor.facts import (
     compute_true_cost_facts,
     compute_rent_vs_buy_facts,
     compute_pmi_model_facts,
+    compute_rate_penalty_facts,
     compute_undo_filter_facts,
 )
 from homebuyer.services.faketor.tools.registry import ToolDefinition
@@ -1198,5 +1199,64 @@ _TOOL_DEFINITIONS: list[ToolDefinition] = [
         },
         "block_type": "pmi_model_card",
         "fact_computer": compute_pmi_model_facts,
+    },
+    {
+        "name": "rate_penalty",
+        "description": (
+            "Calculate the mortgage rate penalty for an equity-trapped upgrader. "
+            "Compares the existing low-rate mortgage payment to a new purchase at "
+            "current market rates. Shows the monthly/annual dollar penalty, penalty "
+            "as a percentage of gross income, rate scenarios (what happens at "
+            "different future rates), and the breakeven rate where the new payment "
+            "matches the old one. Use this for Equity-Trapped Upgrader segments "
+            "evaluating whether to sell and buy at today's higher rates."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "existing_balance": {
+                    "type": "number",
+                    "description": "Remaining balance on current mortgage in dollars.",
+                },
+                "existing_rate": {
+                    "type": "number",
+                    "description": (
+                        "Current mortgage rate as percent, e.g. 3.25."
+                    ),
+                },
+                "existing_remaining_months": {
+                    "type": "integer",
+                    "description": (
+                        "Months remaining on current loan. Default 360 (30y)."
+                    ),
+                },
+                "new_purchase_price": {
+                    "type": "number",
+                    "description": "Purchase price of the new property in dollars.",
+                },
+                "new_down_payment_pct": {
+                    "type": "number",
+                    "description": (
+                        "Down payment on new purchase as percent. Default 20."
+                    ),
+                },
+                "new_rate": {
+                    "type": "number",
+                    "description": (
+                        "Mortgage rate for new purchase as percent. "
+                        "If omitted, current market rate is used."
+                    ),
+                },
+                "annual_gross_income": {
+                    "type": "number",
+                    "description": (
+                        "Buyer's annual gross income for affordability context."
+                    ),
+                },
+            },
+            "required": ["existing_balance", "existing_rate", "new_purchase_price"],
+        },
+        "block_type": "rate_penalty_card",
+        "fact_computer": compute_rate_penalty_facts,
     },
 ]

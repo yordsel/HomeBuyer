@@ -350,6 +350,24 @@ def compute_rent_vs_buy_facts(data: dict) -> dict:
     }
 
 
+def compute_rate_penalty_facts(data: dict) -> dict:
+    """Facts for ``rate_penalty`` results."""
+    return {
+        "existing_rate": data.get("existing_rate"),
+        "new_rate": data.get("new_rate"),
+        "existing_monthly_payment": data.get("existing_monthly_payment"),
+        "new_monthly_payment": data.get("new_monthly_payment"),
+        "monthly_penalty": data.get("monthly_penalty"),
+        "annual_penalty": data.get("annual_penalty"),
+        "penalty_description": data.get("penalty_description"),
+        "penalty_pct_of_income": data.get("penalty_pct_of_income"),
+        "is_tolerable": data.get("is_tolerable"),
+        "breakeven_rate": data.get("breakeven_rate"),
+        "breakeven_description": data.get("breakeven_description"),
+        "tolerable_rate": data.get("tolerable_rate"),
+    }
+
+
 def compute_pmi_model_facts(data: dict) -> dict:
     """Facts for ``pmi_model`` results."""
     wait = data.get("wait_analysis") or {}
@@ -390,6 +408,7 @@ _FACT_COMPUTERS: dict[str, callable] = {
     "compute_true_cost": compute_true_cost_facts,
     "rent_vs_buy": compute_rent_vs_buy_facts,
     "pmi_model": compute_pmi_model_facts,
+    "rate_penalty": compute_rate_penalty_facts,
 }
 
 

@@ -221,6 +221,7 @@ class TestPopulatedRegistry:
             "compute_true_cost",
             "rent_vs_buy",
             "pmi_model",
+            "rate_penalty",
         }
         assert registry.names == expected
 
