@@ -19,6 +19,7 @@ import {
 import { BlockRenderer } from '../chat/BlockRenderer';
 import type { TrackedProperty } from '../../context/PropertyContext';
 import { usePropertyContext } from '../../context/PropertyContext';
+import { useBuyerContext } from '../../context/BuyerContext';
 import { formatCurrency, formatNumber } from '../../lib/utils';
 
 interface SinglePropertyViewProps {
@@ -34,6 +35,7 @@ export function SinglePropertyView({
   const { property, blocks } = tracked;
   const analysisBlocks = blocks.filter((b) => b.type !== 'property_detail');
   const { sendChatMessage, clearPropertyBlocks } = usePropertyContext();
+  const { segment } = useBuyerContext();
   const hasAnalysis = analysisBlocks.length > 0;
 
   function handleRunAnalysis() {
@@ -42,7 +44,28 @@ export function SinglePropertyView({
       // Refresh: clear existing blocks, then re-run
       clearPropertyBlocks(property.address);
     }
-    sendChatMessage(`Give me a full analysis of ${property.address}`);
+    let prompt = `Give me a full analysis of ${property.address}.`;
+    // Enrich prompt with segment-specific analysis hints
+    if (segment === 'stretcher') {
+      prompt += ' Include true monthly cost breakdown and rent-vs-buy comparison.';
+    } else if (segment === 'first_time_buyer') {
+      prompt += ' Include true monthly cost breakdown and PMI analysis.';
+    } else if (segment === 'down_payment_constrained') {
+      prompt += ' Include PMI cost modeling and true monthly cost breakdown.';
+    } else if (segment === 'equity_trapped_upgrader') {
+      prompt += ' Include rate lock penalty analysis for my existing mortgage.';
+    } else if (segment === 'competitive_bidder') {
+      prompt += ' Include competition assessment for this neighborhood.';
+    } else if (segment === 'equity_leveraging_investor') {
+      prompt += ' Include dual property strategy analysis using my existing equity.';
+    } else if (segment === 'leveraged_investor') {
+      prompt += ' Include appreciation stress test and rate penalty analysis.';
+    } else if (segment === 'value_add_investor' || segment === 'appreciation_bettor') {
+      prompt += ' Include appreciation stress test scenarios.';
+    } else if (segment === 'cash_buyer') {
+      prompt += ' Include appreciation stress test scenarios.';
+    }
+    sendChatMessage(prompt);
   }
 
   return (

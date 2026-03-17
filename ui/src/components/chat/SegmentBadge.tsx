@@ -59,7 +59,6 @@ export function SegmentBadge({ segment, confidence }: SegmentBadgeProps) {
     >
       <Icon size={12} />
       <span>{label}</span>
-      <span className="opacity-60">{confLabel}</span>
     </div>
   );
 }

@@ -440,6 +440,7 @@ export interface StreamCallbacks {
   onResumeBriefing?: (data: ResumeBriefingData) => void;
   onPreExecutionStart?: (tools: string[]) => void;
   onPreExecutionComplete?: (toolsRun: number) => void;
+  onSuggestionChips?: (chips: string[]) => void;
 }
 
 /**
@@ -570,6 +571,9 @@ export function streamFaketorMessage(
                 break;
               case 'pre_execution_complete':
                 callbacks.onPreExecutionComplete?.(data.tools_run ?? 0);
+                break;
+              case 'suggestion_chips':
+                callbacks.onSuggestionChips?.(data.chips ?? []);
                 break;
             }
           } catch {

@@ -278,9 +278,29 @@ class TurnOrchestrator:
         plan: TurnPlan,
         property_context: dict[str, Any] | None,
         metrics: TurnMetrics,
+        context: ResearchContext | None = None,
     ) -> PreExecutionResult:
         start = time.monotonic()
-        result = self._pre_executor.execute(plan, property_context)
+        # Build buyer profile dict for gap tools that need buyer data
+        buyer_profile: dict[str, Any] | None = None
+        if context and context.buyer and context.buyer.profile:
+            bp = context.buyer.profile
+            buyer_profile = {
+                k: v
+                for k, v in {
+                    "capital": bp.capital,
+                    "equity": bp.equity,
+                    "income": bp.income,
+                    "current_rent": bp.current_rent,
+                    "owns_current_home": bp.owns_current_home,
+                    "is_first_time_buyer": bp.is_first_time_buyer,
+                    "intent": bp.intent,
+                }.items()
+                if v is not None
+            }
+            if not buyer_profile:
+                buyer_profile = None
+        result = self._pre_executor.execute(plan, property_context, buyer_profile)
         metrics.preexecution_ms = (time.monotonic() - start) * 1000
         return result
 
@@ -645,7 +665,7 @@ class TurnOrchestrator:
         plan = self._resolve_jobs(message, context, metrics)
 
         # Step 5: Pre-execute
-        pre_result = self._pre_execute(plan, property_context, metrics)
+        pre_result = self._pre_execute(plan, property_context, metrics, context)
 
         # Step 6: Assemble prompt
         system_prompt = self._assemble_prompt(
@@ -759,12 +779,12 @@ class TurnOrchestrator:
                 "data": {"tools": pre_tools},
             }
 
-        pre_result = self._pre_execute(plan, property_context, metrics)
+        pre_result = self._pre_execute(plan, property_context, metrics, context)
 
         if pre_tools:
             yield {
                 "event": "pre_execution_complete",
-                "data": {"tools_run": len(pre_result.results)},
+                "data": {"tools_run": len(pre_result.raw_results)},
             }
 
         system_prompt = self._assemble_prompt(
@@ -817,22 +837,26 @@ class TurnOrchestrator:
                     llm_error = True
                     break
 
+                # Concatenate this iteration's streamed tokens into one string
+                iteration_joined = "".join(iteration_text)
+
                 # Check if Claude is done (no tool use)
                 if response.stop_reason == "end_turn":
-                    all_text_parts.extend(iteration_text)
+                    if iteration_joined:
+                        all_text_parts.append(iteration_joined)
                     break
 
                 # Check for tool use blocks
                 tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
                 if not tool_use_blocks:
-                    all_text_parts.extend(iteration_text)
+                    if iteration_joined:
+                        all_text_parts.append(iteration_joined)
                     break
 
                 # Mid-loop: add paragraph break between pre-tool text and
                 # post-tool text so they don't jam together in rendering
-                if iteration_text:
-                    all_text_parts.extend(iteration_text)
-                    all_text_parts.append("\n\n")
+                if iteration_joined:
+                    all_text_parts.append(iteration_joined)
                     yield {"event": "text_delta", "data": {"text": "\n\n"}}
 
                 # Append assistant response
@@ -951,6 +975,16 @@ class TurnOrchestrator:
         await self._persist_context(context)
 
         metrics.total_ms = (time.monotonic() - total_start) * 1000
+
+        # Emit dynamic suggestion chips based on current state
+        from homebuyer.services.faketor.jobs import suggest_chips
+        has_property = bool(property_context)
+        chips = suggest_chips(context, has_property=has_property)
+        if chips:
+            yield {
+                "event": "suggestion_chips",
+                "data": {"chips": chips},
+            }
 
         # Emit done event
         yield {

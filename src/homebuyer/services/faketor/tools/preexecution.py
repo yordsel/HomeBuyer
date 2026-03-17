@@ -98,6 +98,7 @@ class PreExecutor:
         self,
         plan: TurnPlan,
         property_context: dict[str, Any] | None = None,
+        buyer_profile: dict[str, Any] | None = None,
     ) -> PreExecutionResult:
         """Execute proactive analyses from the turn plan.
 
@@ -105,6 +106,9 @@ class PreExecutor:
             plan: TurnPlan with proactive_analyses from JobResolver.
             property_context: Current focus property context dict, used
                 to build tool inputs for property-dependent analyses.
+            buyer_profile: Buyer profile dict (from BuyerState.profile),
+                used to build inputs for buyer-dependent gap tools
+                (rate_penalty, dual_property, adjacent_market, etc.).
 
         Returns:
             PreExecutionResult with facts, raw results, and failures.
@@ -122,7 +126,7 @@ class PreExecutor:
 
         for spec in ordered:
             try:
-                tool_input = _build_tool_input(spec, property_context)
+                tool_input = _build_tool_input(spec, property_context, buyer_profile)
                 raw_json = self._tool_executor(spec.tool_name, tool_input)
 
                 # Parse result
@@ -189,42 +193,136 @@ def _order_analyses(analyses: list[AnalysisSpec]) -> list[AnalysisSpec]:
 def _build_tool_input(
     spec: AnalysisSpec,
     property_context: dict[str, Any] | None,
+    buyer_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the input dict for a tool based on spec and available context.
 
     Maps tool names to their expected input parameters using the
-    property_context data when available.
+    property_context data and buyer_profile when available.
     """
     tool_input: dict[str, Any] = {}
+    prop = property_context or {}
+    buyer = buyer_profile or {}
 
-    if property_context and "property_context" in spec.requires:
-        # Map common property context fields to tool input parameters
+    has_property = bool(prop) and "property_context" in spec.requires
+    has_buyer = bool(buyer) and "buyer_profile" in spec.requires
+
+    if has_property:
+        # --- Original tools ---
         if spec.tool_name == "get_price_prediction":
-            tool_input["address"] = property_context.get("address", "")
+            tool_input["address"] = prop.get("address", "")
 
         elif spec.tool_name == "get_comparable_sales":
-            tool_input["address"] = property_context.get("address", "")
-            if property_context.get("price"):
-                tool_input["target_price"] = property_context["price"]
+            tool_input["address"] = prop.get("address", "")
+            if prop.get("price"):
+                tool_input["target_price"] = prop["price"]
 
         elif spec.tool_name == "estimate_rental_income":
-            tool_input["address"] = property_context.get("address", "")
-            if property_context.get("bedrooms"):
-                tool_input["bedrooms"] = property_context["bedrooms"]
-            if property_context.get("sqft"):
-                tool_input["sqft"] = property_context["sqft"]
+            tool_input["address"] = prop.get("address", "")
+            if prop.get("bedrooms"):
+                tool_input["bedrooms"] = prop["bedrooms"]
+            if prop.get("sqft"):
+                tool_input["sqft"] = prop["sqft"]
 
         elif spec.tool_name == "get_development_potential":
-            tool_input["address"] = property_context.get("address", "")
+            tool_input["address"] = prop.get("address", "")
 
         elif spec.tool_name == "get_neighborhood_stats":
-            tool_input["neighborhood"] = property_context.get(
-                "neighborhood", ""
-            )
+            tool_input["neighborhood"] = prop.get("neighborhood", "")
+
+        # --- Gap tools: property-dependent ---
+        elif spec.tool_name == "compute_true_cost":
+            tool_input["purchase_price"] = prop.get("price", 0)
+            tool_input["mortgage_rate"] = prop.get("mortgage_rate", 7.0)
+            if buyer.get("capital") and prop.get("price"):
+                tool_input["down_payment_pct"] = min(
+                    round(buyer["capital"] / prop["price"] * 100), 100
+                )
+            else:
+                tool_input["down_payment_pct"] = 20.0
+            if buyer.get("current_rent"):
+                tool_input["current_rent"] = buyer["current_rent"]
+            if prop.get("year_built"):
+                tool_input["year_built"] = prop["year_built"]
+
+        elif spec.tool_name == "compute_rent_vs_buy":
+            tool_input["purchase_price"] = prop.get("price", 0)
+            tool_input["mortgage_rate"] = prop.get("mortgage_rate", 7.0)
+            tool_input["current_rent"] = buyer.get("current_rent", 3000)
+            if buyer.get("capital") and prop.get("price"):
+                tool_input["down_payment_pct"] = min(
+                    round(buyer["capital"] / prop["price"] * 100), 100
+                )
+            else:
+                tool_input["down_payment_pct"] = 20.0
+
+        elif spec.tool_name == "compute_pmi_model":
+            tool_input["purchase_price"] = prop.get("price", 0)
+            tool_input["mortgage_rate"] = prop.get("mortgage_rate", 7.0)
+            if buyer.get("capital") and prop.get("price"):
+                tool_input["down_payment_pct"] = min(
+                    round(buyer["capital"] / prop["price"] * 100), 100
+                )
+            else:
+                tool_input["down_payment_pct"] = 10.0
+            if buyer.get("capital"):
+                tool_input["monthly_savings"] = int(buyer["capital"] * 0.02)
+
+        elif spec.tool_name == "compute_competition":
+            if prop.get("neighborhood"):
+                tool_input["neighborhood"] = prop["neighborhood"]
+            if prop.get("price"):
+                tool_input["price_min"] = int(prop["price"] * 0.8)
+                tool_input["price_max"] = int(prop["price"] * 1.2)
+
+        elif spec.tool_name == "compute_appreciation_stress":
+            tool_input["purchase_price"] = prop.get("price", 0)
+            tool_input["mortgage_rate"] = prop.get("mortgage_rate", 7.0)
+            if buyer.get("capital") and prop.get("price"):
+                tool_input["down_payment_pct"] = min(
+                    round(buyer["capital"] / prop["price"] * 100), 100
+                )
+            else:
+                tool_input["down_payment_pct"] = 20.0
+
+        elif spec.tool_name == "compute_rate_penalty":
+            # Requires buyer profile for existing mortgage data
+            if has_buyer and buyer.get("equity") and prop.get("price"):
+                # Estimate existing balance from equity + home value
+                tool_input["new_purchase_price"] = prop["price"]
+                tool_input["new_rate"] = prop.get("mortgage_rate", 7.0)
+                if buyer.get("income"):
+                    tool_input["annual_gross_income"] = buyer["income"]
+            else:
+                # Not enough data — will gracefully fail or return minimal result
+                tool_input["new_purchase_price"] = prop.get("price", 0)
+                tool_input["new_rate"] = prop.get("mortgage_rate", 7.0)
+
+        elif spec.tool_name == "compute_dual_property":
+            if has_buyer and buyer.get("equity") and prop.get("price"):
+                tool_input["investment_price"] = prop["price"]
+                tool_input["investment_rate"] = prop.get("mortgage_rate", 7.0)
+                if buyer.get("income"):
+                    tool_input["annual_gross_income"] = buyer["income"]
+            else:
+                tool_input["investment_price"] = prop.get("price", 0)
+                tool_input["investment_rate"] = prop.get("mortgage_rate", 7.0)
 
         else:
             # Generic fallback: pass address if available
-            if property_context.get("address"):
-                tool_input["address"] = property_context["address"]
+            if prop.get("address"):
+                tool_input["address"] = prop["address"]
+
+    # --- Gap tools: buyer-only (no property_context required) ---
+    if not has_property:
+        if spec.tool_name == "compute_neighborhood_lifestyle":
+            # No required params — defaults to comparing all neighborhoods
+            pass
+
+        elif spec.tool_name == "compute_adjacent_market":
+            if has_buyer and buyer.get("capital"):
+                tool_input["budget"] = buyer["capital"]
+            else:
+                tool_input["budget"] = 1_000_000  # Berkeley default
 
     return tool_input

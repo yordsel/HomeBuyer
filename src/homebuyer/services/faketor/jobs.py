@@ -175,49 +175,66 @@ PROACTIVE_ANALYSES: dict[tuple[str, RequestType], list[AnalysisSpec]] = {
     (STRETCHER, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("get_comparable_sales", ("property_context",), "Recent comp sales"),
+        AnalysisSpec("compute_true_cost", ("property_context",), "True monthly cost breakdown"),
+        AnalysisSpec("compute_rent_vs_buy", ("property_context",), "Rent vs buy comparison"),
     ],
     (STRETCHER, RequestType.AFFORDABILITY): [
         AnalysisSpec("get_market_summary", (), "Current market conditions"),
+        AnalysisSpec("compute_true_cost", ("property_context",), "True monthly cost breakdown"),
+        AnalysisSpec("compute_rent_vs_buy", ("property_context",), "Rent vs buy comparison"),
     ],
 
     # --- First-Time Buyer ---
     (FIRST_TIME_BUYER, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("get_comparable_sales", ("property_context",), "Recent comp sales"),
+        AnalysisSpec("compute_true_cost", ("property_context",), "True monthly cost breakdown"),
+        AnalysisSpec("compute_pmi_model", ("property_context",), "PMI cost and timeline"),
     ],
     (FIRST_TIME_BUYER, RequestType.AFFORDABILITY): [
         AnalysisSpec("get_market_summary", (), "Current market conditions"),
+        AnalysisSpec("compute_pmi_model", ("property_context",), "PMI cost and timeline"),
     ],
 
     # --- Down Payment Constrained ---
     (DOWN_PAYMENT_CONSTRAINED, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
+        AnalysisSpec("compute_pmi_model", ("property_context",), "PMI cost and timeline"),
+        AnalysisSpec("compute_true_cost", ("property_context",), "True monthly cost breakdown"),
     ],
     (DOWN_PAYMENT_CONSTRAINED, RequestType.AFFORDABILITY): [
         AnalysisSpec("get_market_summary", (), "Current market conditions"),
+        AnalysisSpec("compute_pmi_model", ("property_context",), "PMI cost and timeline"),
     ],
 
     # --- Equity-Trapped Upgrader ---
     (EQUITY_TRAPPED_UPGRADER, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("get_comparable_sales", ("property_context",), "Recent comp sales"),
+        AnalysisSpec("compute_rate_penalty", ("property_context", "buyer_profile"), "Rate lock penalty"),
+    ],
+    (EQUITY_TRAPPED_UPGRADER, RequestType.INVESTMENT_ANALYSIS): [
+        AnalysisSpec("compute_dual_property", ("property_context", "buyer_profile"), "Dual property strategy"),
     ],
 
     # --- Competitive Bidder ---
     (COMPETITIVE_BIDDER, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("get_comparable_sales", ("property_context",), "Recent comp sales"),
+        AnalysisSpec("compute_competition", ("property_context",), "Market competition assessment"),
     ],
 
     # --- Not Viable ---
     (NOT_VIABLE, RequestType.AFFORDABILITY): [
         AnalysisSpec("get_market_summary", (), "Current market conditions"),
+        AnalysisSpec("compute_adjacent_market", ("buyer_profile",), "Adjacent market comparison"),
     ],
 
     # --- Cash Buyer ---
     (CASH_BUYER, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("get_comparable_sales", ("property_context",), "Recent comp sales"),
+        AnalysisSpec("compute_appreciation_stress", ("property_context",), "Appreciation scenarios"),
     ],
     (CASH_BUYER, RequestType.INVESTMENT_ANALYSIS): [
         AnalysisSpec("estimate_rental_income", ("property_context",), "Rental yield estimate"),
@@ -227,6 +244,7 @@ PROACTIVE_ANALYSES: dict[tuple[str, RequestType], list[AnalysisSpec]] = {
     (EQUITY_LEVERAGING_INVESTOR, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("estimate_rental_income", ("property_context",), "Rental yield estimate"),
+        AnalysisSpec("compute_dual_property", ("property_context", "buyer_profile"), "Dual property strategy"),
     ],
     (EQUITY_LEVERAGING_INVESTOR, RequestType.INVESTMENT_ANALYSIS): [
         AnalysisSpec("estimate_rental_income", ("property_context",), "Rental yield estimate"),
@@ -236,15 +254,18 @@ PROACTIVE_ANALYSES: dict[tuple[str, RequestType], list[AnalysisSpec]] = {
     (LEVERAGED_INVESTOR, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("estimate_rental_income", ("property_context",), "Rental yield estimate"),
+        AnalysisSpec("compute_appreciation_stress", ("property_context",), "Appreciation scenarios"),
     ],
     (LEVERAGED_INVESTOR, RequestType.INVESTMENT_ANALYSIS): [
         AnalysisSpec("estimate_rental_income", ("property_context",), "Rental yield estimate"),
+        AnalysisSpec("compute_rate_penalty", ("property_context", "buyer_profile"), "Rate penalty analysis"),
     ],
 
     # --- Value-Add Investor ---
     (VALUE_ADD_INVESTOR, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_development_potential", ("property_context",), "Zoning & dev potential"),
         AnalysisSpec("get_price_prediction", ("property_context",), "As-is fair value"),
+        AnalysisSpec("compute_appreciation_stress", ("property_context",), "Appreciation scenarios"),
     ],
     (VALUE_ADD_INVESTOR, RequestType.DEVELOPMENT_QUESTION): [
         AnalysisSpec("get_development_potential", ("property_context",), "Zoning & dev potential"),
@@ -254,9 +275,11 @@ PROACTIVE_ANALYSES: dict[tuple[str, RequestType], list[AnalysisSpec]] = {
     (APPRECIATION_BETTOR, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("get_neighborhood_stats", ("property_context",), "Neighborhood trends"),
+        AnalysisSpec("compute_appreciation_stress", ("property_context",), "Appreciation scenarios"),
     ],
     (APPRECIATION_BETTOR, RequestType.MARKET_QUESTION): [
         AnalysisSpec("get_market_summary", (), "Current market conditions"),
+        AnalysisSpec("compute_neighborhood_lifestyle", (), "Neighborhood lifestyle comparison"),
     ],
 }
 
@@ -482,3 +505,142 @@ def _tool_priority(segment_id: str | None, request_type: RequestType) -> list[st
         return ["get_development_potential", "lookup_permits", "lookup_regulation"]
 
     return []
+
+
+# ---------------------------------------------------------------------------
+# Dynamic suggestion chips — context-aware prompts for the frontend
+# ---------------------------------------------------------------------------
+
+# Intent discovery chips (turn 1, no segment yet)
+_INTENT_DISCOVERY_CHIPS = [
+    "I'm looking to buy my first home",
+    "I want to invest in rental property",
+    "I'm thinking of upgrading from my current home",
+    "Just exploring the market",
+]
+
+# Capacity chips by intent (turn 2, intent known but no financials)
+_CAPACITY_CHIPS_OCCUPY = [
+    "Let me share my financial details",
+    "Show me what's available under $1M",
+    "What neighborhoods fit my budget?",
+    "What are the true monthly costs of owning?",
+]
+
+_CAPACITY_CHIPS_INVEST = [
+    "I have equity in my current home",
+    "I'm looking to buy with cash",
+    "I want to use leverage for maximum returns",
+    "Show me cash-flow positive properties",
+]
+
+# Segment-aware chips (turn 3+, segment known)
+_SEGMENT_CHIPS: dict[str, list[str]] = {
+    NOT_VIABLE: [
+        "What can I afford in nearby cities?",
+        "How can I improve my buying position?",
+        "What's the cheapest neighborhood in Berkeley?",
+        "Show me condos under $600K",
+    ],
+    STRETCHER: [
+        "What's the true monthly cost for this property?",
+        "Should I rent or buy at these prices?",
+        "Show me properties I can actually afford",
+        "What neighborhoods have the best value?",
+    ],
+    FIRST_TIME_BUYER: [
+        "Break down the true monthly cost",
+        "What will my PMI cost look like?",
+        "Rent vs buy — which makes more sense?",
+        "What first-time buyer programs are available?",
+    ],
+    DOWN_PAYMENT_CONSTRAINED: [
+        "How much PMI will I pay and when does it drop off?",
+        "Should I wait to save more for a down payment?",
+        "What's the true monthly cost with 10% down?",
+        "Show me homes where PMI is worth it",
+    ],
+    EQUITY_TRAPPED_UPGRADER: [
+        "What's my rate lock penalty if I move?",
+        "Can I keep my current home and buy another?",
+        "Compare my current payment to a new mortgage",
+        "Show me homes worth the rate penalty",
+    ],
+    COMPETITIVE_BIDDER: [
+        "How competitive is this neighborhood?",
+        "What's the typical overbid percentage here?",
+        "Show me less competitive neighborhoods",
+        "What properties are sitting on the market?",
+    ],
+    CASH_BUYER: [
+        "Rank properties by investment yield",
+        "Run an appreciation stress test",
+        "Compare cap rates across neighborhoods",
+        "Generate an investment prospectus",
+    ],
+    EQUITY_LEVERAGING_INVESTOR: [
+        "Analyze a dual property strategy with my equity",
+        "Rank properties by cash-on-cash return",
+        "What can my equity unlock as a down payment?",
+        "Compare HELOC vs cash-out refi for extraction",
+    ],
+    LEVERAGED_INVESTOR: [
+        "Show me properties with positive leverage spread",
+        "What's the rate penalty on a new investment loan?",
+        "Run an appreciation stress test",
+        "Rank properties by DSCR",
+    ],
+    VALUE_ADD_INVESTOR: [
+        "What's the development potential here?",
+        "Run an appreciation stress test with renovations",
+        "What improvements add the most value?",
+        "Compare ADU vs lot split returns",
+    ],
+    APPRECIATION_BETTOR: [
+        "Run appreciation scenarios for this property",
+        "Which neighborhoods are appreciating fastest?",
+        "Compare exit strategies at different horizons",
+        "What are the lifestyle factors for neighborhoods?",
+    ],
+}
+
+
+def suggest_chips(
+    context: ResearchContext,
+    has_property: bool = False,
+    tools_used: list[str] | None = None,
+) -> list[str]:
+    """Generate context-aware suggestion chips for the frontend.
+
+    Returns 4 chips based on conversation state:
+    - No segment, no intent → intent discovery chips
+    - Intent known, no financials → capacity chips
+    - Segment known → segment-specific job chips
+    - Property active → property-specific follow-ups
+
+    The orchestrator calls this after each turn and emits the result
+    as a ``suggestion_chips`` SSE event.
+    """
+    segment_id = context.buyer.segment_id if context.buyer else None
+    intent = context.buyer.profile.intent if context.buyer else None
+    has_financials = bool(
+        context.buyer
+        and context.buyer.profile.capital is not None
+    )
+
+    # If property is active and segment is known, give segment+property chips
+    if has_property and segment_id and segment_id in _SEGMENT_CHIPS:
+        return _SEGMENT_CHIPS[segment_id][:4]
+
+    # Segment known → segment-specific chips
+    if segment_id and segment_id in _SEGMENT_CHIPS:
+        return _SEGMENT_CHIPS[segment_id][:4]
+
+    # Intent known but no financials → capacity discovery
+    if intent == "invest":
+        return _CAPACITY_CHIPS_INVEST[:4]
+    if intent == "occupy" and not has_financials:
+        return _CAPACITY_CHIPS_OCCUPY[:4]
+
+    # Nothing known → intent discovery
+    return _INTENT_DISCOVERY_CHIPS[:4]

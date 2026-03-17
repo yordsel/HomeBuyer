@@ -13,7 +13,8 @@ import {
   Send, Loader2, Bot, User, MessageCircle, Search,
   Home, BarChart3, GitCompare, MapPin, Building2,
   TrendingUp, DollarSign, Wrench, FileText, Database,
-  Undo2, CheckCircle2, Plus,
+  Undo2, CheckCircle2, Plus, Calculator, ArrowRightLeft,
+  Shield, ArrowUpDown, Flame, Trophy, TrendingDown, Map,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -27,7 +28,8 @@ import { BlockRenderer } from '../components/chat/BlockRenderer';
 import { SuggestionChips } from '../components/chat/SuggestionChips';
 import { SegmentBadge } from '../components/chat/SegmentBadge';
 import { ResumeBriefingCard } from '../components/chat/ResumeBriefingCard';
-import { BuyerIntakeForm } from '../components/chat/BuyerIntakeForm';
+// BuyerIntakeForm — available for inline use when Faketor requests financial details
+// import { BuyerIntakeForm } from '../components/chat/BuyerIntakeForm';
 import { AddressSearch } from '../components/AddressSearch';
 import { PropertyDetailModal } from '../components/context/PropertyDetailModal';
 import type {
@@ -35,7 +37,6 @@ import type {
   FaketorMessage,
   ToolEvent,
   ResponseBlock,
-  BuyerIntakeData,
 } from '../types';
 
 // Icons for tool chips — gives each tool a recognizable visual
@@ -55,6 +56,16 @@ const TOOL_ICONS: Record<string, typeof Home> = {
   query_database: Database,
   undo_filter: Undo2,
   generate_investment_prospectus: FileText,
+  compute_true_cost: Calculator,
+  compute_rent_vs_buy: ArrowRightLeft,
+  compute_pmi_model: Shield,
+  compute_rate_penalty: ArrowUpDown,
+  compute_competition: Flame,
+  compute_dual_property: Building2,
+  compute_yield_ranking: Trophy,
+  compute_appreciation_stress: TrendingDown,
+  compute_neighborhood_lifestyle: MapPin,
+  compute_adjacent_market: Map,
 };
 
 // ---------------------------------------------------------------------------
@@ -105,19 +116,17 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
     segment,
     segmentConfidence,
     resumeBriefing,
-    intakeCompleted,
     intakeData,
     updateSegment,
     setResumeBriefing,
-    completeIntake,
     setPreExecuting,
     clearPreExecuting,
     dismissBriefing,
     resetBuyer,
   } = useBuyerContext();
 
-  // Whether intake has been dismissed (skipped) for this conversation
-  const [intakeSkipped, setIntakeSkipped] = useState(false);
+  // Dynamic suggestion chips from orchestrator SSE events
+  const [dynamicChips, setDynamicChips] = useState<string[]>([]);
 
   // Stable session ID for this conversation
   const [sessionId] = useState(() => crypto.randomUUID());
@@ -459,6 +468,9 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
           onPreExecutionComplete: () => {
             clearPreExecuting();
           },
+          onSuggestionChips: (chips) => {
+            setDynamicChips(chips);
+          },
         },
       );
 
@@ -478,14 +490,10 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
     [setActiveProperty, trackProperty, handleSend],
   );
 
-  // Handle buyer intake form submission
-  const handleIntakeComplete = useCallback((data: BuyerIntakeData) => {
-    completeIntake(data);
-  }, [completeIntake]);
-
-  const handleIntakeSkip = useCallback(() => {
-    setIntakeSkipped(true);
-  }, []);
+  // Handle buyer intake form submission (available for future inline mode)
+  // const handleIntakeComplete = useCallback((data: BuyerIntakeData) => {
+  //   completeIntake(data);
+  // }, [completeIntake]);
 
   // Register handleSend in context
   useEffect(() => {
@@ -561,15 +569,7 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
           />
         )}
 
-        {/* Buyer intake form for new conversations (skippable) */}
-        {messages.length === 0 && !streaming && !loadingConversation && !intakeCompleted && !intakeSkipped && (
-          <BuyerIntakeForm
-            onComplete={handleIntakeComplete}
-            onSkip={handleIntakeSkip}
-          />
-        )}
-
-        {/* Welcome state */}
+        {/* Welcome state — no intake form gate, just the welcome screen */}
         {messages.length === 0 && !streaming && !loadingConversation && (
           <WelcomeScreen
             onSelect={handleSend}
@@ -632,6 +632,7 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
             toolsUsed={allToolsUsed}
             onSelect={handleSend}
             propertyCategory={activeProperty?.property_category}
+            dynamicChips={dynamicChips}
           />
         )}
 
@@ -678,6 +679,13 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
 // Sub-components
 // ---------------------------------------------------------------------------
 
+interface MarketSnapshot {
+  median_sale_price?: number | null;
+  sale_to_list_ratio?: number | null;
+  median_days_on_market?: number | null;
+  mortgage_rate_30yr?: number | null;
+}
+
 function WelcomeScreen({
   onSelect,
   hasProperty,
@@ -686,26 +694,44 @@ function WelcomeScreen({
   hasProperty: boolean;
 }) {
   const [funFact, setFunFact] = useState<string | null>(null);
+  const [market, setMarket] = useState<MarketSnapshot | null>(null);
 
   useEffect(() => {
+    // Fetch fun fact and market data in parallel
     api.getRandomFunFact()
       .then((f) => setFunFact(f.display_text))
-      .catch(() => {/* non-critical — silently hide */});
+      .catch(() => {/* non-critical */});
+
+    api.getMarketSummary()
+      .then((data) => {
+        const m = data?.current_market;
+        if (m) setMarket(m);
+      })
+      .catch(() => {/* non-critical */});
   }, []);
 
-  const prompts = hasProperty
-    ? [
-        'What\u2019s this property worth?',
-        'What can I build on this lot?',
-        'Show comparable sales',
-        'Should I sell or hold?',
-      ]
-    : [
-        'Tell me about 1234 Cedar St',
-        'What\u2019s the Berkeley market like?',
-        'Compare Elmwood vs Thousand Oaks',
-        'What neighborhoods have the best value?',
-      ];
+  // Intent discovery chips for new users (no property active)
+  const intentChips = [
+    "I'm looking to buy my first home",
+    "I want to invest in rental property",
+    "I'm thinking of upgrading from my current home",
+    "Just exploring the market",
+  ];
+
+  // Property-aware chips when a property is already selected
+  const propertyChips = [
+    'What\u2019s this property worth?',
+    'What can I build on this lot?',
+    'Show comparable sales',
+    'Should I sell or hold?',
+  ];
+
+  const prompts = hasProperty ? propertyChips : intentChips;
+
+  const formatPrice = (n: number) =>
+    n >= 1_000_000
+      ? `$${(n / 1_000_000).toFixed(1)}M`
+      : `$${Math.round(n / 1000)}K`;
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60%] text-center px-4">
@@ -713,15 +739,55 @@ function WelcomeScreen({
         <Bot size={32} />
       </div>
       <h2 className="text-xl font-bold text-gray-900 mb-1">Welcome to Faketor</h2>
-      <p className="text-sm text-gray-500 mb-6 max-w-md">
-        Your AI real estate advisor for Berkeley. Ask about any property, neighborhood,
-        or the market — I'll pull live data and give you data-driven insights.
+      <p className="text-sm text-gray-500 mb-4 max-w-md">
+        Your AI real estate advisor for Berkeley. I'll pull live data and give you
+        brutally honest, data-driven insights.
       </p>
+
+      {/* Market snapshot */}
+      {market && (
+        <div className="mb-4 max-w-lg w-full px-4 py-3 rounded-xl bg-blue-50 border border-blue-200">
+          <p className="text-xs font-semibold text-blue-700 mb-2">Berkeley Market Right Now</p>
+          <div className="grid grid-cols-4 gap-2 text-center">
+            {market.median_sale_price != null && (
+              <div>
+                <p className="text-lg font-bold text-blue-900">{formatPrice(market.median_sale_price)}</p>
+                <p className="text-[10px] text-blue-500 uppercase">Median</p>
+              </div>
+            )}
+            {market.sale_to_list_ratio != null && (
+              <div>
+                <p className="text-lg font-bold text-blue-900">{(market.sale_to_list_ratio * 100).toFixed(0)}%</p>
+                <p className="text-[10px] text-blue-500 uppercase">Sale/List</p>
+              </div>
+            )}
+            {market.median_days_on_market != null && (
+              <div>
+                <p className="text-lg font-bold text-blue-900">{market.median_days_on_market}</p>
+                <p className="text-[10px] text-blue-500 uppercase">Days</p>
+              </div>
+            )}
+            {market.mortgage_rate_30yr != null && (
+              <div>
+                <p className="text-lg font-bold text-blue-900">{market.mortgage_rate_30yr.toFixed(1)}%</p>
+                <p className="text-[10px] text-blue-500 uppercase">30yr Rate</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Fun fact */}
       {funFact && (
         <div className="mb-6 max-w-lg w-full px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-left">
           <p className="text-xs font-semibold text-amber-700 mb-1">Did you know?</p>
           <p className="text-sm text-amber-900">{funFact}</p>
         </div>
+      )}
+
+      {/* Intent / context chips */}
+      {!hasProperty && (
+        <p className="text-xs text-gray-400 mb-3">What brings you to Berkeley real estate?</p>
       )}
       <div className="grid grid-cols-2 gap-2 w-full max-w-lg">
         {prompts.map((prompt) => (
@@ -732,7 +798,7 @@ function WelcomeScreen({
                        hover:border-indigo-300 hover:text-indigo-700 hover:bg-indigo-50
                        hover:shadow-sm transition-all"
           >
-            <Search size={14} className="inline mr-1.5 text-gray-400" />
+            <MessageCircle size={14} className="inline mr-1.5 text-gray-400" />
             {prompt}
           </button>
         ))}

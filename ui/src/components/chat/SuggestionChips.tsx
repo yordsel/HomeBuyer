@@ -13,6 +13,8 @@ interface SuggestionChipsProps {
   onSelect: (prompt: string) => void;
   /** Granular property type (sfr, condo, land, etc.) for smarter suggestions. */
   propertyCategory?: string;
+  /** Dynamic chips from the orchestrator (overrides static logic when present). */
+  dynamicChips?: string[];
 }
 
 const INITIAL_PROMPTS = [
@@ -162,8 +164,12 @@ export function SuggestionChips({
   toolsUsed,
   onSelect,
   propertyCategory,
+  dynamicChips,
 }: SuggestionChipsProps) {
-  const prompts = getPrompts(hasProperty, toolsUsed, propertyCategory);
+  // Dynamic chips from orchestrator take precedence over static logic
+  const prompts = dynamicChips && dynamicChips.length > 0
+    ? dynamicChips.slice(0, 4)
+    : getPrompts(hasProperty, toolsUsed, propertyCategory);
 
   if (prompts.length === 0) return null;
 

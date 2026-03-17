@@ -20,6 +20,16 @@ import { ChatRentalIncome } from './ChatRentalIncome';
 import { ChatSearchResults } from './ChatSearchResults';
 import { ChatQueryResult } from './ChatQueryResult';
 import { ChatInvestmentProspectus } from './ChatInvestmentProspectus';
+import { ChatTrueCostCard } from './ChatTrueCostCard';
+import { ChatRentVsBuyCard } from './ChatRentVsBuyCard';
+import { ChatPmiModelCard } from './ChatPmiModelCard';
+import { ChatRatePenaltyCard } from './ChatRatePenaltyCard';
+import { ChatCompetitionCard } from './ChatCompetitionCard';
+import { ChatDualPropertyCard } from './ChatDualPropertyCard';
+import { ChatYieldRankingCard } from './ChatYieldRankingCard';
+import { ChatAppreciationStressCard } from './ChatAppreciationStressCard';
+import { ChatNeighborhoodLifestyleCard } from './ChatNeighborhoodLifestyleCard';
+import { ChatAdjacentMarketCard } from './ChatAdjacentMarketCard';
 
 // ---------------------------------------------------------------------------
 // Error boundary — catches render crashes in any block card
@@ -109,6 +119,36 @@ export function BlockRenderer({ block, onAddressClick }: BlockRendererProps) {
       break;
     case 'investment_prospectus':
       content = <ChatInvestmentProspectus data={block.data} />;
+      break;
+    case 'true_cost_card':
+      content = <ChatTrueCostCard data={block.data} />;
+      break;
+    case 'rent_vs_buy_card':
+      content = <ChatRentVsBuyCard data={block.data} />;
+      break;
+    case 'pmi_model_card':
+      content = <ChatPmiModelCard data={block.data} />;
+      break;
+    case 'rate_penalty_card':
+      content = <ChatRatePenaltyCard data={block.data} />;
+      break;
+    case 'competition_card':
+      content = <ChatCompetitionCard data={block.data} />;
+      break;
+    case 'dual_property_card':
+      content = <ChatDualPropertyCard data={block.data} />;
+      break;
+    case 'yield_ranking_card':
+      content = <ChatYieldRankingCard data={block.data} onAddressClick={onAddressClick} />;
+      break;
+    case 'appreciation_stress_card':
+      content = <ChatAppreciationStressCard data={block.data} />;
+      break;
+    case 'neighborhood_lifestyle_card':
+      content = <ChatNeighborhoodLifestyleCard data={block.data} />;
+      break;
+    case 'adjacent_market_card':
+      content = <ChatAdjacentMarketCard data={block.data} />;
       break;
     default: {
       const _exhaustive: never = block;
