@@ -608,7 +608,7 @@ class AppState:
             cache_set=self.cache_set,
         )
 
-        # Segment-driven orchestration (Phase C shadow mode)
+        # Segment-driven orchestration (Phase C shadow mode + Phase E orchestrator)
         from homebuyer.services.faketor.classification import SegmentClassifier
         from homebuyer.services.faketor.extraction import SignalExtractor
         from homebuyer.services.faketor.state.context import ResearchContextStore
@@ -625,6 +625,37 @@ class AppState:
         else:
             self.signal_extractor = None
             logger.info("Segment extraction disabled (no Anthropic client)")
+
+        # TurnOrchestrator — enabled when USE_SEGMENT_ORCHESTRATION=true
+        self.turn_orchestrator = None
+        from homebuyer.config import USE_SEGMENT_ORCHESTRATION
+        if USE_SEGMENT_ORCHESTRATION and self.faketor.enabled and self.signal_extractor:
+            try:
+                from homebuyer.services.faketor.jobs import JobResolver
+                from homebuyer.services.faketor.orchestrator import TurnOrchestrator
+                from homebuyer.services.faketor.tools import registry as tool_reg
+                from homebuyer.services.faketor.tools.executor import ToolExecutor
+                from homebuyer.services.faketor.tools.preexecution import PreExecutor
+
+                self.turn_orchestrator = TurnOrchestrator(
+                    client=self.faketor._client,
+                    context_store=self.context_store,
+                    signal_extractor=self.signal_extractor,
+                    segment_classifier=self.segment_classifier,
+                    tool_executor=ToolExecutor(
+                        lambda name, inp: _faketor_tool_executor(name, inp),
+                        tool_reg,
+                    ),
+                    pre_executor=PreExecutor(
+                        lambda name, inp: _faketor_tool_executor(name, inp),
+                    ),
+                    registry=tool_reg,
+                    job_resolver=JobResolver(),
+                )
+                logger.info("TurnOrchestrator enabled (segment-driven mode)")
+            except Exception as e:
+                logger.warning("TurnOrchestrator init failed: %s", e)
+                self.turn_orchestrator = None
 
     def get_analyzer(self):
         from homebuyer.analysis.market_analysis import MarketAnalyzer
@@ -3932,15 +3963,39 @@ async def _run_shadow_extraction(message: str, session_id: str | None, user_id: 
 
 
 @app.post("/api/faketor/chat")
-def faketor_chat(req: FaketorChatRequest):
+async def faketor_chat(req: FaketorChatRequest):
     """Chat with Faketor, the AI real estate advisor."""
     if not _state:
         raise HTTPException(status_code=503, detail="Server not initialized")
 
-    # Shadow mode: run extraction + classification (non-blocking on failure)
-    import asyncio
+    # --- Orchestrated path (Phase E, feature-flag-gated) ---
+    if _state.turn_orchestrator is not None:
+        user_id = req.session_id or "anonymous"
+        property_context = _resolve_faketor_context(req)
+        working_set = None
+        if req.session_id:
+            working_set = _state.sessions.get_or_create(req.session_id)
 
+        result = await _state.turn_orchestrator.run(
+            user_id=user_id,
+            message=req.message,
+            history=req.history,
+            property_context=property_context,
+            working_set_descriptor=(
+                working_set.get_descriptor() if working_set else ""
+            ),
+        )
+        response = result.to_dict()
+        if working_set is not None:
+            response["working_set"] = _build_working_set_metadata(
+                working_set, req.session_id
+            )
+        return response
+
+    # --- Legacy path (original FaketorService) ---
+    # Shadow mode: run extraction + classification (non-blocking on failure)
     try:
+        import asyncio
         loop = asyncio.get_event_loop()
         if loop.is_running():
             loop.create_task(_run_shadow_extraction(req.message, req.session_id))
@@ -3974,15 +4029,54 @@ def faketor_chat(req: FaketorChatRequest):
 
 
 @app.post("/api/faketor/chat/stream")
-def faketor_chat_stream(req: FaketorChatRequest):
+async def faketor_chat_stream(req: FaketorChatRequest):
     """SSE streaming version of Faketor chat."""
     if not _state:
         raise HTTPException(status_code=503, detail="Server not initialized")
 
-    # Shadow mode: run extraction + classification (non-blocking on failure)
-    import asyncio
+    # --- Orchestrated path (Phase E, feature-flag-gated) ---
+    if _state.turn_orchestrator is not None:
+        user_id = req.session_id or "anonymous"
+        property_context = _resolve_faketor_context(req)
+        working_set = None
+        if req.session_id:
+            working_set = _state.sessions.get_or_create(req.session_id)
 
+        async def orchestrated_event_generator():
+            async for event in _state.turn_orchestrator.run_stream(
+                user_id=user_id,
+                message=req.message,
+                history=req.history,
+                property_context=property_context,
+                working_set_descriptor=(
+                    working_set.get_descriptor() if working_set else ""
+                ),
+            ):
+                event_type = event["event"]
+                data = safe_json_dumps(event["data"])
+                yield f"event: {event_type}\ndata: {data}\n\n"
+
+            # Emit working set metadata after the chat is done
+            if working_set is not None:
+                ws_data = safe_json_dumps(
+                    _build_working_set_metadata(working_set, req.session_id),
+                )
+                yield f"event: working_set\ndata: {ws_data}\n\n"
+
+        return StreamingResponse(
+            orchestrated_event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # --- Legacy path (original FaketorService) ---
+    # Shadow mode: run extraction + classification (non-blocking on failure)
     try:
+        import asyncio
         loop = asyncio.get_event_loop()
         if loop.is_running():
             loop.create_task(_run_shadow_extraction(req.message, req.session_id))
