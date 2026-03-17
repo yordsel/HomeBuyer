@@ -350,6 +350,22 @@ def compute_rent_vs_buy_facts(data: dict) -> dict:
     }
 
 
+def compute_competition_facts(data: dict) -> dict:
+    """Facts for ``competition_assessment`` results."""
+    dom = data.get("dom_distribution") or {}
+    return {
+        "neighborhood": data.get("neighborhood"),
+        "sample_size": data.get("sample_size"),
+        "competition_score": data.get("competition_score"),
+        "competition_label": data.get("competition_label"),
+        "sale_to_list_median": data.get("sale_to_list_median"),
+        "dom_median": dom.get("median"),
+        "above_asking_pct": data.get("above_asking_pct"),
+        "months_of_inventory": data.get("months_of_inventory"),
+        "interpretation": data.get("interpretation"),
+    }
+
+
 def compute_rate_penalty_facts(data: dict) -> dict:
     """Facts for ``rate_penalty`` results."""
     return {
@@ -409,6 +425,7 @@ _FACT_COMPUTERS: dict[str, callable] = {
     "rent_vs_buy": compute_rent_vs_buy_facts,
     "pmi_model": compute_pmi_model_facts,
     "rate_penalty": compute_rate_penalty_facts,
+    "competition_assessment": compute_competition_facts,
 }
 
 

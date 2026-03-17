@@ -3976,6 +3976,86 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         )
         return safe_json_dumps(compute_rate_penalty(params))
 
+    elif tool_name == "competition_assessment":
+        from homebuyer.services.faketor.tools.gap.competition import (
+            CompetitionParams,
+            compute_competition,
+        )
+
+        neighborhood = tool_input.get("neighborhood", "Berkeley")
+        price_min = tool_input.get("price_min")
+        price_max = tool_input.get("price_max")
+
+        # Fetch recent sales data from DB
+        sale_to_list_ratios: list[float] = []
+        dom_values: list[int] = []
+        above_asking_flags: list[bool] = []
+        active_listings = 0
+        monthly_closed = 0.0
+
+        if _state and _state.db:
+            db = _state.db
+            # Build price-band filter
+            price_clause = ""
+            query_params: list = [neighborhood]
+            if price_min is not None:
+                price_clause += " AND s.last_sale_price >= ?"
+                query_params.append(int(price_min))
+            if price_max is not None:
+                price_clause += " AND s.last_sale_price <= ?"
+                query_params.append(int(price_max))
+
+            # Recent sales (last 6 months) for competition metrics
+            rows = db.execute(
+                f"""
+                SELECT s.last_sale_price, s.list_price, s.dom
+                FROM sales s
+                WHERE s.neighborhood = ?
+                  AND s.sale_date >= date('now', '-6 months')
+                  {price_clause}
+                ORDER BY s.sale_date DESC
+                """,
+                query_params,
+            ).fetchall()
+
+            for row in rows:
+                sale_price = row[0] or 0
+                list_price = row[1] or 0
+                dom = row[2]
+                if list_price > 0 and sale_price > 0:
+                    sale_to_list_ratios.append(sale_price / list_price)
+                    above_asking_flags.append(sale_price > list_price)
+                if dom is not None and dom >= 0:
+                    dom_values.append(int(dom))
+
+            # Active listings count
+            try:
+                active_row = db.execute(
+                    """
+                    SELECT COUNT(*) FROM sales
+                    WHERE neighborhood = ? AND status = 'Active'
+                    """,
+                    [neighborhood],
+                ).fetchone()
+                active_listings = active_row[0] if active_row else 0
+            except Exception:
+                active_listings = 0
+
+            # Monthly closed sales (last 6 months averaged)
+            monthly_closed = len(rows) / 6.0 if rows else 0.0
+
+        comp_params = CompetitionParams(
+            neighborhood=neighborhood,
+            sale_to_list_ratios=sale_to_list_ratios,
+            dom_values=dom_values,
+            above_asking_flags=above_asking_flags,
+            active_listings=active_listings,
+            monthly_closed_sales=monthly_closed,
+            price_min=int(price_min) if price_min is not None else None,
+            price_max=int(price_max) if price_max is not None else None,
+        )
+        return safe_json_dumps(compute_competition(comp_params))
+
     else:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 

@@ -23,6 +23,7 @@ from homebuyer.services.faketor.facts import (
     compute_rent_vs_buy_facts,
     compute_pmi_model_facts,
     compute_rate_penalty_facts,
+    compute_competition_facts,
     compute_undo_filter_facts,
 )
 from homebuyer.services.faketor.tools.registry import ToolDefinition
@@ -1258,5 +1259,36 @@ _TOOL_DEFINITIONS: list[ToolDefinition] = [
         },
         "block_type": "rate_penalty_card",
         "fact_computer": compute_rate_penalty_facts,
+    },
+    {
+        "name": "competition_assessment",
+        "description": (
+            "Assess competitive dynamics for a neighborhood or price band. "
+            "Computes sale-to-list ratios, days-on-market distribution, "
+            "percentage of sales above/below asking, absorption rate, months "
+            "of inventory, and a synthesized competition score (0-100). "
+            "Use for Competitive Bidder segments evaluating how aggressive "
+            "they need to be with offers."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "neighborhood": {
+                    "type": "string",
+                    "description": "Neighborhood name to assess.",
+                },
+                "price_min": {
+                    "type": "number",
+                    "description": "Minimum price for the analysis band.",
+                },
+                "price_max": {
+                    "type": "number",
+                    "description": "Maximum price for the analysis band.",
+                },
+            },
+            "required": ["neighborhood"],
+        },
+        "block_type": "competition_card",
+        "fact_computer": compute_competition_facts,
     },
 ]
