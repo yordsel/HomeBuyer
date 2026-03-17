@@ -350,6 +350,25 @@ def compute_rent_vs_buy_facts(data: dict) -> dict:
     }
 
 
+def compute_pmi_model_facts(data: dict) -> dict:
+    """Facts for ``pmi_model`` results."""
+    wait = data.get("wait_analysis") or {}
+    return {
+        "pmi_applicable": data.get("pmi_applicable"),
+        "initial_ltv_pct": data.get("initial_ltv_pct"),
+        "monthly_pmi": data.get("monthly_pmi"),
+        "annual_pmi": data.get("annual_pmi"),
+        "pmi_dropoff_month": data.get("pmi_dropoff_month"),
+        "pmi_dropoff_years": data.get("pmi_dropoff_years"),
+        "pmi_dropoff_description": data.get("pmi_dropoff_description"),
+        "total_pmi_cost": data.get("total_pmi_cost"),
+        "appreciation_acceleration_months": data.get("appreciation_acceleration_months"),
+        "wait_verdict": wait.get("verdict"),
+        "wait_verdict_description": wait.get("verdict_description"),
+        "net_cost_of_waiting": wait.get("net_cost_of_waiting"),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -370,6 +389,7 @@ _FACT_COMPUTERS: dict[str, callable] = {
     "lookup_glossary_term": compute_glossary_facts,
     "compute_true_cost": compute_true_cost_facts,
     "rent_vs_buy": compute_rent_vs_buy_facts,
+    "pmi_model": compute_pmi_model_facts,
 }
 
 

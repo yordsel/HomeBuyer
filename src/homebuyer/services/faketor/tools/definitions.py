@@ -21,6 +21,7 @@ from homebuyer.services.faketor.facts import (
     compute_sell_vs_hold_facts,
     compute_true_cost_facts,
     compute_rent_vs_buy_facts,
+    compute_pmi_model_facts,
     compute_undo_filter_facts,
 )
 from homebuyer.services.faketor.tools.registry import ToolDefinition
@@ -1137,5 +1138,65 @@ _TOOL_DEFINITIONS: list[ToolDefinition] = [
         },
         "block_type": "rent_vs_buy_card",
         "fact_computer": compute_rent_vs_buy_facts,
+    },
+    {
+        "name": "pmi_model",
+        "description": (
+            "Model PMI costs and elimination timeline for a buyer with less than "
+            "20% down. Computes: monthly PMI at the buyer's LTV using tiered rate "
+            "brackets (85-95% LTV pays more than 80-85% LTV), the month PMI drops "
+            "off via combined appreciation + principal paydown, total PMI paid over "
+            "the life of the loan, and a buy-now-vs-wait comparison that determines "
+            "whether saving more down payment beats market appreciation. Use this "
+            "for Down Payment Constrained and Stretcher segments asking about PMI, "
+            "how long they'll pay it, and whether to delay purchase."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "purchase_price": {
+                    "type": "number",
+                    "description": "Purchase price in dollars.",
+                },
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": (
+                        "Down payment as percent of price, e.g. 10 for 10%. "
+                        "Default 10. Must be less than 20 for PMI to apply."
+                    ),
+                },
+                "mortgage_rate": {
+                    "type": "number",
+                    "description": (
+                        "Annual mortgage rate as percent, e.g. 7.25. "
+                        "If omitted, current market rate is used."
+                    ),
+                },
+                "annual_appreciation_pct": {
+                    "type": "number",
+                    "description": (
+                        "Expected annual home appreciation as percent. Default 3.0. "
+                        "Used to model accelerated PMI drop-off via rising home value."
+                    ),
+                },
+                "monthly_savings": {
+                    "type": "number",
+                    "description": (
+                        "How much the buyer can save per month toward down payment. "
+                        "Required to enable the buy-now-vs-wait analysis."
+                    ),
+                },
+                "wait_months": {
+                    "type": "integer",
+                    "description": (
+                        "Number of months to wait before buying, for the "
+                        "buy-now-vs-wait comparison. Default 12."
+                    ),
+                },
+            },
+            "required": ["purchase_price"],
+        },
+        "block_type": "pmi_model_card",
+        "fact_computer": compute_pmi_model_facts,
     },
 ]

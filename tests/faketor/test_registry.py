@@ -220,6 +220,7 @@ class TestPopulatedRegistry:
             # Phase F gap tools
             "compute_true_cost",
             "rent_vs_buy",
+            "pmi_model",
         }
         assert registry.names == expected
 

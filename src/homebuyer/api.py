@@ -3915,6 +3915,35 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         )
         return safe_json_dumps(compute_rent_vs_buy(rvb_params))
 
+    elif tool_name == "pmi_model":
+        from homebuyer.services.faketor.tools.gap.pmi_model import (
+            PmiModelParams,
+            compute_pmi_model,
+        )
+        from homebuyer.utils.mortgage import get_current_mortgage_rate
+
+        rate = tool_input.get("mortgage_rate")
+        if rate is None and _state and _state.db:
+            rate = get_current_mortgage_rate(_state.db)
+        if rate is None:
+            rate = 6.5
+
+        monthly_savings = tool_input.get("monthly_savings")
+
+        params = PmiModelParams(
+            purchase_price=int(tool_input["purchase_price"]),
+            down_payment_pct=float(tool_input.get("down_payment_pct", 10.0)),
+            mortgage_rate=float(rate),
+            annual_appreciation_pct=float(
+                tool_input.get("annual_appreciation_pct", 3.0)
+            ),
+            monthly_savings=(
+                int(monthly_savings) if monthly_savings is not None else None
+            ),
+            wait_months=int(tool_input.get("wait_months", 12)),
+        )
+        return safe_json_dumps(compute_pmi_model(params))
+
     else:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
