@@ -390,6 +390,37 @@ class FaketorService:
     def enabled(self) -> bool:
         return self._enabled
 
+    def _build_base_system(
+        self,
+        property_context: dict,
+        working_set_descriptor: str = "",
+        research_context=None,
+    ) -> str:
+        """Build the base system prompt, switching on feature flag.
+
+        When USE_SEGMENT_ORCHESTRATION is enabled and a ResearchContext is
+        available, uses the PromptAssembler. Otherwise falls back to the
+        original monolithic SYSTEM_PROMPT.
+        """
+        from homebuyer.config import USE_SEGMENT_ORCHESTRATION
+
+        if USE_SEGMENT_ORCHESTRATION and research_context is not None:
+            from homebuyer.services.faketor.prompts import PromptAssembler
+            assembler = PromptAssembler()
+            base = assembler.assemble(context=research_context)
+            # Still append property context as JSON for backward compat
+            base += f"\n\nCURRENT PROPERTY CONTEXT:\n{json.dumps(property_context, indent=2)}"
+        else:
+            base = (
+                SYSTEM_PROMPT
+                + f"\n\nCURRENT PROPERTY CONTEXT:\n{json.dumps(property_context, indent=2)}"
+            )
+
+        if working_set_descriptor:
+            base += f"\n\n{working_set_descriptor}"
+
+        return base
+
     def chat(
         self,
         message: str,
@@ -413,10 +444,8 @@ class FaketorService:
         if not self._enabled or not self._client:
             return {"error": "Faketor is unavailable (no API key configured)"}
 
-        # Build system prompt with property context and working set
-        base_system = SYSTEM_PROMPT + f"\n\nCURRENT PROPERTY CONTEXT:\n{json.dumps(property_context, indent=2)}"
-        if working_set_descriptor:
-            base_system += f"\n\n{working_set_descriptor}"
+        # Build system prompt (feature-flag-gated: old monolithic vs new composed)
+        base_system = self._build_base_system(property_context, working_set_descriptor)
 
         # Build messages: sanitize history then append new user message
         messages = _sanitize_history(history) + [{"role": "user", "content": message}]
@@ -599,9 +628,8 @@ class FaketorService:
             yield {"event": "error", "data": {"message": "Faketor is unavailable (no API key configured)"}}
             return
 
-        base_system = SYSTEM_PROMPT + f"\n\nCURRENT PROPERTY CONTEXT:\n{json.dumps(property_context, indent=2)}"
-        if working_set_descriptor:
-            base_system += f"\n\n{working_set_descriptor}"
+        # Build system prompt (feature-flag-gated: old monolithic vs new composed)
+        base_system = self._build_base_system(property_context, working_set_descriptor)
         messages = _sanitize_history(history) + [{"role": "user", "content": message}]
 
         tool_calls_log: list[dict] = []
