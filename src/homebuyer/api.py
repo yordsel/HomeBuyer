@@ -608,6 +608,24 @@ class AppState:
             cache_set=self.cache_set,
         )
 
+        # Segment-driven orchestration (Phase C shadow mode)
+        from homebuyer.services.faketor.classification import SegmentClassifier
+        from homebuyer.services.faketor.extraction import SignalExtractor
+        from homebuyer.services.faketor.state.context import ResearchContextStore
+
+        self.segment_classifier = SegmentClassifier()
+        self.context_store = ResearchContextStore(ttl_seconds=1800)
+
+        # SignalExtractor needs the Anthropic client — reuse faketor's
+        if self.faketor.enabled and hasattr(self.faketor, "_client"):
+            self.signal_extractor: SignalExtractor | None = SignalExtractor(
+                self.faketor._client
+            )
+            logger.info("Segment extraction + classification enabled (shadow mode)")
+        else:
+            self.signal_extractor = None
+            logger.info("Segment extraction disabled (no Anthropic client)")
+
     def get_analyzer(self):
         from homebuyer.analysis.market_analysis import MarketAnalyzer
         return MarketAnalyzer(self.db)
@@ -3821,11 +3839,115 @@ def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
     return prop
 
 
+async def _run_shadow_extraction(message: str, session_id: str | None, user_id: str | None = None):
+    """Run signal extraction + classification in shadow mode (Phase C).
+
+    This runs before the main chat and stores results in ResearchContext.
+    It does NOT affect user-facing behavior — purely for monitoring and
+    data collection. Failures are logged and swallowed.
+    """
+    if not _state or not _state.signal_extractor:
+        return
+
+    try:
+        import time as _time
+
+        start = _time.time()
+
+        # Load or create research context
+        ctx = await _state.context_store.load_or_create(
+            user_id=user_id, session_id=session_id
+        )
+
+        # Extract signals from user message
+        extraction = _state.signal_extractor.extract(
+            message=message,
+            current_profile=ctx.buyer.profile,
+            prior_signals=ctx.buyer.profile.signals,
+        )
+
+        # Apply extractions to buyer profile
+        if not extraction.is_empty():
+            extractions = extraction.to_extractions()
+            updated = ctx.buyer.profile.apply_extraction(extractions)
+            ctx.buyer.profile.signals.extend(extraction.signals)
+
+            # Classify segment
+            result = _state.segment_classifier.classify(
+                profile=ctx.buyer.profile,
+                mortgage_rate=ctx.market.mortgage_rate_30yr or 6.5,
+                median_price=(
+                    ctx.market.berkeley_wide.median_sale_price
+                    or 1_300_000
+                ),
+            )
+
+            # Check if transition should occur
+            from homebuyer.services.faketor.classification import SegmentResult
+
+            current_result = SegmentResult(
+                segment_id=ctx.buyer.segment_id,
+                confidence=ctx.buyer.segment_confidence,
+                reasoning="",
+                factor_coverage=ctx.buyer.profile.known_factor_count() / 4.0,
+            )
+            trigger = extraction.signals[0] if extraction.signals else None
+
+            if _state.segment_classifier.should_transition(current_result, result, trigger):
+                ctx.buyer.record_transition(
+                    from_segment=ctx.buyer.segment_id,
+                    to_segment=result.segment_id,
+                    confidence=result.confidence,
+                    trigger=trigger,
+                )
+
+            # Persist context
+            await _state.context_store.persist(ctx)
+
+            elapsed_ms = (_time.time() - start) * 1000
+
+            # Structured logging (C-6, #37)
+            logger.info(
+                "shadow_extraction",
+                extra={
+                    "event": "signal_extraction",
+                    "session_id": session_id,
+                    "extraction_time_ms": extraction.extraction_time_ms,
+                    "total_time_ms": elapsed_ms,
+                    "fields_extracted": updated,
+                    "signal_count": len(extraction.signals),
+                    "segment_id": ctx.buyer.segment_id,
+                    "segment_confidence": ctx.buyer.segment_confidence,
+                    "factor_coverage": ctx.buyer.profile.known_factor_count() / 4.0,
+                },
+            )
+        else:
+            elapsed_ms = (_time.time() - start) * 1000
+            logger.debug(
+                "shadow_extraction: no signals in message (%.0fms)", elapsed_ms
+            )
+
+    except Exception:
+        logger.warning("Shadow extraction failed", exc_info=True)
+
+
 @app.post("/api/faketor/chat")
 def faketor_chat(req: FaketorChatRequest):
     """Chat with Faketor, the AI real estate advisor."""
     if not _state:
         raise HTTPException(status_code=503, detail="Server not initialized")
+
+    # Shadow mode: run extraction + classification (non-blocking on failure)
+    import asyncio
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(_run_shadow_extraction(req.message, req.session_id))
+        else:
+            asyncio.run(_run_shadow_extraction(req.message, req.session_id))
+    except Exception:
+        pass  # Shadow mode — never block the main chat
 
     # Resolve session working set
     working_set = None
@@ -3856,6 +3978,18 @@ def faketor_chat_stream(req: FaketorChatRequest):
     """SSE streaming version of Faketor chat."""
     if not _state:
         raise HTTPException(status_code=503, detail="Server not initialized")
+
+    # Shadow mode: run extraction + classification (non-blocking on failure)
+    import asyncio
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(_run_shadow_extraction(req.message, req.session_id))
+        else:
+            asyncio.run(_run_shadow_extraction(req.message, req.session_id))
+    except Exception:
+        pass  # Shadow mode — never block the main chat
 
     # Resolve session working set
     working_set = None
