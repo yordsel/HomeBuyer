@@ -3976,6 +3976,15 @@ async def faketor_chat(req: FaketorChatRequest):
         if req.session_id:
             working_set = _state.sessions.get_or_create(req.session_id)
 
+        # Create session-aware ToolExecutor for working-set scoping
+        from homebuyer.services.faketor.tools import registry as tool_reg
+        from homebuyer.services.faketor.tools.executor import ToolExecutor
+
+        session_executor = ToolExecutor(
+            _make_session_tool_executor(working_set),
+            tool_reg,
+        )
+
         result = await _state.turn_orchestrator.run(
             user_id=user_id,
             message=req.message,
@@ -3984,6 +3993,7 @@ async def faketor_chat(req: FaketorChatRequest):
             working_set_descriptor=(
                 working_set.get_descriptor() if working_set else ""
             ),
+            tool_executor=session_executor,
         )
         response = result.to_dict()
         if working_set is not None:
@@ -4042,6 +4052,15 @@ async def faketor_chat_stream(req: FaketorChatRequest):
         if req.session_id:
             working_set = _state.sessions.get_or_create(req.session_id)
 
+        # Create session-aware ToolExecutor for working-set scoping
+        from homebuyer.services.faketor.tools import registry as tool_reg
+        from homebuyer.services.faketor.tools.executor import ToolExecutor
+
+        session_executor = ToolExecutor(
+            _make_session_tool_executor(working_set),
+            tool_reg,
+        )
+
         async def orchestrated_event_generator():
             async for event in _state.turn_orchestrator.run_stream(
                 user_id=user_id,
@@ -4051,6 +4070,7 @@ async def faketor_chat_stream(req: FaketorChatRequest):
                 working_set_descriptor=(
                     working_set.get_descriptor() if working_set else ""
                 ),
+                tool_executor=session_executor,
             ):
                 event_type = event["event"]
                 data = safe_json_dumps(event["data"])

@@ -283,6 +283,7 @@ class BuyerState:
     profile: BuyerProfile = field(default_factory=BuyerProfile)
     segment_id: str | None = None
     segment_confidence: float = 0.0
+    segment_factor_coverage: float = 0.0
     segment_history: list[SegmentTransition] = field(default_factory=list)
 
     def record_transition(
@@ -291,10 +292,13 @@ class BuyerState:
         to_segment: str,
         confidence: float,
         trigger: Signal | None = None,
+        factor_coverage: float | None = None,
     ) -> None:
         """Record a segment transition in the history."""
         self.segment_id = to_segment
         self.segment_confidence = confidence
+        if factor_coverage is not None:
+            self.segment_factor_coverage = factor_coverage
         self.segment_history.append(
             SegmentTransition(
                 from_segment=from_segment,
@@ -314,6 +318,7 @@ class BuyerState:
             "profile": self.profile.to_dict(),
             "segment_id": self.segment_id,
             "segment_confidence": self.segment_confidence,
+            "segment_factor_coverage": self.segment_factor_coverage,
             "segment_history": [t.to_dict() for t in self.segment_history],
         }
 
@@ -323,6 +328,7 @@ class BuyerState:
             profile=BuyerProfile.from_dict(data.get("profile", {})),
             segment_id=data.get("segment_id"),
             segment_confidence=data.get("segment_confidence", 0.0),
+            segment_factor_coverage=data.get("segment_factor_coverage", 0.0),
             segment_history=[
                 SegmentTransition.from_dict(t)
                 for t in data.get("segment_history", [])

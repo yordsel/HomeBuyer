@@ -55,13 +55,13 @@ class PromptAssembler:
             ),
             property.render(context.property),
             preexecuted.render(accumulated_facts),
-            _render_iteration_budget(iteration_remaining),
+            render_iteration_budget(iteration_remaining),
         ]
 
         return "\n\n".join(c for c in components if c)
 
 
-def _render_iteration_budget(remaining: int | None) -> str:
+def render_iteration_budget(remaining: int | None) -> str:
     """Render the iteration budget warning if running low."""
     if remaining is None:
         return ""
@@ -76,4 +76,4 @@ def _render_iteration_budget(remaining: int | None) -> str:
     return ""
 
 
-__all__ = ["PromptAssembler"]
+__all__ = ["PromptAssembler", "render_iteration_budget"]

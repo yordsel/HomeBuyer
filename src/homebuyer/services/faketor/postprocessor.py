@@ -12,6 +12,7 @@ Phase E-7 (#51) of Epic #23.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -151,7 +152,6 @@ class PostProcessor:
         }
 
         # Get market snapshot timestamp for analysis records
-        import time
         market_snapshot_at = time.time()
 
         for call in tool_calls:
@@ -162,13 +162,21 @@ class PostProcessor:
             tool_input = call.get("input", {})
             address = tool_input.get("address", "")
 
+            # Build a meaningful result summary from tool input
+            input_parts = [f"{k}={v}" for k, v in tool_input.items() if k != "address"]
+            result_summary = (
+                f"{tool_name}({', '.join(input_parts)})"
+                if input_parts
+                else f"{tool_name} completed"
+            )
+
             # Record analysis for each discussed property
             for prop_id in discussed_properties:
                 context.property.record_analysis(
                     property_id=prop_id,
                     address=address or f"Property #{prop_id}",
                     tool_name=tool_name,
-                    result_summary="Completed during turn",
+                    result_summary=result_summary,
                     conclusion=None,
                     market_snapshot_at=market_snapshot_at,
                 )
@@ -189,6 +197,7 @@ class PostProcessor:
                 context.buyer.segment_id,
                 classification.segment_id,
                 classification.confidence,
+                factor_coverage=classification.factor_coverage,
             )
         except Exception as e:
             logger.warning("PostProcessor: re-classification failed: %s", e)

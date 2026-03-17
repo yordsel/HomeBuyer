@@ -26,7 +26,8 @@ from homebuyer.services.faketor.accumulator import AnalysisAccumulator
 from homebuyer.services.faketor.classification import SegmentClassifier
 from homebuyer.services.faketor.extraction import SignalExtractor
 from homebuyer.services.faketor.jobs import JobResolver, TurnPlan
-from homebuyer.services.faketor.prompts import PromptAssembler
+from homebuyer.services.faketor.postprocessor import PostProcessor
+from homebuyer.services.faketor.prompts import PromptAssembler, render_iteration_budget
 from homebuyer.services.faketor.state.context import ResearchContext, ResearchContextStore
 from homebuyer.services.faketor.tools.executor import ToolExecutor
 from homebuyer.services.faketor.tools.preexecution import PreExecutionResult, PreExecutor
@@ -124,6 +125,7 @@ class TurnOrchestrator:
         registry: ToolRegistry,
         job_resolver: JobResolver | None = None,
         prompt_assembler: PromptAssembler | None = None,
+        post_processor: PostProcessor | None = None,
         model: str = _CLAUDE_MODEL,
         max_iterations: int = _MAX_ITERATIONS,
     ) -> None:
@@ -136,6 +138,9 @@ class TurnOrchestrator:
         self._registry = registry
         self._resolver = job_resolver or JobResolver()
         self._assembler = prompt_assembler or PromptAssembler()
+        self._post_processor = post_processor or PostProcessor(
+            signal_extractor, segment_classifier
+        )
         self._model = model
         self._max_iterations = max_iterations
 
@@ -187,6 +192,7 @@ class TurnOrchestrator:
                 context.buyer.segment_id,
                 result.segment_id,
                 result.confidence,
+                factor_coverage=result.factor_coverage,
             )
         except Exception as e:
             logger.warning("Segment classification failed: %s", e)
@@ -210,7 +216,7 @@ class TurnOrchestrator:
                 segment_id=context.buyer.segment_id,
                 confidence=context.buyer.segment_confidence,
                 reasoning="from context",
-                factor_coverage=0.5,
+                factor_coverage=context.buyer.segment_factor_coverage,
             )
         plan = self._resolver.resolve(message, segment_result, context)
         metrics.job_resolution_ms = (time.monotonic() - start) * 1000
@@ -304,11 +310,13 @@ class TurnOrchestrator:
         messages: list[dict],
         accumulator: AnalysisAccumulator,
         metrics: TurnMetrics,
+        executor: ToolExecutor | None = None,
     ) -> TurnResult:
         """Run the Claude API loop with tool use (non-streaming)."""
         start = time.monotonic()
         result = TurnResult()
         tool_schemas = self._registry.get_tool_schemas()
+        effective_executor = executor or self._tool_executor
 
         for iteration in range(self._max_iterations):
             metrics.llm_iterations = iteration + 1
@@ -343,7 +351,7 @@ class TurnOrchestrator:
             # Execute tools
             tool_results_for_api = []
             for tool_block in tool_use_blocks:
-                tool_result = self._tool_executor.execute(
+                tool_result = effective_executor.execute(
                     tool_block.name, tool_block.input
                 )
                 metrics.tools_used.append(tool_block.name)
@@ -400,8 +408,7 @@ class TurnOrchestrator:
     ) -> str:
         """Update system prompt with accumulated facts and iteration budget."""
         remaining = self._max_iterations - iteration - 1
-        from homebuyer.services.faketor.prompts import _render_iteration_budget
-        budget_str = _render_iteration_budget(remaining)
+        budget_str = render_iteration_budget(remaining)
         if budget_str:
             return prompt + f"\n\n{facts_summary}\n\n{budget_str}"
         return prompt + f"\n\n{facts_summary}"
@@ -416,29 +423,21 @@ class TurnOrchestrator:
         context: ResearchContext,
         metrics: TurnMetrics,
     ) -> None:
-        """Extract signals from LLM output and promote state."""
+        """Delegate to PostProcessor for signal extraction and state promotion."""
         start = time.monotonic()
         try:
-            # Extract signals from the LLM's response text
-            if llm_result.reply:
-                output_extraction = self._extractor.extract_from_output(
-                    llm_result.reply
+            pp_result = self._post_processor.process(
+                reply_text=llm_result.reply,
+                tool_calls=llm_result.tool_calls,
+                discussed_properties=llm_result.discussed_properties,
+                context=context,
+            )
+            if pp_result.segment_changed:
+                logger.info(
+                    "Segment changed: %s → %s",
+                    pp_result.previous_segment,
+                    pp_result.new_segment,
                 )
-                if output_extraction:
-                    extractions = output_extraction.to_extractions()
-                    context.buyer.profile.apply_extraction(extractions)
-
-            # Re-classify after incorporating output signals
-            result = self._classifier.classify(
-                context.buyer.profile,
-                context.market,
-            )
-            context.buyer.record_transition(
-                context.buyer.segment_id,
-                result.segment_id,
-                result.confidence,
-            )
-
         except Exception as e:
             logger.warning("Post-processing failed: %s", e)
         metrics.postprocess_ms = (time.monotonic() - start) * 1000
@@ -454,6 +453,12 @@ class TurnOrchestrator:
     # Public API: run (non-streaming)
     # ------------------------------------------------------------------
 
+    def _effective_tool_executor(
+        self, tool_executor_override: ToolExecutor | None
+    ) -> ToolExecutor:
+        """Return the per-request tool executor or the default one."""
+        return tool_executor_override or self._tool_executor
+
     async def run(
         self,
         user_id: str,
@@ -461,10 +466,19 @@ class TurnOrchestrator:
         history: list[dict],
         property_context: dict[str, Any] | None = None,
         working_set_descriptor: str = "",
+        tool_executor: ToolExecutor | None = None,
     ) -> TurnResult:
-        """Execute the full 9-step pipeline for a non-streaming turn."""
+        """Execute the full 9-step pipeline for a non-streaming turn.
+
+        Args:
+            tool_executor: Optional per-request ToolExecutor override.
+                Use this to inject a session-aware executor that handles
+                working-set scoping. Falls back to the default executor
+                configured at init time.
+        """
         total_start = time.monotonic()
         metrics = TurnMetrics()
+        effective_executor = self._effective_tool_executor(tool_executor)
 
         # Step 1: Load context
         context = await self._load_context(user_id)
@@ -496,7 +510,9 @@ class TurnOrchestrator:
         # Step 7: LLM loop
         messages = list(history) + [{"role": "user", "content": message}]
         accumulator = AnalysisAccumulator()
-        result = self._run_llm_loop(system_prompt, messages, accumulator, metrics)
+        result = self._run_llm_loop(
+            system_prompt, messages, accumulator, metrics, effective_executor
+        )
 
         # Step 8: Post-process
         self._post_process(result, context, metrics)
@@ -529,8 +545,12 @@ class TurnOrchestrator:
         history: list[dict],
         property_context: dict[str, Any] | None = None,
         working_set_descriptor: str = "",
+        tool_executor: ToolExecutor | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Execute the 9-step pipeline with SSE streaming events.
+
+        Args:
+            tool_executor: Optional per-request ToolExecutor override.
 
         Yields events compatible with the existing SSE format:
         - {"event": "tool_start", "data": {"name": "..."}}
@@ -544,6 +564,7 @@ class TurnOrchestrator:
         """
         total_start = time.monotonic()
         metrics = TurnMetrics()
+        effective_executor = self._effective_tool_executor(tool_executor)
 
         # Steps 1-6: Same as non-streaming
         context = await self._load_context(user_id)
@@ -603,10 +624,15 @@ class TurnOrchestrator:
             tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
 
             if not tool_use_blocks:
+                # Final response — stream the text and collect it
+                for text in iteration_text:
+                    if text.strip():
+                        yield {"event": "text_delta", "data": {"text": text}}
                 all_text_parts.extend(iteration_text)
                 break
 
-            # Stream text from this iteration
+            # Mid-loop text (between tool calls) — stream but don't
+            # re-emit later; these are intermediate thoughts.
             for text in iteration_text:
                 if text.strip():
                     yield {"event": "text_delta", "data": {"text": text}}
@@ -626,7 +652,7 @@ class TurnOrchestrator:
                     },
                 }
 
-                tool_result = self._tool_executor.execute(
+                tool_result = effective_executor.execute(
                     tool_block.name, tool_block.input
                 )
                 metrics.tools_used.append(tool_block.name)
@@ -690,12 +716,8 @@ class TurnOrchestrator:
 
         metrics.llm_loop_ms = (time.monotonic() - llm_start) * 1000
 
-        # Final text
+        # Final text — already streamed as text_delta events above
         reply = "\n\n".join(all_text_parts) or _FALLBACK_REPLY
-
-        # Stream the final text
-        if reply != _FALLBACK_REPLY:
-            yield {"event": "text_delta", "data": {"text": reply}}
 
         # Step 8: Post-process
         llm_result = TurnResult(
