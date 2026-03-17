@@ -148,6 +148,22 @@ class TestBuyerProfileDecay:
         # capital_source is None — should not raise
         profile.apply_confidence_decay()
 
+    def test_decay_respects_minimum_floor(self):
+        """Code review fix for #28: repeated decay should not drop below floor."""
+        from homebuyer.services.faketor.state.buyer import _MIN_CONFIDENCE
+
+        profile = BuyerProfile()
+        fs = FieldSource(source="extracted", confidence=0.15, evidence="test", extracted_at=1.0)
+        profile.intent = "invest"
+        profile.intent_source = fs
+
+        # Apply decay 20 times — should converge to floor, not zero
+        for _ in range(20):
+            profile.apply_confidence_decay(factor=0.8)
+
+        assert profile.intent_source.confidence >= _MIN_CONFIDENCE
+        assert profile.intent_source.confidence == _MIN_CONFIDENCE
+
     def test_decay_applies_to_all_sources(self):
         profile = BuyerProfile()
         for attr in ("intent", "capital", "equity", "income"):

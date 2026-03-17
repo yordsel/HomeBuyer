@@ -266,3 +266,18 @@ class TestPropertyStateSerialization:
         assert restored.focus_property.property_id == 42
         assert 42 in restored.analyses
         assert restored.analyses[42].analyses["get_price_prediction"].conclusion == "fair price"
+
+    def test_from_dict_skips_non_integer_keys(self):
+        """Code review fix for #31: corrupt non-integer keys should be
+        skipped rather than crashing deserialization."""
+        data = {
+            "analyses": {
+                "42": {"property_id": 42, "address": "A", "analyses": {}},
+                "not-an-int": {"property_id": 0, "address": "B", "analyses": {}},
+                "": {"property_id": 0, "address": "C", "analyses": {}},
+            },
+        }
+        ps = PropertyState.from_dict(data)
+        # Valid key kept, invalid keys skipped
+        assert 42 in ps.analyses
+        assert len(ps.analyses) == 1

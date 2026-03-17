@@ -10,9 +10,14 @@ Fields are ``None`` until extracted — never defaulted to zero.
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from dataclasses import dataclass, field
 from typing import Any, Literal
+
+# Minimum confidence after decay — prevents long-term users from losing
+# all profile data through repeated stale reloads. See review fix for #28.
+_MIN_CONFIDENCE = 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -146,14 +151,18 @@ class BuyerProfile:
         """Decay all field confidences when loading a returning user's profile.
 
         Multiplies every non-None FieldSource's confidence by ``factor``
-        and marks it as stale.
+        (with a floor of ``_MIN_CONFIDENCE``) and marks it as stale.
+
+        Uses ``dataclasses.fields()`` to iterate — safe against future field
+        additions and avoids ``dir()`` overhead. (Code review fix for #28.)
         """
-        for attr_name in dir(self):
-            if attr_name.endswith("_source") and not attr_name.startswith("_"):
-                source: FieldSource | None = getattr(self, attr_name)
-                if source is not None:
-                    source.confidence *= factor
-                    source.stale = True
+        for f in dataclasses.fields(self):
+            if not f.name.endswith("_source"):
+                continue
+            source: FieldSource | None = getattr(self, f.name)
+            if source is not None:
+                source.confidence = max(source.confidence * factor, _MIN_CONFIDENCE)
+                source.stale = True
 
     def known_factor_count(self) -> int:
         """Count non-None core factors: intent, capital, equity, income."""

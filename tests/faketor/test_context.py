@@ -2,13 +2,17 @@
 
 Covers:
 - ResearchContext serialization roundtrips
-- TurnState.promote() — all five promotion paths
-- ResearchContextStore lifecycle (load_or_create, persist, eviction)
+- TurnState.promote() — all five promotion paths + edge cases
+- ResearchContextStore lifecycle (async load_or_create, persist, eviction)
+- Concurrency safety of ResearchContextStore (asyncio.Lock)
 """
 
+import asyncio
 import time
 
-from homebuyer.services.faketor.state.buyer import FieldSource
+import pytest
+
+from homebuyer.services.faketor.state.buyer import FieldSource, Signal
 from homebuyer.services.faketor.state.context import (
     ResearchContext,
     ResearchContextStore,
@@ -101,11 +105,30 @@ class TestTurnStatePromote:
         ctx.buyer.segment_confidence = 0.6
 
         turn = TurnState()
-        turn.segment_update = ("cash_buyer", 0.9)
+        turn.segment_update = ("cash_buyer", 0.9, None)
         promoted = turn.promote(ctx)
         assert any("Segment" in p for p in promoted)
         assert ctx.buyer.segment_id == "cash_buyer"
         assert ctx.buyer.segment_confidence == 0.9
+
+    def test_promote_segment_with_trigger(self):
+        """Code review fix for #29: trigger signal is plumbed through."""
+        ctx = ResearchContext()
+        ctx.buyer.segment_id = "first_time_buyer"
+        ctx.buyer.segment_confidence = 0.6
+
+        trigger = Signal(
+            evidence="I want to rent it out",
+            implication="invest_intent",
+            confidence=0.9,
+        )
+        turn = TurnState()
+        turn.segment_update = ("leveraged_investor", 0.85, trigger)
+        turn.promote(ctx)
+        assert ctx.buyer.segment_id == "leveraged_investor"
+        last_transition = ctx.buyer.segment_history[-1]
+        assert last_transition.trigger is not None
+        assert last_transition.trigger.evidence == "I want to rent it out"
 
     def test_promote_segment_no_change_same_id_lower_confidence(self):
         ctx = ResearchContext()
@@ -113,10 +136,39 @@ class TestTurnStatePromote:
         ctx.buyer.segment_confidence = 0.95
 
         turn = TurnState()
-        turn.segment_update = ("cash_buyer", 0.8)  # Same segment, lower confidence
+        turn.segment_update = ("cash_buyer", 0.8, None)  # Same segment, lower confidence
         promoted = turn.promote(ctx)
         # Should NOT promote since same segment and lower confidence
         assert not any("Segment" in p for p in promoted)
+        # Confidence should remain unchanged
+        assert ctx.buyer.segment_confidence == 0.95
+
+    def test_promote_segment_same_id_higher_confidence_no_history(self):
+        """Code review fix for #29: same segment + higher confidence updates
+        in-place without recording a self-transition in history."""
+        ctx = ResearchContext()
+        ctx.buyer.segment_id = "cash_buyer"
+        ctx.buyer.segment_confidence = 0.7
+
+        turn = TurnState()
+        turn.segment_update = ("cash_buyer", 0.95, None)
+        promoted = turn.promote(ctx)
+        # Confidence updated in-place, no transition recorded
+        assert ctx.buyer.segment_confidence == 0.95
+        assert len(ctx.buyer.segment_history) == 0
+        assert not any("Segment" in p for p in promoted)
+
+    def test_promote_segment_same_id_equal_confidence_no_change(self):
+        """Edge case: same segment, same confidence — nothing happens."""
+        ctx = ResearchContext()
+        ctx.buyer.segment_id = "cash_buyer"
+        ctx.buyer.segment_confidence = 0.9
+
+        turn = TurnState()
+        turn.segment_update = ("cash_buyer", 0.9, None)
+        promoted = turn.promote(ctx)
+        assert not any("Segment" in p for p in promoted)
+        assert len(ctx.buyer.segment_history) == 0
 
     def test_promote_analysis_records(self):
         ctx = ResearchContext()
@@ -176,57 +228,64 @@ class TestTurnStatePromote:
 
 
 # ---------------------------------------------------------------------------
-# ResearchContextStore — load_or_create
+# ResearchContextStore — load_or_create (async)
 # ---------------------------------------------------------------------------
 
 
 class TestResearchContextStore:
-    def test_create_for_authenticated_user(self):
+    @pytest.mark.asyncio
+    async def test_create_for_authenticated_user(self):
         store = ResearchContextStore()
-        ctx = store.load_or_create(user_id="u1", session_id="s1")
+        ctx = await store.load_or_create(user_id="u1", session_id="s1")
         assert ctx.user_id == "u1"
         assert ctx.session_id == "s1"
         assert ctx.created_at > 0
 
-    def test_reload_returns_same_context(self):
+    @pytest.mark.asyncio
+    async def test_reload_returns_same_context(self):
         store = ResearchContextStore()
-        ctx1 = store.load_or_create(user_id="u1")
+        ctx1 = await store.load_or_create(user_id="u1")
         ctx1.buyer.profile.intent = "invest"
-        ctx2 = store.load_or_create(user_id="u1")
+        ctx2 = await store.load_or_create(user_id="u1")
         assert ctx2.buyer.profile.intent == "invest"
 
-    def test_create_anonymous_session(self):
+    @pytest.mark.asyncio
+    async def test_create_anonymous_session(self):
         store = ResearchContextStore()
-        ctx = store.load_or_create(session_id="anon-123")
+        ctx = await store.load_or_create(session_id="anon-123")
         assert ctx.session_id == "anon-123"
         assert ctx.user_id is None
 
-    def test_reload_anonymous_session(self):
+    @pytest.mark.asyncio
+    async def test_reload_anonymous_session(self):
         store = ResearchContextStore()
-        ctx1 = store.load_or_create(session_id="anon-123")
+        ctx1 = await store.load_or_create(session_id="anon-123")
         ctx1.buyer.profile.capital = 100_000
-        ctx2 = store.load_or_create(session_id="anon-123")
+        ctx2 = await store.load_or_create(session_id="anon-123")
         assert ctx2.buyer.profile.capital == 100_000
 
-    def test_ephemeral_context_when_no_ids(self):
+    @pytest.mark.asyncio
+    async def test_ephemeral_context_when_no_ids(self):
         store = ResearchContextStore()
-        ctx = store.load_or_create()
+        ctx = await store.load_or_create()
         assert ctx.user_id is None
         assert ctx.session_id is None
         assert ctx.created_at > 0
 
-    def test_persist_authenticated_user(self):
+    @pytest.mark.asyncio
+    async def test_persist_authenticated_user(self):
         store = ResearchContextStore()
         ctx = ResearchContext(user_id="u1")
-        store.persist(ctx)
-        loaded = store.load_or_create(user_id="u1")
+        await store.persist(ctx)
+        loaded = await store.load_or_create(user_id="u1")
         assert loaded is ctx
 
-    def test_persist_anonymous_session(self):
+    @pytest.mark.asyncio
+    async def test_persist_anonymous_session(self):
         store = ResearchContextStore()
         ctx = ResearchContext(session_id="s1", last_active=time.time())
-        store.persist(ctx)
-        loaded = store.load_or_create(session_id="s1")
+        await store.persist(ctx)
+        loaded = await store.load_or_create(session_id="s1")
         assert loaded is ctx
 
 
@@ -236,9 +295,10 @@ class TestResearchContextStore:
 
 
 class TestResearchContextStoreDecay:
-    def test_confidence_decay_on_stale_load(self):
+    @pytest.mark.asyncio
+    async def test_confidence_decay_on_stale_load(self):
         store = ResearchContextStore()
-        ctx = store.load_or_create(user_id="u1")
+        ctx = await store.load_or_create(user_id="u1")
         ctx.buyer.profile.intent = "invest"
         ctx.buyer.profile.intent_source = FieldSource(
             source="explicit", confidence=1.0, evidence="test", extracted_at=1.0,
@@ -246,22 +306,43 @@ class TestResearchContextStoreDecay:
         # Make it stale (>4 hours ago)
         ctx.last_active = time.time() - 5 * 3600
 
-        reloaded = store.load_or_create(user_id="u1")
+        reloaded = await store.load_or_create(user_id="u1")
         assert reloaded.buyer.profile.intent_source.confidence < 1.0
         assert reloaded.buyer.profile.intent_source.stale is True
 
-    def test_no_decay_when_recent(self):
+    @pytest.mark.asyncio
+    async def test_no_decay_when_recent(self):
         store = ResearchContextStore()
-        ctx = store.load_or_create(user_id="u1")
+        ctx = await store.load_or_create(user_id="u1")
         ctx.buyer.profile.intent = "occupy"
         ctx.buyer.profile.intent_source = FieldSource(
             source="explicit", confidence=1.0, evidence="test", extracted_at=1.0,
         )
         ctx.last_active = time.time() - 1 * 3600  # 1 hour ago (within 4h)
 
-        reloaded = store.load_or_create(user_id="u1")
+        reloaded = await store.load_or_create(user_id="u1")
         assert reloaded.buyer.profile.intent_source.confidence == 1.0
         assert reloaded.buyer.profile.intent_source.stale is False
+
+    @pytest.mark.asyncio
+    async def test_confidence_decay_has_floor(self):
+        """Code review fix for #28: confidence should never drop below floor."""
+        from homebuyer.services.faketor.state.buyer import _MIN_CONFIDENCE
+
+        store = ResearchContextStore()
+        ctx = await store.load_or_create(user_id="u1")
+        ctx.buyer.profile.intent = "invest"
+        ctx.buyer.profile.intent_source = FieldSource(
+            source="extracted", confidence=0.15, evidence="test", extracted_at=1.0,
+        )
+
+        # Apply decay multiple times by simulating repeated stale loads
+        for _ in range(10):
+            ctx.last_active = time.time() - 5 * 3600
+            ctx = await store.load_or_create(user_id="u1")
+
+        # Should never go below floor
+        assert ctx.buyer.profile.intent_source.confidence >= _MIN_CONFIDENCE
 
 
 # ---------------------------------------------------------------------------
@@ -270,25 +351,63 @@ class TestResearchContextStoreDecay:
 
 
 class TestResearchContextStoreEviction:
-    def test_expired_sessions_evicted(self):
+    @pytest.mark.asyncio
+    async def test_expired_sessions_evicted(self):
         store = ResearchContextStore(ttl_seconds=1)  # 1 second TTL
-        ctx = store.load_or_create(session_id="old-session")
+        ctx = await store.load_or_create(session_id="old-session")
         ctx.last_active = time.time() - 10  # 10 seconds ago, past TTL
 
         # Loading a different session triggers eviction
-        store.load_or_create(session_id="new-session")
+        await store.load_or_create(session_id="new-session")
 
         # Old session should be gone — creates new context
-        reloaded = store.load_or_create(session_id="old-session")
+        reloaded = await store.load_or_create(session_id="old-session")
         assert reloaded.buyer.profile.intent is None  # Fresh context
 
-    def test_authenticated_users_not_evicted(self):
+    @pytest.mark.asyncio
+    async def test_authenticated_users_not_evicted(self):
         store = ResearchContextStore(ttl_seconds=1)
-        ctx = store.load_or_create(user_id="u1")
+        ctx = await store.load_or_create(user_id="u1")
         ctx.buyer.profile.intent = "invest"
         ctx.last_active = time.time() - 100  # Well past TTL
 
         # Eviction only affects anonymous sessions
-        store.load_or_create(session_id="trigger-eviction")
-        reloaded = store.load_or_create(user_id="u1")
+        await store.load_or_create(session_id="trigger-eviction")
+        reloaded = await store.load_or_create(user_id="u1")
         assert reloaded.buyer.profile.intent == "invest"
+
+
+# ---------------------------------------------------------------------------
+# ResearchContextStore — concurrency safety
+# ---------------------------------------------------------------------------
+
+
+class TestResearchContextStoreConcurrency:
+    @pytest.mark.asyncio
+    async def test_concurrent_load_or_create_same_user(self):
+        """Code review fix for #30: concurrent first-turn requests for the
+        same user should return the same context, not create duplicates."""
+        store = ResearchContextStore()
+
+        # Launch concurrent load_or_create for the same user
+        results = await asyncio.gather(
+            store.load_or_create(user_id="u1"),
+            store.load_or_create(user_id="u1"),
+            store.load_or_create(user_id="u1"),
+        )
+
+        # All should be the same object (not duplicates)
+        assert results[0] is results[1]
+        assert results[1] is results[2]
+
+    @pytest.mark.asyncio
+    async def test_concurrent_load_or_create_different_users(self):
+        """Different users should get different contexts."""
+        store = ResearchContextStore()
+        results = await asyncio.gather(
+            store.load_or_create(user_id="u1"),
+            store.load_or_create(user_id="u2"),
+        )
+        assert results[0] is not results[1]
+        assert results[0].user_id == "u1"
+        assert results[1].user_id == "u2"

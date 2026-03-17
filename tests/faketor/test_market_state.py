@@ -14,7 +14,7 @@ from homebuyer.services.faketor.state.market import (
     MarketDelta,
     MarketSnapshot,
     NeighborhoodMetrics,
-    _RATE_MATERIAL_BPS,
+    _RATE_MATERIAL_PP,
 )
 
 
@@ -151,10 +151,10 @@ class TestMarketSnapshotDelta:
 
     def test_material_rate_change(self):
         prior = self._make_snapshot(rate=6.5)
-        current = self._make_snapshot(rate=6.5 + _RATE_MATERIAL_BPS)  # Exactly at threshold
+        current = self._make_snapshot(rate=6.5 + _RATE_MATERIAL_PP)  # Exactly at threshold
         delta = current.compute_delta(prior)
         assert delta.rate_material is True
-        assert delta.rate_change >= _RATE_MATERIAL_BPS
+        assert delta.rate_change >= _RATE_MATERIAL_PP
 
     def test_sub_material_rate_change(self):
         prior = self._make_snapshot(rate=6.5)

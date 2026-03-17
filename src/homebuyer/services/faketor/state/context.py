@@ -8,13 +8,14 @@ ResearchContextStore manages the lifecycle.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from homebuyer.services.faketor.accumulator import AnalysisAccumulator
-from homebuyer.services.faketor.state.buyer import BuyerState
+from homebuyer.services.faketor.state.buyer import BuyerState, Signal
 from homebuyer.services.faketor.state.market import MarketDelta, MarketSnapshot
 from homebuyer.services.faketor.state.property import PropertyState
 
@@ -104,7 +105,9 @@ class TurnState:
 
     # Collected during the turn for promotion
     buyer_extractions: dict[str, tuple[Any, Any]] = field(default_factory=dict)
-    segment_update: tuple[str, float] | None = None  # (segment_id, confidence)
+    # (segment_id, confidence, optional trigger signal)
+    # Code review fix for #29: carry trigger so segment_history records evidence.
+    segment_update: tuple[str, float, Signal | None] | None = None
     analysis_records: list[dict[str, Any]] = field(default_factory=list)
     filter_update: dict[str, Any] | None = None
     focus_update: dict[str, Any] | None = None
@@ -123,16 +126,24 @@ class TurnState:
                 promoted.append(f"Updated buyer profile: {', '.join(updated)}")
 
         # 2. Segment changes → BuyerState
+        # Code review fix for #29: unpack trigger, suppress self-transitions.
         if self.segment_update:
-            seg_id, confidence = self.segment_update
+            seg_id, confidence, trigger = self.segment_update
             old_seg = context.buyer.segment_id
-            if seg_id != old_seg or confidence > context.buyer.segment_confidence:
+            # Only record a transition if the segment actually changed.
+            # Same-segment confidence upgrades update in-place without a
+            # history entry (they aren't real transitions).
+            if seg_id != old_seg:
                 context.buyer.record_transition(
                     from_segment=old_seg,
                     to_segment=seg_id,
                     confidence=confidence,
+                    trigger=trigger,
                 )
                 promoted.append(f"Segment: {old_seg} → {seg_id} ({confidence:.0%})")
+            elif confidence > context.buyer.segment_confidence:
+                # Same segment, higher confidence — update in-place, no history entry
+                context.buyer.segment_confidence = confidence
 
         # 3. Property analyses → PropertyState.analyses
         for rec in self.analysis_records:
@@ -194,8 +205,13 @@ class ResearchContextStore:
         # In-memory stores (Phase G will add DB persistence for authenticated users)
         self._by_user: dict[str, ResearchContext] = {}
         self._by_session: dict[str, ResearchContext] = {}
+        # Code review fix for #30: guard shared dicts in async context.
+        # FastAPI runs on an async event loop; concurrent requests for the
+        # same user_id can interleave between await points, causing duplicate
+        # context creation or lost state during promotion.
+        self._lock = asyncio.Lock()
 
-    def load_or_create(
+    async def load_or_create(
         self,
         user_id: str | None = None,
         session_id: str | None = None,
@@ -211,63 +227,65 @@ class ResearchContextStore:
         - Create empty context if not found
         - Evict expired sessions
         """
-        self._evict_expired()
+        async with self._lock:
+            self._evict_expired()
 
-        now = time.time()
+            now = time.time()
 
-        # Authenticated user path
-        if user_id:
-            ctx = self._by_user.get(user_id)
-            if ctx:
-                # Check if the buyer profile needs confidence decay
-                if ctx.last_active and (now - ctx.last_active) > (4 * 3600):
-                    ctx.buyer.profile.apply_confidence_decay()
-                    logger.info(
-                        "Applied confidence decay for returning user %s (%.1f hours since last active)",
-                        user_id,
-                        (now - ctx.last_active) / 3600,
-                    )
-                ctx.touch()
+            # Authenticated user path
+            if user_id:
+                ctx = self._by_user.get(user_id)
+                if ctx:
+                    # Check if the buyer profile needs confidence decay
+                    if ctx.last_active and (now - ctx.last_active) > (4 * 3600):
+                        ctx.buyer.profile.apply_confidence_decay()
+                        logger.info(
+                            "Applied confidence decay for user %s (%.1fh stale)",
+                            user_id,
+                            (now - ctx.last_active) / 3600,
+                        )
+                    ctx.touch()
+                    return ctx
+
+                # Create new context for authenticated user
+                ctx = ResearchContext(
+                    user_id=user_id,
+                    session_id=session_id,
+                    created_at=now,
+                    last_active=now,
+                )
+                self._by_user[user_id] = ctx
                 return ctx
 
-            # Create new context for authenticated user
-            ctx = ResearchContext(
-                user_id=user_id,
-                session_id=session_id,
-                created_at=now,
-                last_active=now,
-            )
-            self._by_user[user_id] = ctx
-            return ctx
+            # Anonymous user path
+            if session_id:
+                ctx = self._by_session.get(session_id)
+                if ctx:
+                    ctx.touch()
+                    return ctx
 
-        # Anonymous user path
-        if session_id:
-            ctx = self._by_session.get(session_id)
-            if ctx:
-                ctx.touch()
+                ctx = ResearchContext(
+                    session_id=session_id,
+                    created_at=now,
+                    last_active=now,
+                )
+                self._by_session[session_id] = ctx
                 return ctx
 
-            ctx = ResearchContext(
-                session_id=session_id,
-                created_at=now,
-                last_active=now,
-            )
-            self._by_session[session_id] = ctx
-            return ctx
+            # No user_id or session_id — create ephemeral context
+            return ResearchContext(created_at=now, last_active=now)
 
-        # No user_id or session_id — create ephemeral context
-        return ResearchContext(created_at=now, last_active=now)
-
-    def persist(self, context: ResearchContext) -> None:
+    async def persist(self, context: ResearchContext) -> None:
         """Persist research context.
 
         Phase A-G: in-memory only. Phase G will add DB persistence
         for authenticated users.
         """
-        if context.user_id:
-            self._by_user[context.user_id] = context
-        elif context.session_id:
-            self._by_session[context.session_id] = context
+        async with self._lock:
+            if context.user_id:
+                self._by_user[context.user_id] = context
+            elif context.session_id:
+                self._by_session[context.session_id] = context
 
     def _evict_expired(self) -> None:
         """Remove anonymous sessions that have exceeded TTL."""

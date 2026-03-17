@@ -15,7 +15,7 @@ from typing import Any
 _STALE_SECONDS = 4 * 3600
 
 # Materiality thresholds for delta flags
-_RATE_MATERIAL_BPS = 0.125  # 12.5 basis points
+_RATE_MATERIAL_PP = 0.125  # 0.125 percentage points (= 12.5 basis points)
 _PRICE_MATERIAL_PCT = 2.0  # 2% median price change
 _INVENTORY_MATERIAL_PCT = 10.0  # 10% inventory change
 
@@ -236,7 +236,7 @@ class MarketSnapshot:
             inventory_change_pct=round(inv_change_pct, 2),
             dom_change=dom_change,
             sale_to_list_change=round(stl_change, 4),
-            rate_material=abs(rate_change) >= _RATE_MATERIAL_BPS,
+            rate_material=abs(rate_change) >= _RATE_MATERIAL_PP,
             price_material=abs(price_change_pct) >= _PRICE_MATERIAL_PCT,
             inventory_material=abs(inv_change_pct) >= _INVENTORY_MATERIAL_PCT,
         )

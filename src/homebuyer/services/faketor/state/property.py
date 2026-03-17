@@ -7,11 +7,14 @@ detection against market snapshots).
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from homebuyer.services.faketor.state.market import MarketDelta
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +253,17 @@ class PropertyState:
         }
 
     @classmethod
+    def _parse_analyses(cls, raw: dict[str, Any]) -> dict[int, PropertyAnalysis]:
+        """Parse analyses dict with defensive int key conversion."""
+        result: dict[int, PropertyAnalysis] = {}
+        for k, v in raw.items():
+            try:
+                result[int(k)] = PropertyAnalysis.from_dict(v)
+            except (ValueError, TypeError):
+                logger.warning("Skipping analysis with non-integer key: %r", k)
+        return result
+
+    @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PropertyState:
         return cls(
             filter_intent=(
@@ -262,8 +276,7 @@ class PropertyState:
                 if data.get("focus_property")
                 else None
             ),
-            analyses={
-                int(k): PropertyAnalysis.from_dict(v)
-                for k, v in data.get("analyses", {}).items()
-            },
+            # Code review fix for #31: defensive int(k) with error handling
+            # to avoid crashing context deserialization on corrupt data.
+            analyses=cls._parse_analyses(data.get("analyses", {})),
         )
