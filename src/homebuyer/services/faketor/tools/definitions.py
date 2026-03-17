@@ -24,6 +24,7 @@ from homebuyer.services.faketor.facts import (
     compute_pmi_model_facts,
     compute_rate_penalty_facts,
     compute_competition_facts,
+    compute_dual_property_facts,
     compute_undo_filter_facts,
 )
 from homebuyer.services.faketor.tools.registry import ToolDefinition
@@ -1290,5 +1291,62 @@ _TOOL_DEFINITIONS: list[ToolDefinition] = [
         },
         "block_type": "competition_card",
         "fact_computer": compute_competition_facts,
+    },
+    {
+        "name": "dual_property_model",
+        "description": (
+            "Model combined cash flow for a primary residence + investment property. "
+            "Computes equity extraction cost (HELOC or cash-out refi) from the primary, "
+            "investment property cash flow with vacancy/management/maintenance, combined "
+            "monthly cash flow, cash-on-cash return, and stress tests (high vacancy, "
+            "rate increase, maintenance spike, combined worst-case). Use for "
+            "Equity-Leveraging Investor segments evaluating whether to tap home equity "
+            "for an investment property."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "primary_value": {
+                    "type": "number",
+                    "description": "Current market value of primary residence.",
+                },
+                "primary_mortgage_balance": {
+                    "type": "number",
+                    "description": "Remaining mortgage balance on primary.",
+                },
+                "primary_mortgage_rate": {
+                    "type": "number",
+                    "description": "Current mortgage rate on primary (percent).",
+                },
+                "extraction_method": {
+                    "type": "string",
+                    "enum": ["heloc", "cashout_refi"],
+                    "description": "How to extract equity. Default 'heloc'.",
+                },
+                "extraction_amount": {
+                    "type": "number",
+                    "description": "Amount to extract from primary equity.",
+                },
+                "investment_price": {
+                    "type": "number",
+                    "description": "Purchase price of investment property.",
+                },
+                "investment_down_payment_pct": {
+                    "type": "number",
+                    "description": "Down payment on investment (percent). Default 25.",
+                },
+                "investment_rate": {
+                    "type": "number",
+                    "description": "Mortgage rate for investment (percent).",
+                },
+                "investment_monthly_rent": {
+                    "type": "number",
+                    "description": "Expected monthly rent from investment property.",
+                },
+            },
+            "required": ["primary_value", "investment_price", "investment_monthly_rent"],
+        },
+        "block_type": "dual_property_card",
+        "fact_computer": compute_dual_property_facts,
     },
 ]

@@ -350,6 +350,27 @@ def compute_rent_vs_buy_facts(data: dict) -> dict:
     }
 
 
+def compute_dual_property_facts(data: dict) -> dict:
+    """Facts for ``dual_property_model`` results."""
+    extraction = data.get("extraction") or {}
+    investment = data.get("investment") or {}
+    return {
+        "available_equity": data.get("available_equity"),
+        "extraction_method": extraction.get("method"),
+        "extraction_amount": extraction.get("extraction_amount"),
+        "monthly_extraction_cost": extraction.get("monthly_increase"),
+        "investment_monthly_rent": investment.get("monthly_gross_rent"),
+        "investment_monthly_cf": investment.get("monthly_net_cash_flow"),
+        "cap_rate_pct": investment.get("cap_rate_pct"),
+        "combined_monthly_cash_flow": data.get("combined_monthly_cash_flow"),
+        "combined_annual_cash_flow": data.get("combined_annual_cash_flow"),
+        "cash_on_cash_pct": data.get("cash_on_cash_pct"),
+        "is_cash_flow_positive": data.get("is_cash_flow_positive"),
+        "worst_case_scenario": data.get("worst_case_scenario"),
+        "survives_worst_case": data.get("survives_worst_case"),
+    }
+
+
 def compute_competition_facts(data: dict) -> dict:
     """Facts for ``competition_assessment`` results."""
     dom = data.get("dom_distribution") or {}
@@ -426,6 +447,7 @@ _FACT_COMPUTERS: dict[str, callable] = {
     "pmi_model": compute_pmi_model_facts,
     "rate_penalty": compute_rate_penalty_facts,
     "competition_assessment": compute_competition_facts,
+    "dual_property_model": compute_dual_property_facts,
 }
 
 

@@ -4056,6 +4056,41 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         )
         return safe_json_dumps(compute_competition(comp_params))
 
+    elif tool_name == "dual_property_model":
+        from homebuyer.services.faketor.tools.gap.dual_property import (
+            DualPropertyParams,
+            compute_dual_property,
+        )
+
+        params = DualPropertyParams(
+            primary_value=int(tool_input["primary_value"]),
+            primary_mortgage_balance=int(
+                tool_input.get("primary_mortgage_balance", 0)
+            ),
+            primary_mortgage_rate=float(
+                tool_input.get("primary_mortgage_rate", 3.25)
+            ),
+            primary_mortgage_remaining_months=int(
+                tool_input.get("primary_mortgage_remaining_months", 300)
+            ),
+            extraction_method=tool_input.get("extraction_method", "heloc"),
+            extraction_amount=int(tool_input.get("extraction_amount", 0)),
+            heloc_rate=float(tool_input.get("heloc_rate", 8.5)),
+            cashout_refi_rate=(
+                float(tool_input["cashout_refi_rate"])
+                if tool_input.get("cashout_refi_rate") is not None
+                else None
+            ),
+            investment_price=int(tool_input["investment_price"]),
+            investment_down_payment_pct=float(
+                tool_input.get("investment_down_payment_pct", 25.0)
+            ),
+            investment_rate=float(tool_input.get("investment_rate", 7.5)),
+            investment_monthly_rent=int(tool_input["investment_monthly_rent"]),
+            investment_hoa=int(tool_input.get("investment_hoa", 0)),
+        )
+        return safe_json_dumps(compute_dual_property(params))
+
     else:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
