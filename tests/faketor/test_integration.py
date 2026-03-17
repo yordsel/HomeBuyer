@@ -519,8 +519,12 @@ class TestStreamingIntegration:
             stream_mock.__enter__ = MagicMock(return_value=stream_mock)
             stream_mock.__exit__ = MagicMock(return_value=False)
             if call_count[0] == 1:
+                # First iteration: tool use, no text to stream
+                stream_mock.text_stream = iter([])
                 stream_mock.get_final_message.return_value = response1
             else:
+                # Second iteration: final text response
+                stream_mock.text_stream = iter(["Final ", "analysis."])
                 stream_mock.get_final_message.return_value = response2
             return stream_mock
 
@@ -536,4 +540,10 @@ class TestStreamingIntegration:
         assert "tool_start" in event_types
         assert "tool_end" in event_types
         assert "tool_result" in event_types
+        assert "text_delta" in event_types
         assert "done" in event_types
+
+        # Verify text_delta chunks match what text_stream yielded
+        text_deltas = [e["data"]["text"] for e in events if e["event"] == "text_delta"]
+        assert "Final " in text_deltas
+        assert "analysis." in text_deltas

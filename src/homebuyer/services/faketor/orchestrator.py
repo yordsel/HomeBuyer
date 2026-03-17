@@ -605,38 +605,37 @@ class TurnOrchestrator:
                     messages=messages,
                     tools=tool_schemas,
                 ) as stream:
-                    response = stream.get_final_message()
+                    # Stream text deltas in real time as they arrive
+                    iteration_text: list[str] = []
+                    for text_chunk in stream.text_stream:
+                        yield {"event": "text_delta", "data": {"text": text_chunk}}
+                        iteration_text.append(text_chunk)
 
-                    # Stream text deltas
-                    # Note: In a real implementation, we'd iterate over
-                    # stream events for text_delta. For now we use the
-                    # final message approach (matches existing pattern).
+                    # Get the full response for tool block extraction
+                    response = stream.get_final_message()
 
             except Exception as e:
                 logger.error("Claude API stream error: %s", e)
                 yield {"event": "error", "data": {"message": f"AI service error: {e}"}}
                 return
 
-            # Extract text from final message
-            iteration_text = [b.text for b in response.content if b.type == "text"]
-
-            # Check for tool use
-            tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-
-            if not tool_use_blocks:
-                # Final response — stream the text and collect it
-                for text in iteration_text:
-                    if text.strip():
-                        yield {"event": "text_delta", "data": {"text": text}}
+            # Check if Claude is done (no tool use)
+            if response.stop_reason == "end_turn":
                 all_text_parts.extend(iteration_text)
                 break
 
-            # Mid-loop text (between tool calls) — stream but don't
-            # re-emit later; these are intermediate thoughts.
-            for text in iteration_text:
-                if text.strip():
-                    yield {"event": "text_delta", "data": {"text": text}}
-                    all_text_parts.append(text)
+            # Check for tool use blocks
+            tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
+            if not tool_use_blocks:
+                all_text_parts.extend(iteration_text)
+                break
+
+            # Mid-loop: add paragraph break between pre-tool text and
+            # post-tool text so they don't jam together in rendering
+            if iteration_text:
+                all_text_parts.extend(iteration_text)
+                all_text_parts.append("\n\n")
+                yield {"event": "text_delta", "data": {"text": "\n\n"}}
 
             # Append assistant response
             messages.append({"role": "assistant", "content": response.content})
