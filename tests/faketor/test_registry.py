@@ -224,6 +224,10 @@ class TestPopulatedRegistry:
             "rate_penalty",
             "competition_assessment",
             "dual_property_model",
+            "yield_ranking",
+            "appreciation_stress_test",
+            "neighborhood_lifestyle",
+            "adjacent_market_comparison",
         }
         assert registry.names == expected
 

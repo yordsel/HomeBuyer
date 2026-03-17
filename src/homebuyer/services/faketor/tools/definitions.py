@@ -25,6 +25,10 @@ from homebuyer.services.faketor.facts import (
     compute_rate_penalty_facts,
     compute_competition_facts,
     compute_dual_property_facts,
+    compute_yield_ranking_facts,
+    compute_appreciation_stress_facts,
+    compute_neighborhood_lifestyle_facts,
+    compute_adjacent_market_facts,
     compute_undo_filter_facts,
 )
 from homebuyer.services.faketor.tools.registry import ToolDefinition
@@ -1348,5 +1352,157 @@ _TOOL_DEFINITIONS: list[ToolDefinition] = [
         },
         "block_type": "dual_property_card",
         "fact_computer": compute_dual_property_facts,
+    },
+    {
+        "name": "yield_ranking",
+        "description": (
+            "Rank properties by investment yield metrics: leverage spread "
+            "(cap rate minus borrowing cost), DSCR, and cash-on-cash return. "
+            "Ranks the working set or a list of properties at a given down "
+            "payment and mortgage rate. Use for Leveraged Investor segments "
+            "comparing multiple investment options."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "properties": {
+                    "type": "array",
+                    "description": "List of properties with price and monthly_rent.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "address": {"type": "string"},
+                            "price": {"type": "number"},
+                            "monthly_rent": {"type": "number"},
+                            "hoa_monthly": {"type": "number"},
+                        },
+                        "required": ["price", "monthly_rent"],
+                    },
+                },
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": "Down payment as percent. Default 25.",
+                },
+                "mortgage_rate": {
+                    "type": "number",
+                    "description": "Investor mortgage rate as percent. Default 7.5.",
+                },
+            },
+            "required": ["properties"],
+        },
+        "block_type": "yield_ranking_card",
+        "fact_computer": compute_yield_ranking_facts,
+    },
+    {
+        "name": "appreciation_stress_test",
+        "description": (
+            "Stress test a property's appreciation under multiple scenarios "
+            "(bull, base, flat, bear, crash). Models breakeven between negative "
+            "carry and appreciation, exit analysis at configurable horizons, "
+            "and optional refinance scenario. Use for Appreciation Bettor "
+            "segments evaluating risk-reward tradeoffs."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "purchase_price": {
+                    "type": "number",
+                    "description": "Purchase price in dollars.",
+                },
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": "Down payment as percent. Default 20.",
+                },
+                "mortgage_rate": {
+                    "type": "number",
+                    "description": "Mortgage rate as percent. Default 7.0.",
+                },
+                "monthly_rental_income": {
+                    "type": "number",
+                    "description": "Monthly rental income if held as rental. Default 0.",
+                },
+                "exit_years": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Exit horizons to analyze. Default [3, 5, 7, 10].",
+                },
+                "refi_rate": {
+                    "type": "number",
+                    "description": "Potential refinance rate for refi scenario.",
+                },
+            },
+            "required": ["purchase_price"],
+        },
+        "block_type": "appreciation_stress_card",
+        "fact_computer": compute_appreciation_stress_facts,
+    },
+    {
+        "name": "neighborhood_lifestyle",
+        "description": (
+            "Compare Berkeley neighborhoods across lifestyle factors: "
+            "walkability, transit access, schools, dining, parks, safety. "
+            "Produces weighted composite scores and identifies best matches "
+            "based on buyer priorities. Use for Occupy segments choosing "
+            "between neighborhoods."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "neighborhoods": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Neighborhoods to compare. Empty = all available."
+                    ),
+                },
+                "priority_walkability": {"type": "number", "description": "Weight 0-5. Default 1."},
+                "priority_transit": {"type": "number", "description": "Weight 0-5. Default 1."},
+                "priority_schools": {"type": "number", "description": "Weight 0-5. Default 1."},
+                "priority_dining": {"type": "number", "description": "Weight 0-5. Default 1."},
+                "priority_parks": {"type": "number", "description": "Weight 0-5. Default 1."},
+                "priority_safety": {"type": "number", "description": "Weight 0-5. Default 1."},
+            },
+            "required": [],
+        },
+        "block_type": "neighborhood_lifestyle_card",
+        "fact_computer": compute_neighborhood_lifestyle_facts,
+    },
+    {
+        "name": "adjacent_market_comparison",
+        "description": (
+            "Compare what the buyer's budget buys in Berkeley vs. adjacent "
+            "markets (Oakland neighborhoods, Albany, El Cerrito, Richmond, "
+            "Kensington). Shows affordability, typical home size, school "
+            "ratings, commute times, and BART access for each market. "
+            "Use when buyers want to understand their options beyond Berkeley."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "budget": {
+                    "type": "number",
+                    "description": "Buyer's total budget in dollars.",
+                },
+                "min_beds": {
+                    "type": "integer",
+                    "description": "Minimum bedrooms. Default 3.",
+                },
+                "min_baths": {
+                    "type": "number",
+                    "description": "Minimum bathrooms. Default 1.5.",
+                },
+                "must_have_bart": {
+                    "type": "boolean",
+                    "description": "Require BART access. Default false.",
+                },
+                "max_commute_minutes": {
+                    "type": "integer",
+                    "description": "Max commute to SF in minutes. Default 60.",
+                },
+            },
+            "required": ["budget"],
+        },
+        "block_type": "adjacent_market_card",
+        "fact_computer": compute_adjacent_market_facts,
     },
 ]

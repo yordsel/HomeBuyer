@@ -4091,6 +4091,85 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         )
         return safe_json_dumps(compute_dual_property(params))
 
+    elif tool_name == "yield_ranking":
+        from homebuyer.services.faketor.tools.gap.yield_ranking import (
+            PropertyForRanking,
+            YieldRankingParams,
+            compute_yield_ranking,
+        )
+
+        props = [
+            PropertyForRanking(
+                address=p.get("address", ""),
+                price=int(p["price"]),
+                monthly_rent=int(p["monthly_rent"]),
+                hoa_monthly=int(p.get("hoa_monthly", 0)),
+                property_id=p.get("property_id"),
+            )
+            for p in (tool_input.get("properties") or [])
+        ]
+        params = YieldRankingParams(
+            properties=props,
+            down_payment_pct=float(tool_input.get("down_payment_pct", 25.0)),
+            mortgage_rate=float(tool_input.get("mortgage_rate", 7.5)),
+        )
+        return safe_json_dumps(compute_yield_ranking(params))
+
+    elif tool_name == "appreciation_stress_test":
+        from homebuyer.services.faketor.tools.gap.appreciation_stress import (
+            AppreciationStressParams,
+            compute_appreciation_stress,
+        )
+
+        params = AppreciationStressParams(
+            purchase_price=int(tool_input["purchase_price"]),
+            down_payment_pct=float(tool_input.get("down_payment_pct", 20.0)),
+            mortgage_rate=float(tool_input.get("mortgage_rate", 7.0)),
+            monthly_rental_income=int(
+                tool_input.get("monthly_rental_income", 0)
+            ),
+            exit_years=tool_input.get("exit_years", [3, 5, 7, 10]),
+            refi_rate=(
+                float(tool_input["refi_rate"])
+                if tool_input.get("refi_rate") is not None else None
+            ),
+        )
+        return safe_json_dumps(compute_appreciation_stress(params))
+
+    elif tool_name == "neighborhood_lifestyle":
+        from homebuyer.services.faketor.tools.gap.neighborhood_lifestyle import (
+            NeighborhoodLifestyleParams,
+            compute_neighborhood_lifestyle,
+        )
+
+        params = NeighborhoodLifestyleParams(
+            neighborhoods=tool_input.get("neighborhoods", []),
+            priority_walkability=float(tool_input.get("priority_walkability", 1.0)),
+            priority_transit=float(tool_input.get("priority_transit", 1.0)),
+            priority_schools=float(tool_input.get("priority_schools", 1.0)),
+            priority_dining=float(tool_input.get("priority_dining", 1.0)),
+            priority_parks=float(tool_input.get("priority_parks", 1.0)),
+            priority_safety=float(tool_input.get("priority_safety", 1.0)),
+        )
+        return safe_json_dumps(compute_neighborhood_lifestyle(params))
+
+    elif tool_name == "adjacent_market_comparison":
+        from homebuyer.services.faketor.tools.gap.adjacent_market import (
+            AdjacentMarketParams,
+            compute_adjacent_market,
+        )
+
+        params = AdjacentMarketParams(
+            budget=int(tool_input["budget"]),
+            min_beds=int(tool_input.get("min_beds", 3)),
+            min_baths=float(tool_input.get("min_baths", 1.5)),
+            min_sqft=int(tool_input.get("min_sqft", 0)),
+            must_have_bart=bool(tool_input.get("must_have_bart", False)),
+            max_commute_minutes=int(tool_input.get("max_commute_minutes", 60)),
+            markets=tool_input.get("markets", []),
+        )
+        return safe_json_dumps(compute_adjacent_market(params))
+
     else:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 

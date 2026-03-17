@@ -424,6 +424,53 @@ def compute_pmi_model_facts(data: dict) -> dict:
     }
 
 
+def compute_yield_ranking_facts(data: dict) -> dict:
+    """Facts for ``yield_ranking`` results."""
+    best_spread = data.get("best_leverage_spread") or {}
+    best_coc = data.get("best_cash_on_cash") or {}
+    return {
+        "property_count": data.get("property_count"),
+        "positive_cash_flow_count": data.get("positive_cash_flow_count"),
+        "negative_spread_count": data.get("negative_spread_count"),
+        "best_spread_address": best_spread.get("address"),
+        "best_spread_pct": best_spread.get("leverage_spread_pct"),
+        "best_coc_address": best_coc.get("address"),
+        "best_coc_pct": best_coc.get("cash_on_cash_pct"),
+    }
+
+
+def compute_appreciation_stress_facts(data: dict) -> dict:
+    """Facts for ``appreciation_stress_test`` results."""
+    return {
+        "scenario_count": data.get("scenario_count"),
+        "all_scenarios_profitable": data.get("all_scenarios_profitable"),
+        "any_scenario_profitable": data.get("any_scenario_profitable"),
+        "monthly_carry_cost": data.get("monthly_carry_cost"),
+        "purchase_price": data.get("purchase_price"),
+    }
+
+
+def compute_neighborhood_lifestyle_facts(data: dict) -> dict:
+    """Facts for ``neighborhood_lifestyle`` results."""
+    return {
+        "neighborhoods_compared": data.get("neighborhoods_compared"),
+        "best_overall": data.get("best_overall"),
+        "best_per_factor": data.get("best_per_factor"),
+    }
+
+
+def compute_adjacent_market_facts(data: dict) -> dict:
+    """Facts for ``adjacent_market_comparison`` results."""
+    return {
+        "budget": data.get("budget"),
+        "markets_compared": data.get("markets_compared"),
+        "affordable_count": data.get("affordable_count"),
+        "affordable_markets": data.get("affordable_markets"),
+        "best_value": data.get("best_value"),
+        "meets_requirements_count": data.get("meets_requirements_count"),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -448,6 +495,10 @@ _FACT_COMPUTERS: dict[str, callable] = {
     "rate_penalty": compute_rate_penalty_facts,
     "competition_assessment": compute_competition_facts,
     "dual_property_model": compute_dual_property_facts,
+    "yield_ranking": compute_yield_ranking_facts,
+    "appreciation_stress_test": compute_appreciation_stress_facts,
+    "neighborhood_lifestyle": compute_neighborhood_lifestyle_facts,
+    "adjacent_market_comparison": compute_adjacent_market_facts,
 }
 
 
