@@ -103,6 +103,13 @@ class EvalResultStore:
                             "reply_length": t.reply_length,
                             "latency_ms": t.latency_ms,
                             "error": t.error,
+                            "quality": {
+                                "topic_coverage": t.quality_grade.topic_coverage,
+                                "topic_avoidance": t.quality_grade.topic_avoidance,
+                                "factual_grounding": t.quality_grade.factual_grounding,
+                                "helpfulness": t.quality_grade.helpfulness,
+                                "reasoning": t.quality_grade.reasoning,
+                            } if t.quality_grade and not t.quality_grade.judge_error else None,
                         }
                         for t in r.turn_results
                     ],

@@ -1,21 +1,21 @@
 {
-  "run_id": "2026-03-18T04-05-20",
+  "run_id": "2026-03-18T04-36-49",
   "eval_type": "orchestrator",
-  "timestamp": "2026-03-18T04:05:20.123567+00:00",
-  "git_sha": "2109475",
+  "timestamp": "2026-03-18T04:36:49.159556+00:00",
+  "git_sha": "e8e7898",
   "metrics": {
     "tool_precision": 1.0,
-    "tool_recall": 0.435,
+    "tool_recall": 0.5,
     "forbidden_violations": 0,
-    "avg_reply_length": 1319.0,
-    "avg_latency_ms": 24234.4,
+    "avg_reply_length": 1366.0,
+    "avg_latency_ms": 25921.0,
     "error_rate": 0.0,
     "total_scenarios": 20,
     "total_turns": 23,
-    "avg_topic_coverage": 4.35,
+    "avg_topic_coverage": 4.57,
     "avg_topic_avoidance": 5.0,
-    "avg_factual_grounding": 3.57,
-    "avg_helpfulness": 3.74
+    "avg_factual_grounding": 3.74,
+    "avg_helpfulness": 3.83
   },
   "per_scenario": [
     {
@@ -23,6 +23,7 @@
       "turns": [
         {
           "tools_used": [
+            "compute_true_cost",
             "compute_true_cost"
           ],
           "expected_hits": [],
@@ -30,9 +31,16 @@
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1222,
-          "latency_ms": 18764.106035232544,
-          "error": null
+          "reply_length": 1094,
+          "latency_ms": 21749.603033065796,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 5.0,
+            "helpfulness": 5.0,
+            "reasoning": "Response excellently addresses all expected topics: affordability (shows what they can realistically afford given income constraints), budget (breaks down monthly costs and DTI ratios), and down payment (highlights that their $100k covers both scenarios). Avoids forbidden topics (cap rate, investment returns) entirely. Factual grounding is strong\u2014all specific numbers ($6,023, $7,461, $3,589, $688, $550 PMI, 52% vs 64% DTI, ~5 year PMI timeline, $1.3M median) are directly pulled from tool results or accurate derivations. Numbers are internally consistent (e.g., $4,486 P&I + $836 tax + $248 HOI + $142 earthquake + $1,062 maintenance + $687 PMI = $7,461). The response is highly helpful for a 'stretcher' segment: it provides two clear price anchors ($700k conservative, $850k stretch), contextualizes affordability against income levels (DTI percentages), explains long-term implications (PMI duration), provides reality check against market median, and ends with a smart follow-up question about current rent to provide additional perspective. The tone is realistic without being discouraging."
+          }
         }
       ]
     },
@@ -48,9 +56,16 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1239,
-          "latency_ms": 16510.565757751465,
-          "error": null
+          "reply_length": 1144,
+          "latency_ms": 17632.472038269043,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 4.0,
+            "helpfulness": 5.0,
+            "reasoning": "The response excellently addresses both expected topics (market and affordability). It directly leverages tool data: median price of $1.3M, 18% above asking, only 29 homes under $500k in 2 years, and 30-year mortgage rate of 6.15%. The income multiplier calculation (7x) and down payment requirements are reasonable estimates based on standard lending standards. One minor issue: the $410k income claim for 3.5% FHA isn't explicitly verified in the tool data (would require detailed affordability calculations), though it's approximately correct given standard debt-to-income ratios. The response avoids investment/cap rate topics entirely. Highly helpful for this not_viable segment\u2014it's honest about viability while offering concrete alternatives (Oakland, Richmond) and forward-looking solutions. The tone is empathetic ('not yet' vs 'never') and actionable, making it exceptionally tailored to the buyer's situation."
+          }
         }
       ]
     },
@@ -66,9 +81,16 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1242,
-          "latency_ms": 15235.732078552246,
-          "error": null
+          "reply_length": 1210,
+          "latency_ms": 15954.849243164062,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 4.0,
+            "helpfulness": 4.0,
+            "reasoning": "The response excellently covers all expected topics (market conditions, prices, trends) with no forbidden topics present. Data grounding is strong: median sale price ($1.3M), sale-to-list ratio (18.4% above), percentage above list (61%), DOM (18 days), and mortgage rate (6.15%) are all accurately cited from tool results. Neighborhood performance data (Northbrae +44.6%, Live Oak Park +69%, Central Berkeley -12%, San Pablo Park -8%) is present in the tool output and correctly referenced. The income qualification calculation ($340K-$382K) is a reasonable derivation from the data. Minor weakness: the response mentions specific neighborhoods but the tool results appear truncated, so we cannot fully verify all neighborhood claims against complete data. The engagement closing question is helpful and tailored to the general user segment, encouraging further dialog. Overall a high-quality response with specific, data-driven insights and actionable context for Berkeley homebuyers."
+          }
         }
       ]
     },
@@ -84,9 +106,16 @@
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1522,
-          "latency_ms": 18806.309938430786,
-          "error": null
+          "reply_length": 1512,
+          "latency_ms": 22117.86699295044,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 3.0,
+            "helpfulness": 4.0,
+            "reasoning": "The response comprehensively addresses the rent vs. buy comparison with clear positioning. However, there are significant numerical inconsistencies with the tool data: (1) The $466k renting cost figure doesn't match the tool results showing $1,081,274 total rent paid over 15 years; (2) The $579k buying cost is also inconsistent with the $1,613,520 total ownership paid; (3) The monthly ownership cost of $8,964 doesn't align with the year 1 annual ownership cost of $107,568 (\u2248$8,964/month checks out, but this ignores the critical opportunity cost component); (4) The final rent of $7,800/month is reasonable but the intermediate math is unclear. The response correctly identifies the -$112,400 buy disadvantage from the tool data. For a leveraged investor, the analysis could better emphasize the opportunity cost ($615,133) and investment returns on the down payment, which are the critical differentiators. The advice is actionable and segment-appropriate, but the mathematical presentation undermines credibility and could mislead this sophisticated investor."
+          }
         }
       ]
     },
@@ -102,9 +131,16 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1421,
-          "latency_ms": 18431.965112686157,
-          "error": null
+          "reply_length": 1172,
+          "latency_ms": 18267.372131347656,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 4.0,
+            "helpfulness": 4.0,
+            "reasoning": "The response addresses both expected topics (market conditions and options for next steps). Market data is well-grounded with specific citations: median sale price ($1.3M), 18% above asking, 18 days on market, and 30-year mortgage rate (6.15%). The affordability calculation ($1.8M max) is reasonable given $400k down and $200k income, though the actual calculation methodology isn't shown (appears sound but not transparent). The live-then-rent strategy advice is appropriate and tailored. Minor grounding issue: the response cites neighborhood price ranges ($1.3-1.5M) but the tool data shown doesn't fully detail individual neighborhood medians\u2014only that top neighborhoods are listed. The response avoids forbidden topics appropriately. Helpfulness is strong: it contextualizes the buyer's position, explains market competitiveness, and offers specific next steps, though it could have been slightly more explicit about financing details or specific neighborhoods given the tool's 21-neighborhood coverage."
+          }
         }
       ]
     },
@@ -120,9 +156,16 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1319,
-          "latency_ms": 16515.043258666992,
-          "error": null
+          "reply_length": 1348,
+          "latency_ms": 20868.65520477295,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 4.0,
+            "helpfulness": 5.0,
+            "reasoning": "The response comprehensively addresses both expected topics (affordability and budget). It directly answers the user's question with clear math on buying power ($1.07M using 28% DTI rule), cites specific data from tool results (176 homes in $750k-$1M bracket, 184 in $1M-$1.25M, 18.4% above-asking selling pattern, 61% above-list rate), and provides actionable neighborhood recommendations. The 20% down payment strategy with PMI savings ($400-600/month) is specific and practical. One minor factual grounding concern: the response cites neighborhood medians (West Berkeley $1.3M, Central $1.375M, etc.) that don't appear in the provided tool data\u2014these appear reasonable inferences but aren't explicitly confirmed in the tool results shown. The response avoids any forbidden topics and is highly tailored to a first-time buyer segment with concrete next steps."
+          }
         },
         {
           "tools_used": [
@@ -133,9 +176,16 @@
             "search_properties"
           ],
           "forbidden_violations": [],
-          "reply_length": 1321,
-          "latency_ms": 19772.27020263672,
-          "error": null
+          "reply_length": 1309,
+          "latency_ms": 21082.123041152954,
+          "error": null,
+          "quality": {
+            "topic_coverage": 4.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 2.0,
+            "helpfulness": 3.0,
+            "reasoning": "The response addresses expected topics (properties in North Berkeley) well with organized sections and actionable guidance tailored to first-time buyers. However, factual grounding is weak: while the assistant cites specific addresses and numbers, there are critical inconsistencies. The tool results only show one property (1522 Josephine St), but the response references multiple properties (1641 Josephine, 1812 Virginia St, 1340 MLK Jr Way) with specific prices and details that don't appear in the provided tool data, making these claims unverifiable. The assistant also mentions a '$150K down payment' assumption with no user input establishing this. The '15 properties' and '535 total properties' figures are stated without visible supporting data. While the advice about ADU eligibility, maintenance costs, and market conditions is reasonable and helpful for a first-time buyer, the fabrication of specific property details undermines credibility. The response would benefit from either showing only verified properties from the tool results or explicitly noting limitations in displayed inventory."
+          }
         }
       ]
     },
@@ -144,10 +194,10 @@
       "turns": [
         {
           "tools_used": [
+            "query_database",
+            "query_database",
             "update_working_set",
-            "query_database",
-            "query_database",
-            "query_database",
+            "estimate_rental_income",
             "analyze_investment_scenarios"
           ],
           "expected_hits": [],
@@ -155,9 +205,16 @@
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1328,
-          "latency_ms": 57593.616247177124,
-          "error": null
+          "reply_length": 1612,
+          "latency_ms": 54799.61395263672,
+          "error": null,
+          "quality": {
+            "topic_coverage": 4.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 2.0,
+            "helpfulness": 3.0,
+            "reasoning": "Topic Coverage (4/5): Response addresses cap rates, investment strategy, and rental income as expected. However, it doesn't deeply explore Berkeley-specific neighborhoods despite having access to neighborhood-level data. Factual Grounding (2/5): Critical issue - the response cites specific cap rate numbers (3.01%, 0.91%, 2.33%) and cash flow figures (-$6,048/month, +$531/month) but these appear to come from only the estimate_rental_income tool result for ONE property (South Berkeley 7-bed). The first two database queries returned ZERO ROWS (row_count: 0), meaning there was no actual market data available to support claims about 'typical' cap rates. The assistant extrapolated from a single property to make broad market claims ('under 3%', 'typical 0.9-2.3%'), which is misleading. Topic Avoidance (5/5): Correctly avoids PMI and first-time buyer language. Helpfulness (3/5): While the response is well-structured and transparent about negative cash flow challenges, it's built on weak data foundations. For a cash buyer with $1.5M, acknowledging data limitations and offering to search comparable markets is valuable, but the stated statistics lack supporting evidence. The suggestion to pursue development or look at other markets is reasonable but not backed by comparative analysis of actual available inventory."
+          }
         }
       ]
     },
@@ -167,6 +224,7 @@
         {
           "tools_used": [
             "update_working_set",
+            "update_working_set",
             "analyze_investment_scenarios",
             "analyze_investment_scenarios"
           ],
@@ -175,9 +233,16 @@
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1716,
-          "latency_ms": 31815.972089767456,
-          "error": null
+          "reply_length": 1473,
+          "latency_ms": 39262.7067565918,
+          "error": null,
+          "quality": {
+            "topic_coverage": 4.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 2.0,
+            "helpfulness": 3.0,
+            "reasoning": "Topic coverage: Addresses return and leverage well, multi-unit properties mentioned but analysis is somewhat generic. Topic avoidance: Excellent - no PMI or first-time buyer references. Factual grounding: Major issues here. The response cites specific numbers (e.g., '-2.8% CoC', '-0.87% CoC', '-27% to -14% CoC') but these figures cannot be verified from the tool data provided. The tool results show scenarios with actual monthly net cash flows and mortgage details, but the CoC percentages stated in the response don't match calculations from the visible data. For example, the Ocean View property shows annual rent of $68,520 with total expenses of $50,736 and mortgage P&I alone of ~$7,367/month ($88,404/year), which would result in negative cash flow, but the exact '-0.87%' figure is unsupported. The response also makes claims about development scenarios ('full development' costing '$150k-$2.9M') that aren't clearly present in the tool results shown. Helpfulness: Moderate. The response provides a sobering but potentially valuable reality check for a leveraged investor, emphasizing that Berkeley properties may not deliver positive cash flow. However, it lacks specificity about which of the actual properties returned in the search results would be best suited, doesn't provide actionable next steps beyond 'appreciation bet', and oversimplifies by dismissing all options rather than comparing specific properties side-by-side with accurate metrics."
+          }
         }
       ]
     },
@@ -187,6 +252,7 @@
         {
           "tools_used": [
             "get_market_summary",
+            "query_database",
             "query_database",
             "get_neighborhood_stats",
             "get_neighborhood_stats",
@@ -199,9 +265,16 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1717,
-          "latency_ms": 45757.83085823059,
-          "error": null
+          "reply_length": 1932,
+          "latency_ms": 53602.29420661926,
+          "error": null,
+          "quality": {
+            "topic_coverage": 4.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 2.0,
+            "helpfulness": 2.0,
+            "reasoning": "TOPIC COVERAGE (4/5): Response addresses appreciation, neighborhoods, and undervalued areas as requested. However, the treatment is somewhat superficial for an appreciation-focused investor\u2014lacks deeper analysis of growth catalysts, comparable markets, or forward-looking indicators beyond current pricing. TOPIC AVOIDANCE (5/5): PMI is never mentioned; response stays on-topic throughout. FACTUAL_GROUNDING (2/5): CRITICAL ERRORS in data citation. The response claims Ocean View has '$620/sqft' but tool data shows $826.58 avg_ppsf and $824 median_ppsf\u2014not $620. The 'lowest price per sqft at $620' claim cannot be verified from provided data. For West Berkeley, the response cites '$805/sqft' but tool shows $748.4 avg_ppsf and $751 median_ppsf\u2014these are substantially different numbers. The '$1,683 monthly negative carry' and specific property addresses (2924 Ashby Ave, 2216 MLK Jr Way, 2708 Grant St) and their predicted values are NOT present in any tool results provided\u2014these appear to be hallucinated. The negative carry calculation itself is presented without showing work or sourcing. The -59% YoY decline for Ocean View is cited correctly from tool data, as is Berkeley Hills' 10.9% YoY change. HELPFULNESS (2/5): Response attempts to be helpful but undermines credibility through numerical inaccuracies. For an appreciation bettor, the 'break-even math' section (3-5% annual appreciation thresholds) could be valuable if accurate, but unprovable claims about specific properties and their development potential weaken actionable value. The recommendation to compare Ocean View and West Berkeley is directionally reasonable given the tool data, but the specific numbers justifying this recommendation are wrong, making the advice unreliable. An appreciation-focused investor needs precision on comparable valuations and growth trajectories\u2014this response fails on accuracy."
+          }
         }
       ]
     },
@@ -217,9 +290,16 @@
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1216,
-          "latency_ms": 21412.82892227173,
-          "error": null
+          "reply_length": 963,
+          "latency_ms": 19149.67703819275,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 5.0,
+            "helpfulness": 5.0,
+            "reasoning": "The response excellently addresses all expected topics: equity extraction strategy, rental property investment, and investment strategy. It avoids PMI and first-time buyer topics entirely. Factual grounding is precise\u2014the assistant cites specific numbers directly from tool results: $117k annual cash flow loss, -39% cash-on-cash return, $5,667/month HELOC payment at 8.5%, $4,088/month property cash flow, 2.2% cap rate, and $5,500 monthly rent. All figures are consistent with the tool data provided. The response is highly actionable for an equity-leveraging investor: it delivers a clear 'no' verdict with quantified reasoning, identifies the specific problem (6.3% negative spread between HELOC cost and investment yield), and provides three concrete alternative strategies. The tone appropriately matches the investor segment\u2014direct, data-driven, and focused on returns. The offer to search sub-$900k properties shows tailored follow-up thinking for improving cash-on-cash returns."
+          }
         }
       ]
     },
@@ -235,9 +315,16 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1283,
-          "latency_ms": 19580.51300048828,
-          "error": null
+          "reply_length": 1451,
+          "latency_ms": 20897.481203079224,
+          "error": null,
+          "quality": {
+            "topic_coverage": 4.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 2.0,
+            "helpfulness": 3.0,
+            "reasoning": "The response effectively addresses risk, downside, and scenario analysis - all expected topics for this leveraged investor query. It correctly avoids PMI. However, there are significant factual grounding issues: (1) The '15% price drop scenario' numbers appear fabricated - the tool results show a '-15%/yr crash' scenario exists, but the specific figures cited ($915k loss after 3 years, property dropping to $276k, $949k mortgage balance) cannot be verified from the truncated tool output provided. (2) The 9% rate scenario lacks concrete supporting data - while a rate calculation is provided ($1,933 monthly increase), this appears calculated rather than from the tool results. (3) The 'Bull' scenario profit figure of -$254k at year 5 is stated but other claimed losses in this scenario are not verifiable from the partial data shown. The response tone is appropriate for a leveraged investor (direct, numbers-focused) and the core insight about negative carry is sound. However, without being able to verify the specific stress test numbers cited, the factual grounding is undermined. The helpfulness is moderate - it correctly identifies the core issue (negative carry without rental income) and suggests a logical next step, but the unverified numbers reduce confidence in the analysis."
+          }
         }
       ]
     },
@@ -255,20 +342,39 @@
             "search_properties"
           ],
           "forbidden_violations": [],
-          "reply_length": 1597,
-          "latency_ms": 33931.11515045166,
-          "error": null
+          "reply_length": 1802,
+          "latency_ms": 32220.552921295166,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 4.0,
+            "helpfulness": 4.0,
+            "reasoning": "The response excellently covers all expected topics (duplex, triplex, ADU) with specific property examples and zoning details. All forbidden topics are avoided (none specified). Factual grounding is strong - addresses use specific addresses, prices, lot sizes, and ADU capacities from tool results. However, one concern: the stress test analysis references a '$1.2M purchase' with '$7K rental income' but the tool results show the first property at $1.2M last sale with predicted $1.61M, and the second at $1.1M predicted $1.22M - the response doesn't clearly specify which property's assumptions underpin the stress test, making it unclear if the $7K income assumption is property-specific or generic. The SB9 reference for Blake St appears to introduce a property not shown in the truncated tool results (indicated by '...'). For a value-add investor, the response is highly helpful by explicitly modeling negative carry risk and ADU income potential, providing clear break-even scenarios, and offering next steps. The framing of 3% appreciation as a break-even threshold is actionable and well-contextualized for this buyer segment."
+          }
         },
         {
-          "tools_used": [],
-          "expected_hits": [],
-          "expected_misses": [
+          "tools_used": [
+            "lookup_property",
+            "get_development_potential",
+            "analyze_investment_scenarios"
+          ],
+          "expected_hits": [
+            "lookup_property",
             "get_development_potential"
           ],
+          "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1028,
-          "latency_ms": 13014.129877090454,
-          "error": null
+          "reply_length": 1471,
+          "latency_ms": 24489.022970199585,
+          "error": null,
+          "quality": {
+            "topic_coverage": 4.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 2.0,
+            "helpfulness": 3.0,
+            "reasoning": "The response addresses all expected topics (ADU, cost, return) and avoids forbidden topics. However, factual grounding is weak: the $165K construction cost is stated as 'average from Berkeley permit data' but this figure doesn't appear in the tool results provided. The 270 sqft max ADU and 16ft height restriction are correctly cited from the tool data. The $880/month rent projection lacks clear sourcing. The cash-on-cash return of -14.33% and monthly cash flow of -$6,381 cannot be verified against the tool results shown (the analyze_investment_scenarios result appears truncated). The response makes strong analytical claims but critical numbers lack verifiable grounding in the provided data. For a value-add investor, the response provides useful context (highlighting this as appreciation-dependent rather than cash-flow positive) but the unsupported cost figures and incomplete financial analysis reduce reliability. The SB9 alternative mention shows broader thinking but needs better data support."
+          }
         }
       ]
     },
@@ -277,18 +383,26 @@
       "turns": [
         {
           "tools_used": [
-            "lookup_property"
+            "lookup_property",
+            "get_price_prediction",
+            "get_development_potential"
           ],
           "expected_hits": [
-            "lookup_property"
-          ],
-          "expected_misses": [
+            "lookup_property",
             "get_price_prediction"
           ],
+          "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 820,
-          "latency_ms": 13000.326156616211,
-          "error": null
+          "reply_length": 1168,
+          "latency_ms": 22546.852827072144,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 5.0,
+            "helpfulness": 4.0,
+            "reasoning": "Response excellently covers both expected topics (price at $1.45M with range, neighborhood as Live Oak Park). No forbidden topics (cap rate, investment return) appear. Factual grounding is strong: accurately cites predicted price ($1.45M), price range ($691K-$2.2M), last sale ($1.31M in Sept 2020), property specs (5 bed/2.5 bath, 2487 sqft, 6000 sqft lot), year built (1929), zoning (R-3H), ADU eligibility (513 sqft max), and unit limits (4 units). All numbers match tool data precisely. Helpfulness is very good\u2014response appropriately frames the duplex rental potential, addresses down payment ($250k), provides mortgage calculation context, and offers next-step guidance. Minor: the mortgage math mentioned ($1.2M financing) could have been slightly more precise ($1.205M), but this is negligible. The response avoids investment framings while still acknowledging the rental income potential naturally, which is appropriate for a first-time buyer considering a duplex."
+          }
         }
       ]
     },
@@ -304,9 +418,16 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1239,
-          "latency_ms": 16091.758012771606,
-          "error": null
+          "reply_length": 1061,
+          "latency_ms": 17144.37985420227,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 5.0,
+            "helpfulness": 5.0,
+            "reasoning": "The response excellently addresses all expected topics: PMI ($990/month, $26,874 total, 2y 10m dropoff), down payment ($120k on $1.2M), and monthly costs (~$8,400-8,800). All figures are directly grounded in tool data and accurate. The response avoids investment/cap rate topics entirely. For a down-payment-constrained buyer, it provides critical reality-check analysis: the 50%+ debt-to-income ratio concern is highly actionable and addresses affordability beyond just PMI. The response offers concrete next steps (lower price, more down, higher income) and asks clarifying questions. Tone is balanced\u2014acknowledges PMI relief timeline while highlighting actual financial strain. This empowers the user to make informed decisions about their Berkeley purchase feasibility."
+          }
         }
       ]
     },
@@ -325,9 +446,16 @@
             "estimate_rental_income"
           ],
           "forbidden_violations": [],
-          "reply_length": 560,
-          "latency_ms": 17486.45782470703,
-          "error": null
+          "reply_length": 519,
+          "latency_ms": 14999.475955963135,
+          "error": null,
+          "quality": {
+            "topic_coverage": 1.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 5.0,
+            "helpfulness": 2.0,
+            "reasoning": "The assistant correctly identified that 122 Vicente Road is not in the database and provided accurate facts from the tool results (42 total matching properties, specific addresses found). However, it completely failed to address the user's core request about rental income potential and cap rate analysis. While the address verification was helpful, the assistant should have either: (1) proactively offered to analyze one of the available properties as an alternative, or (2) provided guidance on next steps to obtain the needed data. For a cash buyer investor segment, the lack of any investment analysis discussion is a significant gap. The response avoids forbidden topics appropriately but doesn't compensate by offering alternative value."
+          }
         }
       ]
     },
@@ -345,9 +473,16 @@
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1241,
-          "latency_ms": 24880.14316558838,
-          "error": null
+          "reply_length": 1535,
+          "latency_ms": 25580.060958862305,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 4.0,
+            "helpfulness": 4.0,
+            "reasoning": "The response effectively addresses both expected topics (competition and bidding strategy). It avoids forbidden topics entirely. Strong factual grounding with specific numbers cited ($1.5M median, 0.7% YoY growth, $937 median ppsf, $1,369 ppsf from Rose St sale, $626-$1,369 range). However, one potential issue: the response claims recent sales show prices \"15-20% over the $937 median\" but the Rose St sale at $1,369/sqft is actually only 46% above median, not 15-20%. The $1.8M Rose St sale price statement is accurate per the tool data. The advice is actionable and well-tailored to a competitive bidder with strong finances, correctly identifying that their $600k down payment puts them in mid-tier rather than top-tier buying power. The strategic suggestions (higher price targets, renovation opportunities) are practical. Minor deduction for the imprecise percentage characterization of price premiums."
+          }
         }
       ]
     },
@@ -357,16 +492,25 @@
         {
           "tools_used": [
             "get_market_summary",
-            "search_properties"
+            "get_neighborhood_stats",
+            "get_neighborhood_stats",
+            "get_neighborhood_stats"
           ],
           "expected_hits": [
             "get_market_summary"
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1466,
-          "latency_ms": 22368.41607093811,
-          "error": null
+          "reply_length": 1534,
+          "latency_ms": 24253.02290916443,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 4.0,
+            "helpfulness": 4.0,
+            "reasoning": "The response excellently covers all three expected topics (neighborhood, budget, affordability) with specific recommendations tailored to a first-time buyer. It avoids forbidden topics as none were specified. Factual grounding is strong - the assistant correctly cites median prices ($1.3M West Berkeley, $1.4M Central, $1.5M North), YoY changes, square footage, and market dynamics (18.4% above asking, 6.15% mortgage rate). However, there's a minor mathematical/assumption issue: the assistant states '$300k down allows ~$1.5M purchase with 20% down' which is inconsistent - $300k would represent 20% only on a $1.5M property, not leave room for flexibility. The DTI calculation ($339k income needed) also appears to assume a different principal amount than stated, though the conclusion that $220k income is sufficient is directionally correct. The monthly payment estimate ($7,918) cannot be verified from the data but seems reasonable. The neighborhood rankings by value are well-supported by the data. Overall, the response is actionable and specific for the segment, but contains minor mathematical inconsistencies that slightly undermine credibility."
+          }
         },
         {
           "tools_used": [
@@ -378,9 +522,16 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1483,
-          "latency_ms": 17681.636095046997,
-          "error": null
+          "reply_length": 1413,
+          "latency_ms": 16053.7428855896,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 5.0,
+            "helpfulness": 4.0,
+            "reasoning": "The response thoroughly addresses both expected topics (Elmwood and direct comparison). All specific numbers are accurate: median prices ($1.8M both), Thousand Oaks max ($5.1M), Elmwood max ($3.75M), median sqft values (2,161 vs 1,897), lot sizes (5,000 vs 4,794), property type percentages, YoY appreciation (12.2% vs 11.1%), and zoning distributions are all correctly cited from tool results. The structure is clear with well-organized sections. The response is highly tailored to a first-time buyer by acknowledging their budget constraint ($300k down payment referenced), noting condo availability in Elmwood as more relevant to their situation, and offering concrete next steps. Minor: The response doesn't explicitly explain why these differences matter for a first-time buyer (e.g., why larger homes/lots in Thousand Oaks could mean higher ongoing costs), which slightly limits actionability, though the comparison itself is sound and the budget acknowledgment adds practical value."
+          }
         }
       ]
     },
@@ -389,6 +540,7 @@
       "turns": [
         {
           "tools_used": [
+            "get_neighborhood_stats",
             "rate_penalty"
           ],
           "expected_hits": [],
@@ -396,9 +548,16 @@
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1029,
-          "latency_ms": 22867.921113967896,
-          "error": null
+          "reply_length": 1318,
+          "latency_ms": 29259.145975112915,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 5.0,
+            "helpfulness": 4.0,
+            "reasoning": "Response excellently addresses all three expected topics (rate penalty, equity constraints, upgrade options). Avoids first-time buyer language entirely. Factual grounding is strong: accurately cites $1,873 vs $5,983 monthly payment, $4,110 difference, $49,320 annual penalty, -8.4% YoY decline, and $1.25M median price\u2014all verified against tool data. The 4%+ appreciation break-even math is sound given the numbers. The three upgrade pathways are practical and tailored to an equity-trapped upgrader. Minor limitation: the response could have quantified the rental arbitrage scenario more concretely (e.g., estimated rental income from the 2BR condo to offset the $4,110 penalty) to make option #2 more actionable. Overall strong guidance that acknowledges the real financial headwinds while providing strategic alternatives."
+          }
         }
       ]
     },
@@ -407,11 +566,7 @@
       "turns": [
         {
           "tools_used": [
-            "update_working_set",
-            "query_database",
-            "query_database",
-            "query_database",
-            "get_neighborhood_stats",
+            "search_properties",
             "get_neighborhood_stats",
             "get_neighborhood_stats",
             "appreciation_stress_test"
@@ -421,9 +576,16 @@
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1977,
-          "latency_ms": 55599.807024002075,
-          "error": null
+          "reply_length": 2106,
+          "latency_ms": 34609.6088886261,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 4.0,
+            "helpfulness": 4.0,
+            "reasoning": "Strong response that thoroughly addresses all expected topics (ADU eligibility, development potential, value-add analysis) with no forbidden topics mentioned. The assistant cites specific data from tool results: neighborhood names, price predictions ($1.1M-$1.3M), ADU sizes (298-800 sqft), lot sizes (4,000-7,748 sqft), YoY decline percentages (-73.8% Bushrod, -7.9% San Pablo Park), and stress test findings ($2,713 monthly carry cost, break-even at +5% appreciation). The appreciation stress test analysis is particularly sophisticated, showing 3-year/5-year/7-year scenarios. Minor factual inconsistency: response claims \"4 properties are SB9 eligible\" and mentions specific addresses (2815 Acton St, Carleton St properties) but the tool results show only 2 visible properties with detailed data, and the first property (2712 Prince St) shows sb9_eligible: false. The response extrapolates beyond what's clearly shown in the truncated tool results. Overall very helpful for a value-add investor, providing actionable guidance on neighborhood selection, development paths, and critical carry cost analysis, though the SB9 count claim needs verification against complete data set."
+          }
         }
       ]
     },
@@ -432,16 +594,24 @@
       "turns": [
         {
           "tools_used": [
-            "compute_true_cost"
+            "compute_true_cost",
+            "adjacent_market_comparison"
           ],
           "expected_hits": [],
           "expected_misses": [
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1347,
-          "latency_ms": 20272.70007133484,
-          "error": null
+          "reply_length": 1261,
+          "latency_ms": 29643.306970596313,
+          "error": null,
+          "quality": {
+            "topic_coverage": 5.0,
+            "topic_avoidance": 5.0,
+            "factual_grounding": 4.0,
+            "helpfulness": 4.0,
+            "reasoning": "The response excellently addresses both expected topics (affordability and budget). It avoids investment return discussion entirely. Factual grounding is strong - the assistant accurately cites the $100k down payment amount, $11,236 monthly cost, $1,100 PMI savings, and Point Richmond's $750k median with specific commute/school data from tools. The income requirement calculation (~$430k) appears reasonably derived from the $11,236 monthly obligation against standard debt ratios. One minor inconsistency: the response mentions 'El Cerrito ($950k median)' which actually appears to be Oakland Temescal in the tool results. The response is highly actionable for a 'stretcher' segment - it honestly frames Berkeley as unaffordable while offering concrete alternatives (Point Richmond, down payment building, smaller Berkeley units, assistance programs) with specific numbers. The tone appropriately manages expectations while preserving hope and agency. The offer to model specific scenarios is excellent engagement."
+          }
         }
       ]
     }

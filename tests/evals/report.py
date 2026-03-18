@@ -96,12 +96,36 @@ def format_orchestrator_report(
             errors = sum(1 for t in r.turn_results if t.error)
             status = "PASS" if violations == 0 and errors == 0 else "FAIL"
             tools = set()
+            quality_scores = []
             for t in r.turn_results:
                 tools.update(t.tool_grade.tools_used)
+                if t.quality_grade and not t.quality_grade.judge_error:
+                    quality_scores.append(t.quality_grade.helpfulness)
+            help_str = f"help={sum(quality_scores)/len(quality_scores):.1f}" if quality_scores else ""
             lines.append(
                 f"  [{status}] {r.scenario_id:40s} "
-                f"tools={len(tools):2d}  violations={violations}  errors={errors}"
+                f"tools={len(tools):2d}  {help_str:8s}  violations={violations}"
             )
+
+        # Show lowest-scoring scenarios with judge reasoning
+        all_scored = []
+        for r in results:
+            for t in r.turn_results:
+                if t.quality_grade and not t.quality_grade.judge_error:
+                    all_scored.append((r.scenario_id, t.quality_grade))
+        if all_scored:
+            all_scored.sort(key=lambda x: x[1].helpfulness)
+            lines.append("")
+            lines.append("--- Lowest Helpfulness (bottom 5) ---")
+            for scenario_id, qg in all_scored[:5]:
+                lines.append(
+                    f"  {scenario_id:40s} help={qg.helpfulness:.1f}  "
+                    f"fact={qg.factual_grounding:.1f}  topic={qg.topic_coverage:.1f}"
+                )
+                if qg.reasoning:
+                    # Truncate reasoning to one line
+                    reason = qg.reasoning.replace("\n", " ")[:120]
+                    lines.append(f"    -> {reason}")
 
     lines.append("=" * 60)
     return "\n".join(lines)

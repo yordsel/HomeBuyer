@@ -62,6 +62,6 @@ scenarios:
       - message: "I want to find a duplex or triplex in Berkeley I can add an ADU to. Budget is $1.2M."
         expected_tools: [search_properties]
         expected_topics: [duplex, triplex, ADU]
-      - message: "What would the total cost be including the ADU construction? And what's the projected return?"
-        expected_tools: [get_development_potential]
+      - message: "What about 1452 Scenic Ave? What would the ADU construction cost and projected return look like?"
+        expected_tools: [lookup_property, get_development_potential]
         expected_topics: [ADU, cost, return]

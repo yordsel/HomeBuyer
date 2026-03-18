@@ -4,7 +4,7 @@ scenarios:
     segment: first_time_buyer
     description: "First-time buyer asking about a specific property"
     turns:
-      - message: "I'm a first-time buyer with $250k down. Tell me about 1234 Cedar St."
+      - message: "I'm a first-time buyer with $250k down. Tell me about 2332 Virginia St."
         expected_tools: [lookup_property, get_price_prediction]
         forbidden_tools: [generate_investment_prospectus]
         expected_topics: [price, neighborhood]
@@ -26,7 +26,7 @@ scenarios:
     segment: cash_buyer
     description: "Cash buyer analyzing a specific investment property"
     turns:
-      - message: "I want to buy 2500 Piedmont Ave all-cash as an investment. What's the rental income potential and cap rate?"
+      - message: "I want to buy 122 Vicente Rd all-cash as an investment. What's the rental income potential and cap rate?"
         expected_tools: [lookup_property, estimate_rental_income]
         forbidden_tools: [pmi_model]
         expected_topics: [rental income, cap rate]
