@@ -138,8 +138,10 @@ def _run_scenario(
 class TestExtractionEvalMock:
     """Test the extraction eval harness using mock responses."""
 
-    def test_scenarios_load(self, extraction_scenarios):
+    def test_scenarios_load(self, extraction_scenarios, request):
         """Verify scenarios load from YAML."""
+        if request.config.getoption("--scenario", default=None):
+            pytest.skip("Filtered by --scenario")
         assert len(extraction_scenarios) > 0, "No extraction scenarios found"
 
     def test_all_scenarios_have_turns(self, extraction_scenarios):
@@ -149,6 +151,8 @@ class TestExtractionEvalMock:
 
     def test_mock_grading_pipeline(self, extraction_scenarios):
         """Run all scenarios in mock mode and verify grading works."""
+        if not extraction_scenarios:
+            pytest.skip("No matching scenarios")
         results = []
         for scenario in extraction_scenarios:
             client = _make_mock_client(scenario.turns)
@@ -165,7 +169,8 @@ class TestExtractionEvalMock:
     def test_multi_turn_accumulation(self, extraction_scenarios):
         """Multi-turn scenarios correctly accumulate profile data."""
         multi_turn = [s for s in extraction_scenarios if len(s.turns) > 1]
-        assert len(multi_turn) > 0, "No multi-turn scenarios found"
+        if not multi_turn:
+            pytest.skip("No multi-turn scenarios in current filter")
 
         for scenario in multi_turn:
             client = _make_mock_client(scenario.turns)

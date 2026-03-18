@@ -165,8 +165,10 @@ def _make_mock_orchestrator(
 class TestOrchestratorEvalMock:
     """Test the orchestrator eval harness using mocked components."""
 
-    def test_scenarios_load(self, orchestrator_scenarios):
+    def test_scenarios_load(self, orchestrator_scenarios, request):
         """Verify scenarios load from YAML."""
+        if request.config.getoption("--scenario", default=None):
+            pytest.skip("Filtered by --scenario")
         assert len(orchestrator_scenarios) > 0, "No orchestrator scenarios found"
 
     def test_all_scenarios_have_turns(self, orchestrator_scenarios):
@@ -177,6 +179,8 @@ class TestOrchestratorEvalMock:
     @pytest.mark.asyncio
     async def test_mock_grading_pipeline(self, orchestrator_scenarios):
         """Run all scenarios in mock mode and verify grading works."""
+        if not orchestrator_scenarios:
+            pytest.skip("No matching scenarios")
         results = []
 
         for scenario in orchestrator_scenarios:

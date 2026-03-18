@@ -139,6 +139,24 @@ def load_orchestrator_scenarios() -> list[OrchestratorScenario]:
 
 
 # ---------------------------------------------------------------------------
+# Pytest plugin: --scenario filter
+# ---------------------------------------------------------------------------
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--scenario",
+        action="store",
+        default=None,
+        help="Filter eval scenarios by ID prefix (e.g. --scenario orch_22)",
+    )
+
+
+def _get_scenario_filter(request: pytest.FixtureRequest) -> str | None:
+    return request.config.getoption("--scenario", default=None)
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
@@ -149,10 +167,18 @@ def eval_mode() -> str:
 
 
 @pytest.fixture
-def extraction_scenarios() -> list[ExtractionScenario]:
-    return load_extraction_scenarios()
+def extraction_scenarios(request: pytest.FixtureRequest) -> list[ExtractionScenario]:
+    scenarios = load_extraction_scenarios()
+    filt = _get_scenario_filter(request)
+    if filt:
+        scenarios = [s for s in scenarios if s.id.startswith(filt)]
+    return scenarios
 
 
 @pytest.fixture
-def orchestrator_scenarios() -> list[OrchestratorScenario]:
-    return load_orchestrator_scenarios()
+def orchestrator_scenarios(request: pytest.FixtureRequest) -> list[OrchestratorScenario]:
+    scenarios = load_orchestrator_scenarios()
+    filt = _get_scenario_filter(request)
+    if filt:
+        scenarios = [s for s in scenarios if s.id.startswith(filt)]
+    return scenarios
