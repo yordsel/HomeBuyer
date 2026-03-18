@@ -60,3 +60,7 @@ line-length = 100
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not eval'"
+markers = [
+    "eval: LLM quality evaluation (excluded from default test runs)",
+]

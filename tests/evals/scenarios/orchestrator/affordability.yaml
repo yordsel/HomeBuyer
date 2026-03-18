@@ -1,0 +1,67 @@
+scenarios:
+  # --- Stretcher: Affordability ---
+  - id: orch_10_stretcher_afford
+    segment: stretcher
+    description: "Stretcher asking what they can afford"
+    turns:
+      - message: "We make $140k combined, have $100k saved. What can we afford in Berkeley?"
+        expected_tools: [get_market_summary]
+        forbidden_tools: [generate_investment_prospectus, yield_ranking]
+        expected_topics: [affordability, budget, down payment]
+        forbidden_topics: [cap rate, investment return]
+
+  # --- Not Viable: Reality check ---
+  - id: orch_11_not_viable
+    segment: not_viable
+    description: "Buyer who likely can't afford Berkeley"
+    turns:
+      - message: "I make about $60k and have $20k in savings. I'd love to buy a place in Berkeley. What's the market like?"
+        expected_tools: [get_market_summary]
+        forbidden_tools: [yield_ranking, dual_property_model]
+        expected_topics: [market, affordability]
+        forbidden_topics: [investment, cap rate]
+
+  # --- General Market: No buyer signals ---
+  - id: orch_12_market_overview
+    segment: general
+    description: "Generic market question with no buyer signals"
+    turns:
+      - message: "What's the Berkeley real estate market like right now? Are prices going up or down?"
+        expected_tools: [get_market_summary]
+        forbidden_tools: [pmi_model, dual_property_model]
+        expected_topics: [market, prices, trends]
+        forbidden_topics: []
+
+  # --- Rent vs Buy ---
+  - id: orch_13_rent_vs_buy
+    segment: leveraged_investor
+    description: "Renter comparing rent vs buy economics"
+    turns:
+      - message: "I'm currently renting for $4,500/month. With $350k down and a $250k income, does it make more sense financially to buy or keep renting?"
+        expected_tools: [get_market_summary]
+        forbidden_tools: [generate_investment_prospectus]
+        expected_topics: [rent, buy, comparison]
+        forbidden_topics: []
+
+  # --- Mixed Intent ---
+  - id: orch_14_mixed_intent
+    segment: ambiguous
+    description: "Buyer with unclear occupy vs invest intent"
+    turns:
+      - message: "I'm thinking about buying a property in Berkeley. Maybe live in it for a few years then rent it out. I have about $400k and make $200k."
+        expected_tools: [get_market_summary]
+        forbidden_tools: []
+        expected_topics: [market, options]
+        forbidden_topics: []
+
+  # --- Multi-turn: Affordability then specific property ---
+  - id: orch_15_afford_then_property
+    segment: first_time_buyer
+    description: "Multi-turn: affordability question then property lookup"
+    turns:
+      - message: "I'm a first-time buyer making $180k with $150k saved. Is Berkeley realistic for me?"
+        expected_tools: [get_market_summary]
+        expected_topics: [affordability, budget]
+      - message: "Show me what's available in my price range in North Berkeley."
+        expected_tools: [search_properties]
+        expected_topics: [properties, North Berkeley]

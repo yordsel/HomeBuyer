@@ -1,0 +1,115 @@
+scenarios:
+  # --- Cash Buyer ---
+  - id: ext_20_cash_buyer
+    description: "All-cash investor with clear intent"
+    turns:
+      - message: "I have $1.5M cash to invest. Looking for investment properties in Berkeley."
+        expected:
+          intent: invest
+          capital: 1500000
+        expected_null: [income, current_rent, is_first_time_buyer]
+        min_signals: 1
+
+  # --- Leveraged Investor ---
+  - id: ext_21_leveraged_investor
+    description: "Investor using leverage with down payment"
+    turns:
+      - message: "I want to invest in Berkeley real estate. I have $400k for a down payment and I'm looking at multi-unit properties."
+        expected:
+          intent: invest
+          capital: 400000
+        expected_null: [equity, is_first_time_buyer]
+        min_signals: 1
+
+  # --- Value-Add Investor ---
+  - id: ext_22_value_add
+    description: "Investor looking for ADU/renovation opportunities"
+    turns:
+      - message: "I'm looking for properties with ADU potential in Berkeley. I have $800k to invest."
+        expected:
+          intent: invest
+          capital: 800000
+        expected_null: [equity, is_first_time_buyer]
+        min_signals: 1
+
+  # --- Appreciation Bettor ---
+  - id: ext_23_appreciation
+    description: "Investor focused on long-term appreciation"
+    turns:
+      - message: "I'm less concerned about cash flow. I want to buy in the neighborhood with the best 5-year appreciation potential. I have $500k to invest."
+        expected:
+          intent: invest
+          capital: 500000
+        expected_null: [current_rent, is_first_time_buyer]
+        min_signals: 1
+
+  # --- Equity-Leveraging Investor ---
+  - id: ext_24_equity_investor
+    description: "Using home equity to invest in rentals"
+    turns:
+      - message: "I own my home in Piedmont (worth about $2M, $400k left on mortgage). I want to use my equity to invest in Berkeley rental properties."
+        expected:
+          intent: invest
+          owns_current_home: true
+          equity: 1600000
+        expected_null: [is_first_time_buyer]
+        min_signals: 2
+
+  # --- Rent vs Buy (Investor framing) ---
+  - id: ext_25_rent_vs_buy_investor
+    description: "Renter comparing rent vs buy from an investment angle"
+    turns:
+      - message: "I'm currently renting for $4,500/month. With $350k down and a $250k income, does it make more sense financially to buy or keep renting and invest the difference?"
+        expected:
+          current_rent: 4500
+          capital: 350000
+          income: 250000
+        expected_null: [equity]
+        min_signals: 2
+
+  # --- Multi-turn: Investment strategy refinement ---
+  - id: ext_26_invest_multi_turn
+    description: "Investor refining strategy across turns"
+    turns:
+      - message: "I want to invest in Berkeley real estate. I have about $600k liquid."
+        expected:
+          intent: invest
+          capital: 600000
+        expected_null: [equity, income]
+      - message: "I already own my primary residence in Oakland with about $300k in equity. My income is $280k."
+        expected:
+          owns_current_home: true
+          equity: 300000
+          income: 280000
+    final_expected:
+      intent: invest
+      capital: 600000
+      owns_current_home: true
+      equity: 300000
+      income: 280000
+
+  # --- Multi-turn: Cash buyer refining budget ---
+  - id: ext_27_cash_refine
+    description: "Cash buyer refining their budget over conversation"
+    turns:
+      - message: "I want to buy a rental property in Berkeley all-cash."
+        expected:
+          intent: invest
+        expected_null: [capital, income]
+      - message: "My budget is around $1.8M."
+        expected:
+          capital: 1800000
+    final_expected:
+      intent: invest
+      capital: 1800000
+
+  # --- Stress test investor ---
+  - id: ext_28_stress_test
+    description: "Investor asking about downside risk"
+    turns:
+      - message: "If I buy a $1.4M property with 20% down, what happens to my investment if prices drop 15%?"
+        expected:
+          intent: invest
+          capital: 280000
+        expected_null: [equity, is_first_time_buyer]
+        min_signals: 1

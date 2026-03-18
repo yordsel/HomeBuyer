@@ -1,0 +1,67 @@
+scenarios:
+  # --- Cash Buyer: Market Analysis ---
+  - id: orch_20_cash_buyer_market
+    segment: cash_buyer
+    description: "All-cash investor asking about market opportunity"
+    turns:
+      - message: "I have $1.5M cash to invest. Looking for investment properties in Berkeley. What's the best cap rate I can expect?"
+        expected_tools: [get_market_summary]
+        forbidden_tools: [pmi_model]
+        expected_topics: [cap rate, investment, rental]
+        forbidden_topics: [PMI, first-time buyer]
+
+  # --- Leveraged Investor: Cash-on-Cash ---
+  - id: orch_21_leveraged_investor
+    segment: leveraged_investor
+    description: "Leveraged investor looking at multi-unit"
+    turns:
+      - message: "I want to invest in Berkeley real estate. I have $400k for a down payment and I'm looking at multi-unit properties. What's the cash-on-cash return?"
+        expected_tools: [get_market_summary]
+        forbidden_tools: [pmi_model]
+        expected_topics: [return, multi-unit, leverage]
+        forbidden_topics: [PMI, first-time]
+
+  # --- Appreciation Bettor: Undervalued Areas ---
+  - id: orch_22_appreciation
+    segment: appreciation_bettor
+    description: "Investor focused on 5-year appreciation"
+    turns:
+      - message: "I'm less concerned about cash flow. I want the best 5-year appreciation potential. I have $500k to invest. Which areas are undervalued?"
+        expected_tools: [get_market_summary]
+        forbidden_tools: [pmi_model]
+        expected_topics: [appreciation, neighborhood, undervalued]
+        forbidden_topics: [PMI]
+
+  # --- Equity-Leveraging Investor ---
+  - id: orch_23_equity_investor
+    segment: equity_leveraging_investor
+    description: "Using home equity to invest in rentals"
+    turns:
+      - message: "I own my home in Piedmont (worth about $2M, $400k left on mortgage). I want to use my equity to invest in Berkeley rental properties."
+        expected_tools: [get_market_summary]
+        forbidden_tools: [pmi_model]
+        expected_topics: [equity, rental, investment strategy]
+        forbidden_topics: [PMI, first-time]
+
+  # --- Stress Test ---
+  - id: orch_24_stress_test
+    segment: leveraged_investor
+    description: "Investor asking about downside risk scenarios"
+    turns:
+      - message: "If I buy a $1.4M property with 20% down, what happens to my investment if prices drop 15%? Or if rates go to 9%?"
+        expected_tools: [appreciation_stress_test]
+        forbidden_tools: [pmi_model]
+        expected_topics: [risk, downside, scenario]
+        forbidden_topics: [PMI]
+
+  # --- Multi-turn: Investment conversation ---
+  - id: orch_25_invest_multi_turn
+    segment: value_add_investor
+    description: "Multi-turn: find properties then analyze returns"
+    turns:
+      - message: "I want to find a duplex or triplex in Berkeley I can add an ADU to. Budget is $1.2M."
+        expected_tools: [search_properties]
+        expected_topics: [duplex, triplex, ADU]
+      - message: "What would the total cost be including the ADU construction? And what's the projected return?"
+        expected_tools: [get_development_potential]
+        expected_topics: [ADU, cost, return]

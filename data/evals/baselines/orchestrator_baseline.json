@@ -1,0 +1,454 @@
+{
+  "run_id": "2026-03-18T03-15-50",
+  "eval_type": "orchestrator",
+  "timestamp": "2026-03-18T03:15:50.697925+00:00",
+  "git_sha": "dede10a",
+  "metrics": {
+    "tool_precision": 1.0,
+    "tool_recall": 0.543,
+    "forbidden_violations": 0,
+    "avg_reply_length": 1250.0,
+    "avg_latency_ms": 22732.3,
+    "error_rate": 0.0,
+    "total_scenarios": 20,
+    "total_turns": 23,
+    "avg_topic_coverage": 4.35,
+    "avg_topic_avoidance": 5.0,
+    "avg_factual_grounding": 2.7,
+    "avg_helpfulness": 3.48
+  },
+  "per_scenario": [
+    {
+      "id": "orch_10_stretcher_afford",
+      "turns": [
+        {
+          "tools_used": [
+            "compute_true_cost",
+            "query_database"
+          ],
+          "expected_hits": [],
+          "expected_misses": [
+            "get_market_summary"
+          ],
+          "forbidden_violations": [],
+          "reply_length": 1477,
+          "latency_ms": 30546.562910079956,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_11_not_viable",
+      "turns": [
+        {
+          "tools_used": [
+            "get_market_summary"
+          ],
+          "expected_hits": [
+            "get_market_summary"
+          ],
+          "expected_misses": [],
+          "forbidden_violations": [],
+          "reply_length": 1363,
+          "latency_ms": 19582.73983001709,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_12_market_overview",
+      "turns": [
+        {
+          "tools_used": [
+            "get_market_summary"
+          ],
+          "expected_hits": [
+            "get_market_summary"
+          ],
+          "expected_misses": [],
+          "forbidden_violations": [],
+          "reply_length": 1329,
+          "latency_ms": 16265.437841415405,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_13_rent_vs_buy",
+      "turns": [
+        {
+          "tools_used": [
+            "rent_vs_buy"
+          ],
+          "expected_hits": [],
+          "expected_misses": [
+            "get_market_summary"
+          ],
+          "forbidden_violations": [],
+          "reply_length": 1353,
+          "latency_ms": 21268.882036209106,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_14_mixed_intent",
+      "turns": [
+        {
+          "tools_used": [
+            "get_market_summary"
+          ],
+          "expected_hits": [
+            "get_market_summary"
+          ],
+          "expected_misses": [],
+          "forbidden_violations": [],
+          "reply_length": 1301,
+          "latency_ms": 18065.732955932617,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_15_afford_then_property",
+      "turns": [
+        {
+          "tools_used": [
+            "get_market_summary",
+            "compute_true_cost",
+            "compute_true_cost"
+          ],
+          "expected_hits": [
+            "get_market_summary"
+          ],
+          "expected_misses": [],
+          "forbidden_violations": [],
+          "reply_length": 1380,
+          "latency_ms": 23805.180072784424,
+          "error": null
+        },
+        {
+          "tools_used": [],
+          "expected_hits": [],
+          "expected_misses": [
+            "search_properties"
+          ],
+          "forbidden_violations": [],
+          "reply_length": 688,
+          "latency_ms": 15225.074768066406,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_20_cash_buyer_market",
+      "turns": [
+        {
+          "tools_used": [
+            "update_working_set",
+            "query_database",
+            "query_database"
+          ],
+          "expected_hits": [],
+          "expected_misses": [
+            "get_market_summary"
+          ],
+          "forbidden_violations": [],
+          "reply_length": 1209,
+          "latency_ms": 27931.351900100708,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_21_leveraged_investor",
+      "turns": [
+        {
+          "tools_used": [
+            "update_working_set",
+            "query_database",
+            "appreciation_stress_test"
+          ],
+          "expected_hits": [],
+          "expected_misses": [
+            "get_market_summary"
+          ],
+          "forbidden_violations": [],
+          "reply_length": 1295,
+          "latency_ms": 25961.771965026855,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_22_appreciation",
+      "turns": [
+        {
+          "tools_used": [
+            "get_market_summary",
+            "get_neighborhood_stats",
+            "get_neighborhood_stats",
+            "get_neighborhood_stats",
+            "query_database",
+            "search_properties",
+            "appreciation_stress_test"
+          ],
+          "expected_hits": [
+            "get_market_summary"
+          ],
+          "expected_misses": [],
+          "forbidden_violations": [],
+          "reply_length": 1739,
+          "latency_ms": 38884.07301902771,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_23_equity_investor",
+      "turns": [
+        {
+          "tools_used": [
+            "get_market_summary",
+            "dual_property_model",
+            "search_properties",
+            "analyze_investment_scenarios"
+          ],
+          "expected_hits": [
+            "get_market_summary"
+          ],
+          "expected_misses": [],
+          "forbidden_violations": [],
+          "reply_length": 1171,
+          "latency_ms": 31402.349948883057,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_24_stress_test",
+      "turns": [
+        {
+          "tools_used": [
+            "appreciation_stress_test"
+          ],
+          "expected_hits": [
+            "appreciation_stress_test"
+          ],
+          "expected_misses": [],
+          "forbidden_violations": [],
+          "reply_length": 1354,
+          "latency_ms": 19831.06517791748,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_25_invest_multi_turn",
+      "turns": [
+        {
+          "tools_used": [
+            "update_working_set",
+            "update_working_set",
+            "query_database"
+          ],
+          "expected_hits": [],
+          "expected_misses": [
+            "search_properties"
+          ],
+          "forbidden_violations": [],
+          "reply_length": 1513,
+          "latency_ms": 28882.4200630188,
+          "error": null
+        },
+        {
+          "tools_used": [],
+          "expected_hits": [],
+          "expected_misses": [
+            "get_development_potential"
+          ],
+          "forbidden_violations": [],
+          "reply_length": 845,
+          "latency_ms": 10290.489196777344,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_01_first_time_property",
+      "turns": [
+        {
+          "tools_used": [
+            "lookup_property"
+          ],
+          "expected_hits": [
+            "lookup_property"
+          ],
+          "expected_misses": [
+            "get_price_prediction"
+          ],
+          "forbidden_violations": [],
+          "reply_length": 763,
+          "latency_ms": 11475.817203521729,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_02_pmi_on_property",
+      "turns": [
+        {
+          "tools_used": [
+            "pmi_model",
+            "compute_true_cost"
+          ],
+          "expected_hits": [
+            "pmi_model"
+          ],
+          "expected_misses": [],
+          "forbidden_violations": [],
+          "reply_length": 1156,
+          "latency_ms": 20486.274003982544,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_03_cash_property",
+      "turns": [
+        {
+          "tools_used": [
+            "lookup_property",
+            "estimate_rental_income",
+            "get_price_prediction"
+          ],
+          "expected_hits": [
+            "lookup_property",
+            "estimate_rental_income"
+          ],
+          "expected_misses": [],
+          "forbidden_violations": [],
+          "reply_length": 1243,
+          "latency_ms": 24001.219272613525,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_04_competitive_bidder",
+      "turns": [
+        {
+          "tools_used": [
+            "competition_assessment"
+          ],
+          "expected_hits": [],
+          "expected_misses": [
+            "get_market_summary"
+          ],
+          "forbidden_violations": [],
+          "reply_length": 1093,
+          "latency_ms": 18107.295036315918,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_05_first_time_multi",
+      "turns": [
+        {
+          "tools_used": [
+            "get_neighborhood_stats",
+            "get_neighborhood_stats",
+            "get_neighborhood_stats",
+            "get_neighborhood_stats",
+            "neighborhood_lifestyle"
+          ],
+          "expected_hits": [],
+          "expected_misses": [
+            "get_market_summary"
+          ],
+          "forbidden_violations": [],
+          "reply_length": 1285,
+          "latency_ms": 20054.826974868774,
+          "error": null
+        },
+        {
+          "tools_used": [
+            "get_neighborhood_stats",
+            "get_neighborhood_stats",
+            "neighborhood_lifestyle"
+          ],
+          "expected_hits": [
+            "get_neighborhood_stats"
+          ],
+          "expected_misses": [],
+          "forbidden_violations": [],
+          "reply_length": 1362,
+          "latency_ms": 17897.52721786499,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_06_equity_trapped",
+      "turns": [
+        {
+          "tools_used": [
+            "get_market_summary",
+            "rate_penalty"
+          ],
+          "expected_hits": [
+            "get_market_summary"
+          ],
+          "expected_misses": [],
+          "forbidden_violations": [],
+          "reply_length": 1108,
+          "latency_ms": 22008.17084312439,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_07_value_add_property",
+      "turns": [
+        {
+          "tools_used": [
+            "update_working_set",
+            "query_database",
+            "get_neighborhood_stats",
+            "get_neighborhood_stats",
+            "get_neighborhood_stats"
+          ],
+          "expected_hits": [],
+          "expected_misses": [
+            "get_market_summary"
+          ],
+          "forbidden_violations": [],
+          "reply_length": 1288,
+          "latency_ms": 35905.90596199036,
+          "error": null
+        }
+      ]
+    },
+    {
+      "id": "orch_08_stretcher_property",
+      "turns": [
+        {
+          "tools_used": [
+            "compute_true_cost",
+            "get_market_summary",
+            "adjacent_market_comparison"
+          ],
+          "expected_hits": [
+            "get_market_summary"
+          ],
+          "expected_misses": [],
+          "forbidden_violations": [],
+          "reply_length": 1427,
+          "latency_ms": 24962.857007980347,
+          "error": null
+        }
+      ]
+    }
+  ]
+}

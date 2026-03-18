@@ -1,0 +1,1253 @@
+{
+  "run_id": "2026-03-18T03-04-17",
+  "eval_type": "extraction",
+  "timestamp": "2026-03-18T03:04:17.017419+00:00",
+  "git_sha": "dede10a",
+  "metrics": {
+    "field_precision": 0.982,
+    "field_recall": 0.811,
+    "false_positive_rate": 0.015,
+    "per_field_f1": {
+      "capital": 0.941,
+      "current_rent": 0.7,
+      "equity": 0.92,
+      "income": 0.936,
+      "intent": 0.923,
+      "is_first_time_buyer": 0.88,
+      "owns_current_home": 0.444
+    },
+    "macro_f1": 0.821,
+    "avg_latency_ms": 2191.9,
+    "total_scenarios": 29,
+    "total_turns": 35
+  },
+  "per_scenario": [
+    {
+      "id": "ext_30_no_signals",
+      "turns": 1,
+      "latencies_ms": [
+        1879.72092628479
+      ],
+      "signal_counts": [
+        1
+      ],
+      "final_profile": {
+        "intent": null,
+        "capital": null,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          },
+          {
+            "field": "current_rent",
+            "status": "correct"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_31_greeting",
+      "turns": 1,
+      "latencies_ms": [
+        1823.7950801849365
+      ],
+      "signal_counts": [
+        0
+      ],
+      "final_profile": {
+        "intent": null,
+        "capital": null,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          },
+          {
+            "field": "current_rent",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_32_mixed_intent",
+      "turns": 1,
+      "latencies_ms": [
+        1532.3739051818848
+      ],
+      "signal_counts": [
+        0
+      ],
+      "final_profile": {
+        "intent": "occupy",
+        "capital": 400000,
+        "equity": null,
+        "income": 200000,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_33_approximate_numbers",
+      "turns": 1,
+      "latencies_ms": [
+        1263.735055923462
+      ],
+      "signal_counts": [
+        2
+      ],
+      "final_profile": {
+        "intent": null,
+        "capital": 250000,
+        "equity": null,
+        "income": 150000,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_34_question_form",
+      "turns": 1,
+      "latencies_ms": [
+        5909.459829330444
+      ],
+      "signal_counts": [
+        0
+      ],
+      "final_profile": {
+        "intent": null,
+        "capital": null,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "missed"
+          },
+          {
+            "field": "income",
+            "status": "missed"
+          },
+          {
+            "field": "capital",
+            "status": "missed"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_35_negative_signals",
+      "turns": 1,
+      "latencies_ms": [
+        2456.0070037841797
+      ],
+      "signal_counts": [
+        0
+      ],
+      "final_profile": {
+        "intent": null,
+        "capital": null,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "is_first_time_buyer",
+            "status": "missed"
+          },
+          {
+            "field": "owns_current_home",
+            "status": "missed"
+          },
+          {
+            "field": "current_rent",
+            "status": "missed"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_36_irrelevant_numbers",
+      "turns": 1,
+      "latencies_ms": [
+        1797.4390983581543
+      ],
+      "signal_counts": [
+        0
+      ],
+      "final_profile": {
+        "intent": null,
+        "capital": null,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          },
+          {
+            "field": "current_rent",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_37_joint_finances",
+      "turns": 1,
+      "latencies_ms": [
+        4805.400848388672
+      ],
+      "signal_counts": [
+        2
+      ],
+      "final_profile": {
+        "intent": null,
+        "capital": 450000,
+        "equity": null,
+        "income": 320000,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_20_cash_buyer",
+      "turns": 1,
+      "latencies_ms": [
+        1896.7647552490234
+      ],
+      "signal_counts": [
+        0
+      ],
+      "final_profile": {
+        "intent": "invest",
+        "capital": 1500000,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "current_rent",
+            "status": "correct"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_21_leveraged_investor",
+      "turns": 1,
+      "latencies_ms": [
+        2533.317804336548
+      ],
+      "signal_counts": [
+        4
+      ],
+      "final_profile": {
+        "intent": "invest",
+        "capital": 400000,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_22_value_add",
+      "turns": 1,
+      "latencies_ms": [
+        2642.594814300537
+      ],
+      "signal_counts": [
+        4
+      ],
+      "final_profile": {
+        "intent": "invest",
+        "capital": 800000,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_23_appreciation",
+      "turns": 1,
+      "latencies_ms": [
+        2230.592966079712
+      ],
+      "signal_counts": [
+        4
+      ],
+      "final_profile": {
+        "intent": "invest",
+        "capital": 500000,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "current_rent",
+            "status": "correct"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_24_equity_investor",
+      "turns": 1,
+      "latencies_ms": [
+        2722.9959964752197
+      ],
+      "signal_counts": [
+        7
+      ],
+      "final_profile": {
+        "intent": "invest",
+        "capital": null,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": false
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "owns_current_home",
+            "status": "missed"
+          },
+          {
+            "field": "equity",
+            "status": "missed"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "false_positive"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_25_rent_vs_buy_investor",
+      "turns": 1,
+      "latencies_ms": [
+        2384.255886077881
+      ],
+      "signal_counts": [
+        5
+      ],
+      "final_profile": {
+        "intent": "occupy",
+        "capital": 350000,
+        "equity": null,
+        "income": 250000,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "current_rent",
+            "status": "missed"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_26_invest_multi_turn",
+      "turns": 2,
+      "latencies_ms": [
+        1573.188066482544,
+        2049.9351024627686
+      ],
+      "signal_counts": [
+        3,
+        4
+      ],
+      "final_profile": {
+        "intent": "invest",
+        "capital": 300000,
+        "equity": null,
+        "income": 280000,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          }
+        ],
+        [
+          {
+            "field": "owns_current_home",
+            "status": "missed"
+          },
+          {
+            "field": "equity",
+            "status": "missed"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_27_cash_refine",
+      "turns": 2,
+      "latencies_ms": [
+        1657.6120853424072,
+        2176.5658855438232
+      ],
+      "signal_counts": [
+        3,
+        1
+      ],
+      "final_profile": {
+        "intent": "invest",
+        "capital": null,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          }
+        ],
+        [
+          {
+            "field": "capital",
+            "status": "missed"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_28_stress_test",
+      "turns": 1,
+      "latencies_ms": [
+        2731.933832168579
+      ],
+      "signal_counts": [
+        3
+      ],
+      "final_profile": {
+        "intent": "invest",
+        "capital": 280000,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_01_first_time_explicit",
+      "turns": 1,
+      "latencies_ms": [
+        2064.9468898773193
+      ],
+      "signal_counts": [
+        4
+      ],
+      "final_profile": {
+        "intent": "occupy",
+        "capital": 200000,
+        "equity": null,
+        "income": 180000,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": true
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          },
+          {
+            "field": "current_rent",
+            "status": "correct"
+          },
+          {
+            "field": "owns_current_home",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_02_first_time_implicit",
+      "turns": 1,
+      "latencies_ms": [
+        2160.645008087158
+      ],
+      "signal_counts": [
+        5
+      ],
+      "final_profile": {
+        "intent": "occupy",
+        "capital": null,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": true
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "current_rent",
+            "status": "missed"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_03_first_time_property",
+      "turns": 1,
+      "latencies_ms": [
+        1881.2499046325684
+      ],
+      "signal_counts": [
+        0
+      ],
+      "final_profile": {
+        "intent": "occupy",
+        "capital": 250000,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": true
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_04_down_payment_constrained",
+      "turns": 1,
+      "latencies_ms": [
+        2118.4520721435547
+      ],
+      "signal_counts": [
+        0
+      ],
+      "final_profile": {
+        "intent": "occupy",
+        "capital": 80000,
+        "equity": null,
+        "income": 200000,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "current_rent",
+            "status": "missed"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          },
+          {
+            "field": "owns_current_home",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_05_pmi_question",
+      "turns": 1,
+      "latencies_ms": [
+        2265.913963317871
+      ],
+      "signal_counts": [
+        5
+      ],
+      "final_profile": {
+        "intent": null,
+        "capital": 120000,
+        "equity": null,
+        "income": 200000,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "missed"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_06_stretcher",
+      "turns": 1,
+      "latencies_ms": [
+        2348.566770553589
+      ],
+      "signal_counts": [
+        5
+      ],
+      "final_profile": {
+        "intent": "occupy",
+        "capital": 100000,
+        "equity": null,
+        "income": 140000,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_07_not_viable",
+      "turns": 1,
+      "latencies_ms": [
+        1885.7617378234863
+      ],
+      "signal_counts": [
+        4
+      ],
+      "final_profile": {
+        "intent": "occupy",
+        "capital": 20000,
+        "equity": null,
+        "income": 60000,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          },
+          {
+            "field": "current_rent",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_08_equity_trapped",
+      "turns": 1,
+      "latencies_ms": [
+        2657.0820808410645
+      ],
+      "signal_counts": [
+        0
+      ],
+      "final_profile": {
+        "intent": null,
+        "capital": null,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "missed"
+          },
+          {
+            "field": "equity",
+            "status": "missed"
+          },
+          {
+            "field": "owns_current_home",
+            "status": "missed"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_09_competitive_bidder",
+      "turns": 1,
+      "latencies_ms": [
+        2181.41508102417
+      ],
+      "signal_counts": [
+        5
+      ],
+      "final_profile": {
+        "intent": "occupy",
+        "capital": 600000,
+        "equity": null,
+        "income": 450000,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_10_incremental_disclosure",
+      "turns": 3,
+      "latencies_ms": [
+        1698.0030536651611,
+        1670.4998016357422,
+        967.4229621887207
+      ],
+      "signal_counts": [
+        3,
+        0,
+        1
+      ],
+      "final_profile": {
+        "intent": "occupy",
+        "capital": null,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": true
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "correct"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          }
+        ],
+        [
+          {
+            "field": "capital",
+            "status": "missed"
+          },
+          {
+            "field": "income",
+            "status": "missed"
+          },
+          {
+            "field": "equity",
+            "status": "correct"
+          }
+        ],
+        [
+          {
+            "field": "current_rent",
+            "status": "missed"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_11_upgrader_correction",
+      "turns": 2,
+      "latencies_ms": [
+        1826.6780376434326,
+        1880.3563117980957
+      ],
+      "signal_counts": [
+        0,
+        0
+      ],
+      "final_profile": {
+        "intent": "occupy",
+        "capital": 900000,
+        "equity": null,
+        "income": null,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": false
+      },
+      "field_results": [
+        [
+          {
+            "field": "intent",
+            "status": "correct"
+          },
+          {
+            "field": "owns_current_home",
+            "status": "missed"
+          },
+          {
+            "field": "is_first_time_buyer",
+            "status": "false_positive"
+          }
+        ],
+        [
+          {
+            "field": "equity",
+            "status": "missed"
+          },
+          {
+            "field": "income",
+            "status": "missed"
+          }
+        ]
+      ]
+    },
+    {
+      "id": "ext_12_rent_vs_buy_deliberation",
+      "turns": 2,
+      "latencies_ms": [
+        1890.3498649597168,
+        1149.7461795806885
+      ],
+      "signal_counts": [
+        2,
+        2
+      ],
+      "final_profile": {
+        "intent": "occupy",
+        "capital": 300000,
+        "equity": null,
+        "income": 250000,
+        "current_rent": null,
+        "owns_current_home": null,
+        "is_first_time_buyer": null
+      },
+      "field_results": [
+        [
+          {
+            "field": "current_rent",
+            "status": "missed"
+          },
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          }
+        ],
+        [
+          {
+            "field": "capital",
+            "status": "correct"
+          },
+          {
+            "field": "income",
+            "status": "correct"
+          }
+        ]
+      ]
+    }
+  ]
+}

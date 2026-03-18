@@ -1,0 +1,166 @@
+scenarios:
+  # --- First-Time Buyer ---
+  - id: ext_01_first_time_explicit
+    description: "First-time buyer with explicit capital, income, and intent"
+    turns:
+      - message: "I'm a first-time homebuyer with about $200k saved and a household income of $180k. I'm looking to buy a home to live in."
+        expected:
+          intent: occupy
+          capital: 200000
+          income: 180000
+          is_first_time_buyer: true
+        expected_null: [equity, current_rent, owns_current_home]
+        min_signals: 2
+
+  - id: ext_02_first_time_implicit
+    description: "First-time buyer via implication only"
+    turns:
+      - message: "I'm currently renting for $3500/month and want to buy my first home in Berkeley."
+        expected:
+          intent: occupy
+          current_rent: 3500
+          is_first_time_buyer: true
+        expected_null: [capital, income, equity]
+        min_signals: 1
+
+  - id: ext_03_first_time_property
+    description: "First-time buyer asking about a specific property"
+    turns:
+      - message: "I'm a first-time buyer with $250k down. Tell me about 1234 Cedar St."
+        expected:
+          intent: occupy
+          capital: 250000
+          is_first_time_buyer: true
+        expected_null: [equity, income]
+        min_signals: 1
+
+  # --- Down Payment Constrained ---
+  - id: ext_04_down_payment_constrained
+    description: "Buyer with limited down payment and PMI concern"
+    turns:
+      - message: "I make $200k/year but only have $80k saved for a down payment. I'm currently paying $3,500/month in rent. Is it realistic to buy in Berkeley with less than 10% down?"
+        expected:
+          intent: occupy
+          income: 200000
+          capital: 80000
+          current_rent: 3500
+        expected_null: [equity, owns_current_home]
+        min_signals: 2
+
+  - id: ext_05_pmi_question
+    description: "Buyer asking about PMI on low down payment"
+    turns:
+      - message: "If I put 10% down on a $1.2M house in Berkeley, how much would PMI cost me? I make $200k/year."
+        expected:
+          intent: occupy
+          income: 200000
+        expected_null: [equity]
+        min_signals: 1
+
+  # --- Stretcher ---
+  - id: ext_06_stretcher
+    description: "Couple stretching beyond comfortable budget"
+    turns:
+      - message: "My wife and I make $140k combined. We have $100k saved. We really want to stay in Berkeley near our kids' school."
+        expected:
+          intent: occupy
+          income: 140000
+          capital: 100000
+        expected_null: [equity]
+        min_signals: 2
+
+  # --- Not Viable ---
+  - id: ext_07_not_viable
+    description: "Buyer who likely can't afford Berkeley"
+    turns:
+      - message: "I make about $60k and have $20k in savings. I'd love to buy a place in Berkeley."
+        expected:
+          intent: occupy
+          income: 60000
+          capital: 20000
+        expected_null: [equity, current_rent]
+        min_signals: 1
+
+  # --- Equity-Trapped Upgrader ---
+  - id: ext_08_equity_trapped
+    description: "Current homeowner wanting to upgrade"
+    turns:
+      - message: "I bought my 2BR condo in South Berkeley 5 years ago for $650k. I have a 2.9% rate. We need more space with 2 kids. I have about $200k in equity."
+        expected:
+          intent: occupy
+          equity: 200000
+          owns_current_home: true
+        expected_null: [is_first_time_buyer]
+        min_signals: 2
+
+  # --- Competitive Bidder ---
+  - id: ext_09_competitive_bidder
+    description: "Well-qualified buyer in competitive market"
+    turns:
+      - message: "My household income is $450k and I have $600k for a down payment. I keep losing bidding wars in North Berkeley."
+        expected:
+          intent: occupy
+          income: 450000
+          capital: 600000
+        expected_null: [equity]
+        min_signals: 2
+
+  # --- Multi-turn: Incremental disclosure ---
+  - id: ext_10_incremental_disclosure
+    description: "Buyer reveals info across multiple turns"
+    turns:
+      - message: "I'm looking to buy my first home in Berkeley."
+        expected:
+          intent: occupy
+          is_first_time_buyer: true
+        expected_null: [capital, income, equity]
+      - message: "I make about $180k per year and have $200k saved up."
+        expected:
+          capital: 200000
+          income: 180000
+        expected_null: [equity]
+      - message: "By the way, I'm currently paying $3500/month in rent."
+        expected:
+          current_rent: 3500
+    final_expected:
+      intent: occupy
+      capital: 200000
+      income: 180000
+      current_rent: 3500
+      is_first_time_buyer: true
+
+  # --- Multi-turn: Upgrader with correction ---
+  - id: ext_11_upgrader_correction
+    description: "Homeowner upgrader who corrects a number"
+    turns:
+      - message: "I own a home in Berkeley worth about $900k. I need to upgrade for my growing family."
+        expected:
+          intent: occupy
+          owns_current_home: true
+        expected_null: [is_first_time_buyer]
+      - message: "Actually, I have about $350k in equity and make $220k."
+        expected:
+          equity: 350000
+          income: 220000
+    final_expected:
+      intent: occupy
+      owns_current_home: true
+      equity: 350000
+      income: 220000
+
+  # --- Multi-turn: Rent vs buy deliberation ---
+  - id: ext_12_rent_vs_buy_deliberation
+    description: "Renter deliberating whether to buy"
+    turns:
+      - message: "I'm paying $4500/month in rent and wondering if buying makes sense."
+        expected:
+          current_rent: 4500
+        expected_null: [capital, income]
+      - message: "I have $300k saved and make $250k. What do you think?"
+        expected:
+          capital: 300000
+          income: 250000
+    final_expected:
+      current_rent: 4500
+      capital: 300000
+      income: 250000

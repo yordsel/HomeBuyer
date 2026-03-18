@@ -39,6 +39,9 @@ data/*.db-wal
 # Regulation scraper cached HTML (regenerable, ~2MB)
 data/regulations/sources/
 
+# Eval run results (per-run, not committed; baselines are committed)
+data/evals/runs/
+
 # Keep deployed data (models and geo, required for production)
 # data/models/                — ~2MB, committed for deploy
 # data/geo/                   — ~3MB, committed for deploy

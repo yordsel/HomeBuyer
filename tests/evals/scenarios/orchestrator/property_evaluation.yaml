@@ -1,0 +1,89 @@
+scenarios:
+  # --- First-Time Buyer: Property ---
+  - id: orch_01_first_time_property
+    segment: first_time_buyer
+    description: "First-time buyer asking about a specific property"
+    turns:
+      - message: "I'm a first-time buyer with $250k down. Tell me about 1234 Cedar St."
+        expected_tools: [lookup_property, get_price_prediction]
+        forbidden_tools: [generate_investment_prospectus]
+        expected_topics: [price, neighborhood]
+        forbidden_topics: [cap rate, investment return]
+
+  # --- Down Payment Constrained: PMI ---
+  - id: orch_02_pmi_on_property
+    segment: down_payment_constrained
+    description: "Buyer asking about PMI on a specific home"
+    turns:
+      - message: "If I put 10% down on a $1.2M house in Berkeley, how much would PMI cost me? I make $200k/year."
+        expected_tools: [pmi_model]
+        forbidden_tools: [dual_property_model, yield_ranking]
+        expected_topics: [PMI, down payment, monthly cost]
+        forbidden_topics: [investment, cap rate]
+
+  # --- Cash Buyer: Specific Property ---
+  - id: orch_03_cash_property
+    segment: cash_buyer
+    description: "Cash buyer analyzing a specific investment property"
+    turns:
+      - message: "I want to buy 2500 Piedmont Ave all-cash as an investment. What's the rental income potential and cap rate?"
+        expected_tools: [lookup_property, estimate_rental_income]
+        forbidden_tools: [pmi_model]
+        expected_topics: [rental income, cap rate]
+        forbidden_topics: [PMI, first-time buyer]
+
+  # --- Competitive Bidder: Property Eval ---
+  - id: orch_04_competitive_bidder
+    segment: competitive_bidder
+    description: "Competitive bidder evaluating a property"
+    turns:
+      - message: "My household income is $450k and I have $600k for a down payment. I keep losing bidding wars in North Berkeley."
+        expected_tools: [get_market_summary]
+        forbidden_tools: [generate_investment_prospectus]
+        expected_topics: [competition, bidding]
+        forbidden_topics: [not viable, can't afford]
+
+  # --- Multi-turn: First-time buyer explores then asks about property ---
+  - id: orch_05_first_time_multi
+    segment: first_time_buyer
+    description: "Multi-turn: market overview then property-specific question"
+    turns:
+      - message: "I'm a first-time buyer with $300k down and $220k income. What neighborhoods should I be looking at?"
+        expected_tools: [get_market_summary]
+        expected_topics: [neighborhood, budget, affordability]
+      - message: "What about Elmwood? How does it compare to Thousand Oaks?"
+        expected_tools: [get_neighborhood_stats]
+        expected_topics: [Elmwood, comparison]
+
+  # --- Equity-Trapped: Upgrade dilemma ---
+  - id: orch_06_equity_trapped
+    segment: equity_trapped_upgrader
+    description: "Homeowner wanting to upgrade without losing rate"
+    turns:
+      - message: "I bought my 2BR condo in South Berkeley 5 years ago for $650k at 2.9%. We need more space with 2 kids. I have about $200k in equity. How do I upgrade?"
+        expected_tools: [get_market_summary]
+        forbidden_tools: [generate_investment_prospectus]
+        expected_topics: [rate, equity, upgrade]
+        forbidden_topics: [first-time buyer]
+
+  # --- Value-Add Investor: Property with ADU potential ---
+  - id: orch_07_value_add_property
+    segment: value_add_investor
+    description: "Investor looking for ADU/renovation opportunities"
+    turns:
+      - message: "I'm looking for properties with ADU potential in Berkeley. I have $800k to invest. What neighborhoods have the best value-add opportunities?"
+        expected_tools: [get_market_summary]
+        forbidden_tools: [pmi_model]
+        expected_topics: [ADU, development, value-add]
+        forbidden_topics: [PMI, first-time]
+
+  # --- Stretcher: Can they afford it? ---
+  - id: orch_08_stretcher_property
+    segment: stretcher
+    description: "Stretcher evaluating if a specific home is feasible"
+    turns:
+      - message: "My wife and I make $140k combined. We have $100k saved. We really want to stay in Berkeley near our kids' school. What are our options?"
+        expected_tools: [get_market_summary]
+        forbidden_tools: [yield_ranking, dual_property_model]
+        expected_topics: [affordability, budget]
+        forbidden_topics: [investment return]

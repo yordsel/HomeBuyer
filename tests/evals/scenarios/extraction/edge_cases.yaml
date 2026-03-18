@@ -1,0 +1,83 @@
+scenarios:
+  # --- No extractable signals ---
+  - id: ext_30_no_signals
+    description: "Generic market question with no buyer signals"
+    turns:
+      - message: "What's the Berkeley real estate market like right now? Are prices going up or down?"
+        expected: {}
+        expected_null: [intent, capital, income, equity, current_rent, is_first_time_buyer]
+        min_signals: 0
+
+  - id: ext_31_greeting
+    description: "Simple greeting with no financial info"
+    turns:
+      - message: "Hi, I'm interested in learning about Berkeley real estate."
+        expected: {}
+        expected_null: [capital, income, equity, current_rent]
+        min_signals: 0
+
+  # --- Ambiguous intent ---
+  - id: ext_32_mixed_intent
+    description: "Buyer with unclear occupy vs invest intent"
+    turns:
+      - message: "I'm thinking about buying a property in Berkeley. Maybe live in it for a few years then rent it out. I have about $400k and make $200k."
+        expected:
+          capital: 400000
+          income: 200000
+        expected_null: [equity]
+        min_signals: 1
+
+  # --- Approximate numbers ---
+  - id: ext_33_approximate_numbers
+    description: "Buyer using approximate/round numbers"
+    turns:
+      - message: "I make around a hundred and fifty grand and probably have close to 250k saved."
+        expected:
+          income: 150000
+          capital: 250000
+        expected_null: [equity]
+        min_signals: 1
+
+  # --- Information in question form ---
+  - id: ext_34_question_form
+    description: "Financial info embedded in questions"
+    turns:
+      - message: "Can someone with $120k income and only $50k saved even think about buying in Berkeley?"
+        expected:
+          intent: occupy
+          income: 120000
+          capital: 50000
+        expected_null: [equity]
+        min_signals: 1
+
+  # --- Negative signals ---
+  - id: ext_35_negative_signals
+    description: "Buyer explicitly stating what they don't have"
+    turns:
+      - message: "I don't own any property currently. I'm renting at $2800. Is first-time buyer assistance available in Berkeley?"
+        expected:
+          is_first_time_buyer: true
+          owns_current_home: false
+          current_rent: 2800
+        expected_null: [equity]
+        min_signals: 1
+
+  # --- Irrelevant numbers ---
+  - id: ext_36_irrelevant_numbers
+    description: "Message with numbers that aren't financial signals"
+    turns:
+      - message: "I've been looking at Berkeley for about 3 months now. My family of 4 needs at least 3 bedrooms."
+        expected: {}
+        expected_null: [capital, income, equity, current_rent]
+        min_signals: 0
+
+  # --- Multiple people's finances ---
+  - id: ext_37_joint_finances
+    description: "Joint finances should be combined"
+    turns:
+      - message: "Between my partner and me, we earn $320k total and have pooled $450k for a down payment."
+        expected:
+          income: 320000
+          capital: 450000
+        expected_null: [equity]
+        min_signals: 2
