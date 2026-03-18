@@ -59,13 +59,29 @@ class _MockToolUseBlock:
         self.input = input or {}
 
 
+_SEGMENT_PROFILES: dict[str, dict] = {
+    "first_time_buyer": {"intent": "occupy", "capital": 250_000, "income": 180_000, "is_first_time_buyer": True},
+    "stretcher": {"intent": "occupy", "capital": 100_000, "income": 140_000},
+    "not_viable": {"intent": "occupy", "capital": 20_000, "income": 60_000},
+    "down_payment_constrained": {"intent": "occupy", "capital": 80_000, "income": 200_000},
+    "equity_trapped_upgrader": {"intent": "occupy", "equity": 200_000, "owns_current_home": True},
+    "competitive_bidder": {"intent": "occupy", "capital": 600_000, "income": 450_000},
+    "cash_buyer": {"intent": "invest", "capital": 1_500_000},
+    "leveraged_investor": {"intent": "invest", "capital": 400_000, "income": 250_000},
+    "value_add_investor": {"intent": "invest", "capital": 800_000},
+    "appreciation_bettor": {"intent": "invest", "capital": 500_000},
+    "equity_leveraging_investor": {"intent": "invest", "equity": 1_600_000, "owns_current_home": True},
+}
+
+
 def _make_mock_context(segment: str = "first_time_buyer") -> ResearchContext:
     ctx = ResearchContext(user_id="eval-test-user")
     ctx.market = MarketSnapshot(
         mortgage_rate_30yr=6.5,
         berkeley_wide=BerkeleyWideMetrics(median_sale_price=1_300_000),
     )
-    ctx.buyer.profile = BuyerProfile(intent="occupy", capital=100_000)
+    profile_kwargs = _SEGMENT_PROFILES.get(segment, {"intent": "occupy", "capital": 100_000})
+    ctx.buyer.profile = BuyerProfile(**profile_kwargs)
     if segment:
         ctx.buyer.segment_id = segment
         ctx.buyer.segment_confidence = 0.75
