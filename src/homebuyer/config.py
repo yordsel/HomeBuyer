@@ -252,5 +252,5 @@ class PriceRange:
 # Feature flags
 # ---------------------------------------------------------------------------
 USE_SEGMENT_ORCHESTRATION = os.environ.get(
-    "USE_SEGMENT_ORCHESTRATION", ""
+    "USE_SEGMENT_ORCHESTRATION", "true"
 ).lower() in ("1", "true", "yes")
