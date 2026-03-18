@@ -268,52 +268,39 @@ class TestOrchestratorEvalLive:
     async def test_all_scenarios(
         self, orchestrator_scenarios, anthropic_client, app_state, tmp_path,
     ):
-        """Run all orchestrator scenarios against real Sonnet API + real DB."""
-        from homebuyer.api import _faketor_tool_executor
-        from homebuyer.services.faketor.classification import SegmentClassifier
-        from homebuyer.services.faketor.extraction import SignalExtractor
-        from homebuyer.services.faketor.tools import registry as global_registry
+        """Run all orchestrator scenarios using the production TurnOrchestrator.
 
-        # Build real components with real client
-        extractor = SignalExtractor(anthropic_client)
-        classifier = SegmentClassifier()
-
-        # Real tool executor backed by DB + ML model
-        real_tool_executor = ToolExecutor(_faketor_tool_executor, global_registry)
-
-        # Use in-memory context store (no DB needed for context persistence)
-        ctx_store = MagicMock(spec=ResearchContextStore)
-        ctx_store.persist = AsyncMock()
-
-        # Pre-executor still mocked (proactive analysis is tested separately)
-        pre_executor = MagicMock(spec=PreExecutor)
-        pre_executor.execute.return_value = PreExecutionResult()
+        Uses AppState.turn_orchestrator directly — same code path as the
+        real /api/faketor/chat endpoint. No mocked components: real DB,
+        real ML model, real extraction, real classification, real market
+        snapshot, real pre-execution.
+        """
+        orch = app_state.turn_orchestrator
+        assert orch is not None, (
+            "TurnOrchestrator not initialized — check ANTHROPIC_API_KEY and "
+            "USE_SEGMENT_ORCHESTRATION"
+        )
 
         import time
         results = []
         for scenario in orchestrator_scenarios:
-            context = _make_mock_context(scenario.segment)
-            ctx_store.load_or_create = AsyncMock(return_value=context)
-
-            orch = TurnOrchestrator(
-                client=anthropic_client,
-                context_store=ctx_store,
-                signal_extractor=extractor,
-                segment_classifier=classifier,
-                tool_executor=real_tool_executor,
-                pre_executor=pre_executor,
-                registry=global_registry,
-            )
+            # Unique user_id per scenario so contexts don't bleed
+            user_id = f"eval-{scenario.id}"
+            history: list[dict] = []
 
             turn_results = []
             for turn in scenario.turns:
                 t0 = time.time()
                 result = await orch.run(
                     message=turn.message,
-                    user_id="eval-live-user",
-                    history=[],
+                    user_id=user_id,
+                    history=history,
                 )
                 elapsed = (time.time() - t0) * 1000
+
+                # Build history for multi-turn continuity
+                history.append({"role": "user", "content": turn.message})
+                history.append({"role": "assistant", "content": result.reply})
 
                 tools_used = [tc["name"] for tc in result.tool_calls]
                 tool_grade = grade_tool_selection(
