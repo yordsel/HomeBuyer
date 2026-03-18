@@ -501,6 +501,19 @@ class AppState:
         self.db.connect(check_same_thread=False)
         self.db.initialize_schema()
 
+        # Backfill computed_bldg_sqft for any rows that don't have it yet
+        from homebuyer.processing.reconcile_sqft import reconcile_sqft
+
+        try:
+            stats = reconcile_sqft(self.db)
+            logger.info(
+                "Sqft reconciliation: %d/%d properties populated.",
+                stats.get("_total_reconciled", 0),
+                stats.get("_total_properties", 0),
+            )
+        except Exception:
+            logger.exception("Sqft reconciliation failed (non-fatal).")
+
         logger.info("Loading ML model...")
         try:
             self.model = ModelArtifact.load()

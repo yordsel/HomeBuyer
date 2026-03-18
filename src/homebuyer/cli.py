@@ -533,29 +533,50 @@ def process_sales(ctx: click.Context) -> None:
 @process.command("all")
 @click.pass_context
 def process_all(ctx: click.Context) -> None:
-    """Run normalize, geocode, zoning, and deduplicate in sequence."""
-    click.echo("Step 1/5: Normalizing neighborhood names...")
+    """Run normalize, geocode, zoning, deduplicate, validate, and reconcile in sequence."""
+    click.echo("Step 1/6: Normalizing neighborhood names...")
     ctx.invoke(process_normalize)
 
-    click.echo("\nStep 2/5: Geocoding missing neighborhoods...")
+    click.echo("\nStep 2/6: Geocoding missing neighborhoods...")
     try:
         ctx.invoke(process_geocode)
     except FileNotFoundError as e:
         click.echo(f"  Skipping geocode: {e}")
 
-    click.echo("\nStep 3/5: Classifying zoning districts...")
+    click.echo("\nStep 3/6: Classifying zoning districts...")
     try:
         ctx.invoke(process_zoning)
     except FileNotFoundError as e:
         click.echo(f"  Skipping zoning: {e}")
 
-    click.echo("\nStep 4/5: Deduplicating records...")
+    click.echo("\nStep 4/6: Deduplicating records...")
     ctx.invoke(process_deduplicate)
 
-    click.echo("\nStep 5/5: Validating data ranges...")
+    click.echo("\nStep 5/6: Validating data ranges...")
     ctx.invoke(process_validate)
 
+    click.echo("\nStep 6/6: Reconciling building sqft...")
+    ctx.invoke(process_reconcile_sqft)
+
     click.echo("\nAll processing complete.")
+
+
+@process.command("reconcile-sqft")
+@click.option("--force", is_flag=True, help="Re-reconcile all rows (clears existing values).")
+@click.pass_context
+def process_reconcile_sqft(ctx: click.Context, force: bool = False) -> None:
+    """Reconcile building_sqft vs sqft into computed_bldg_sqft."""
+    from homebuyer.processing.reconcile_sqft import reconcile_sqft
+
+    db_path = ctx.obj["db_path"]
+    with Database(db_path) as db:
+        db.initialize_schema()
+        stats = reconcile_sqft(db, force=force)
+
+    total = stats.get("_total_reconciled", 0)
+    noted = stats.get("_total_noted", 0)
+    props = stats.get("_total_properties", 0)
+    click.echo(f"Reconciled: {total}/{props} properties, {noted} with data notes")
 
 
 # ---------------------------------------------------------------------------

@@ -194,6 +194,9 @@ class BerkeleyParcel:
     last_sale_date: Optional[str] = None
     last_sale_price: Optional[int] = None
     rentcast_enriched: bool = False  # Flag: has RentCast API enrichment been fetched?
+    # Computed / reconciled fields
+    computed_bldg_sqft: Optional[int] = None  # Best-available building sqft after reconciliation
+    data_notes: Optional[str] = None  # JSON array of reconciliation notes
 
 
 @dataclass

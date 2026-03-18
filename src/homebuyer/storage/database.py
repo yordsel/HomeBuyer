@@ -53,7 +53,7 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 # Schema DDL (SQLite dialect — translated at runtime for Postgres)
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _SCHEMA_SQL_SQLITE = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -243,6 +243,8 @@ CREATE TABLE IF NOT EXISTS properties (
     record_type         TEXT,
     lot_group_key       TEXT,
     parcel_lot_size_sqft INTEGER,
+    computed_bldg_sqft  INTEGER,
+    data_notes          TEXT,
     collected_at        TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -912,6 +914,17 @@ class Database:
                 self.commit()
                 logger.info(
                     "Migration v4: renamed attom_enriched → rentcast_enriched."
+                )
+
+            # --- v6 migration: add computed_bldg_sqft + data_notes ---
+            if "computed_bldg_sqft" not in props_cols:
+                self.execute(
+                    "ALTER TABLE properties ADD COLUMN computed_bldg_sqft INTEGER"
+                )
+                self.execute("ALTER TABLE properties ADD COLUMN data_notes TEXT")
+                self.commit()
+                logger.info(
+                    "Migration v6: added computed_bldg_sqft and data_notes columns."
                 )
 
         # --- v3 migration: make password_hash nullable for OAuth-only users ---
