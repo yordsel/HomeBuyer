@@ -44,10 +44,62 @@ def render(
         logger.warning("No prompt template registered for segment %r", segment_id)
         return ""
 
-    return template(
+    rendered = template(
         confidence=segment_confidence,
         profile_summary=profile_summary,
         profile=profile,
+    )
+
+    # Append confidence-aware nudge when classification is uncertain
+    nudge = _build_confidence_nudge(segment_confidence, profile)
+    if nudge:
+        rendered = rendered + "\n\n" + nudge
+
+    return rendered
+
+
+# The 4 core factors the classifier uses to determine segment
+_CORE_FACTORS = [
+    ("capital", "budget or savings amount"),
+    ("income", "household income"),
+    ("owns_current_home", "whether they currently own or rent"),
+    ("equity", "equity in current property (if they own)"),
+]
+
+_CONFIDENCE_NUDGE_THRESHOLD = 0.6
+
+
+def _build_confidence_nudge(confidence: float, profile: BuyerProfile) -> str:
+    """Build a nudge instruction when segment confidence is low.
+
+    Tells the LLM which profile factors are missing and asks it to
+    naturally elicit them after answering the user's question.
+    """
+    if confidence >= _CONFIDENCE_NUDGE_THRESHOLD:
+        return ""
+
+    missing = []
+    for field_name, description in _CORE_FACTORS:
+        if getattr(profile, field_name) is None:
+            missing.append(description)
+
+    if not missing:
+        return ""
+
+    missing_str = ", ".join(missing)
+    confidence_pct = int(confidence * 100)
+
+    return (
+        f"=== CONFIDENCE NOTE ===\n"
+        f"Segment confidence is low ({confidence_pct}%). "
+        f"The segment guidance above is a best guess — prioritize answering "
+        f"the user's explicit question over the segment's primary job.\n"
+        f"\n"
+        f"After answering their question, naturally ask about one of these "
+        f"missing factors to improve your understanding: {missing_str}.\n"
+        f"Keep it conversational — weave it into your response, don't list "
+        f"questions like a form.\n"
+        f"=== END CONFIDENCE NOTE ==="
     )
 
 
