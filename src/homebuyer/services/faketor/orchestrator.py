@@ -222,16 +222,22 @@ class TurnOrchestrator:
         context: ResearchContext,
         metrics: TurnMetrics,
     ) -> None:
-        """Classify buyer segment and update context."""
+        """Classify buyer segment and update context.
+
+        Also computes top-N alternative candidates for ambiguous cases.
+        Candidates are stored on ``context.buyer.segment_candidates``
+        (ephemeral, not persisted) for use by the prompt renderer.
+        """
         start = time.monotonic()
+        mortgage_rate = context.market.mortgage_rate_30yr or 6.5
+        median_price = (
+            context.market.berkeley_wide.median_sale_price or 1_300_000
+        )
         try:
             result = self._classifier.classify(
                 context.buyer.profile,
-                mortgage_rate=context.market.mortgage_rate_30yr or 6.5,
-                median_price=(
-                    context.market.berkeley_wide.median_sale_price
-                    or 1_300_000
-                ),
+                mortgage_rate=mortgage_rate,
+                median_price=median_price,
             )
             # Guard: only record transition when classifier returns a segment
             if result.segment_id is not None:
@@ -241,8 +247,18 @@ class TurnOrchestrator:
                     result.confidence,
                     factor_coverage=result.factor_coverage,
                 )
+
+            # Compute alternatives for ambiguous classifications
+            context.buyer.segment_candidates = (
+                self._classifier.classify_with_alternatives(
+                    context.buyer.profile,
+                    mortgage_rate=mortgage_rate,
+                    median_price=median_price,
+                )
+            )
         except Exception as e:
             logger.warning("Segment classification failed: %s", e)
+            context.buyer.segment_candidates = []
         metrics.classification_ms = (time.monotonic() - start) * 1000
 
     # ------------------------------------------------------------------
@@ -265,7 +281,21 @@ class TurnOrchestrator:
                 reasoning="from context",
                 factor_coverage=context.buyer.segment_factor_coverage,
             )
-        plan = self._resolver.resolve(message, segment_result, context)
+        # Extract alternative segment IDs from candidates for broader
+        # pre-execution coverage (multi-segment classification, #82)
+        alt_ids: list[str] | None = None
+        candidates = getattr(context.buyer, "segment_candidates", None)
+        if candidates and len(candidates) > 1:
+            alt_ids = [
+                c.segment_id for c in candidates
+                if c.segment_id != context.buyer.segment_id
+                and c.confidence > 0.25
+            ]
+
+        plan = self._resolver.resolve(
+            message, segment_result, context,
+            alternative_segment_ids=alt_ids,
+        )
         metrics.job_resolution_ms = (time.monotonic() - start) * 1000
         return plan
 
@@ -387,6 +417,13 @@ class TurnOrchestrator:
 
         for iteration in range(self._max_iterations):
             metrics.llm_iterations = iteration + 1
+
+            if iteration == 0:
+                logger.debug(
+                    "LLM loop system prompt (%d chars):\n%s",
+                    len(system_prompt),
+                    system_prompt,
+                )
 
             try:
                 response = self._client.messages.create(

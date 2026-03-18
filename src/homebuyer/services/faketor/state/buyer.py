@@ -299,6 +299,8 @@ class BuyerState:
     segment_confidence: float = 0.0
     segment_factor_coverage: float = 0.0
     segment_history: list[SegmentTransition] = field(default_factory=list)
+    # Ephemeral per-turn: top-N segment candidates (not persisted)
+    segment_candidates: list[Any] = field(default_factory=list)
 
     def record_transition(
         self,

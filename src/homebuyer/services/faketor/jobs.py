@@ -396,16 +396,39 @@ class JobResolver:
         request_text: str,
         segment: SegmentResult | None,
         context: ResearchContext,
+        alternative_segment_ids: list[str] | None = None,
     ) -> TurnPlan:
-        """Build a turn plan from the request and current state."""
+        """Build a turn plan from the request and current state.
+
+        When ``alternative_segment_ids`` is provided, unions proactive
+        analyses from the primary segment and all alternatives to ensure
+        broader tool coverage for ambiguous classifications.
+        """
         request_type = self.classify_request(request_text)
         segment_id = segment.segment_id if segment else None
 
-        # Look up proactive analyses
+        # Look up proactive analyses — union from primary + alternatives
+        seen_tools: set[str] = set()
         analyses: list[AnalysisSpec] = []
+
+        # Primary segment's analyses
         if segment_id:
             key = (segment_id, request_type)
-            analyses = list(PROACTIVE_ANALYSES.get(key, []))
+            for spec in PROACTIVE_ANALYSES.get(key, []):
+                if spec.tool_name not in seen_tools:
+                    analyses.append(spec)
+                    seen_tools.add(spec.tool_name)
+
+        # Alternative segments' analyses (deduplicated by tool name)
+        if alternative_segment_ids:
+            for alt_id in alternative_segment_ids:
+                if alt_id == segment_id:
+                    continue
+                alt_key = (alt_id, request_type)
+                for spec in PROACTIVE_ANALYSES.get(alt_key, []):
+                    if spec.tool_name not in seen_tools:
+                        analyses.append(spec)
+                        seen_tools.add(spec.tool_name)
 
         # Filter by available context
         available = _available_context(context)

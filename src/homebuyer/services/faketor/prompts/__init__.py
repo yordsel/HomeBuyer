@@ -54,6 +54,7 @@ class PromptAssembler:
                 context.buyer.segment_id,
                 context.buyer.segment_confidence,
                 context.buyer.profile,
+                candidates=getattr(context.buyer, "segment_candidates", None),
             ),
             property.render(context.property),
             preexecuted.render(accumulated_facts),

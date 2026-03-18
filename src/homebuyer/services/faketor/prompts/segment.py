@@ -4,14 +4,19 @@ Detected segment, buyer profile, confidence. This is the segment-aware
 component that renders differently based on classification.
 
 Phase D-1 (#38) of Epic #23.
+Updated for multi-segment classification (#82).
 """
 
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from homebuyer.services.faketor.prompts.templates import get_segment_template
 from homebuyer.services.faketor.state.buyer import BuyerProfile
+
+if TYPE_CHECKING:
+    from homebuyer.services.faketor.classification import SegmentCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +25,17 @@ def render(
     segment_id: str | None,
     segment_confidence: float,
     profile: BuyerProfile,
+    candidates: list[SegmentCandidate] | None = None,
 ) -> str:
     """Render the segment context prompt fragment.
 
     Returns empty string if confidence is too low (<0.1) to be useful.
     For low confidence (0.1–0.3), returns the fallback elicitation prompt.
     For reasonable confidence (>0.3), returns the segment-specific template.
+
+    When ``candidates`` is provided and confidence is below the threshold,
+    renders a SEGMENT ALTERNATIVES block with disambiguation guidance
+    instead of the generic confidence nudge.
     """
     if segment_id is None or segment_confidence < 0.1:
         return ""
@@ -50,10 +60,18 @@ def render(
         profile=profile,
     )
 
-    # Append confidence-aware nudge when classification is uncertain
-    nudge = _build_confidence_nudge(segment_confidence, profile)
-    if nudge:
-        rendered = rendered + "\n\n" + nudge
+    # Append disambiguation or confidence nudge when classification is uncertain
+    if segment_confidence < _CONFIDENCE_NUDGE_THRESHOLD:
+        alternatives_block = _build_alternatives_block(
+            segment_id, segment_confidence, candidates
+        )
+        if alternatives_block:
+            rendered = rendered + "\n\n" + alternatives_block
+        else:
+            # Fall back to generic confidence nudge if no alternatives
+            nudge = _build_confidence_nudge(segment_confidence, profile)
+            if nudge:
+                rendered = rendered + "\n\n" + nudge
 
     return rendered
 
@@ -68,12 +86,74 @@ _CORE_FACTORS = [
 
 _CONFIDENCE_NUDGE_THRESHOLD = 0.6
 
+# Maximum gap between primary and alternative to show as "also possible"
+_ALTERNATIVE_GAP_THRESHOLD = 0.15
+
+
+def _build_alternatives_block(
+    primary_id: str,
+    primary_confidence: float,
+    candidates: list[SegmentCandidate] | None,
+) -> str:
+    """Build a SEGMENT ALTERNATIVES block for ambiguous classifications.
+
+    Shows close alternatives and a targeted disambiguation question
+    derived from the distinguishing factor between the top two candidates.
+    Returns empty string if no meaningful alternatives exist.
+    """
+    if not candidates or len(candidates) < 2:
+        return ""
+
+    # Find alternatives close in confidence to the primary
+    close_alternatives = [
+        c for c in candidates
+        if c.segment_id != primary_id
+        and (primary_confidence - c.confidence) <= _ALTERNATIVE_GAP_THRESHOLD
+        and c.confidence > 0.15
+    ]
+
+    if not close_alternatives:
+        return ""
+
+    # Build the segment names in human-readable form
+    def _format_segment(seg_id: str) -> str:
+        return seg_id.replace("_", " ").upper()
+
+    confidence_pct = int(primary_confidence * 100)
+
+    lines = [
+        "=== SEGMENT ALTERNATIVES ===",
+        f"Primary: {_format_segment(primary_id)} ({confidence_pct}%)",
+    ]
+
+    for alt in close_alternatives:
+        alt_pct = int(alt.confidence * 100)
+        lines.append(
+            f"Also possible: {_format_segment(alt.segment_id)} ({alt_pct}%)"
+            + (f" — distinguishing factor: {alt.distinguishing_factor}"
+               if alt.distinguishing_factor else "")
+        )
+
+    # Use the top alternative's distinguishing factor for the question
+    top_alt = close_alternatives[0]
+    if top_alt.distinguishing_factor:
+        lines.append("")
+        lines.append(
+            f"To narrow this down, after answering the user's question, "
+            f"naturally ask about: {top_alt.distinguishing_factor}. "
+            f"Keep it conversational — one question woven into your response."
+        )
+
+    lines.append("=== END SEGMENT ALTERNATIVES ===")
+    return "\n".join(lines)
+
 
 def _build_confidence_nudge(confidence: float, profile: BuyerProfile) -> str:
     """Build a nudge instruction when segment confidence is low.
 
     Tells the LLM which profile factors are missing and asks it to
     naturally elicit them after answering the user's question.
+    Used as fallback when no alternatives are available.
     """
     if confidence >= _CONFIDENCE_NUDGE_THRESHOLD:
         return ""

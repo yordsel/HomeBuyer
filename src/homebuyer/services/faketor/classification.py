@@ -34,6 +34,20 @@ class SegmentResult:
     factor_coverage: float  # 0.0–1.0 based on known core factors
 
 
+@dataclass(frozen=True)
+class SegmentCandidate:
+    """A scored segment candidate with disambiguation info.
+
+    Used by ``classify_with_alternatives()`` to return the top-N candidates
+    so the prompt can show alternatives and ask targeted follow-up questions.
+    """
+
+    segment_id: str
+    confidence: float
+    reasoning: str
+    distinguishing_factor: str  # what would disambiguate from adjacent candidates
+
+
 # ---------------------------------------------------------------------------
 # Segment IDs — canonical string identifiers
 # ---------------------------------------------------------------------------
@@ -567,6 +581,164 @@ class SegmentClassifier:
         # Same segment: only update if higher confidence
         return proposed.confidence > current.confidence
 
+    def classify_with_alternatives(
+        self,
+        profile: BuyerProfile,
+        mortgage_rate: float = 6.5,
+        median_price: int = _DEFAULT_BERKELEY_MEDIAN,
+        max_candidates: int = 3,
+    ) -> list[SegmentCandidate]:
+        """Classify buyer and return top-N scored candidates.
+
+        Unlike ``classify()`` which returns only the winner, this method
+        returns up to ``max_candidates`` plausible segments with confidence
+        scores and distinguishing factors. This lets the prompt renderer
+        show alternatives and ask targeted disambiguation questions.
+
+        Returns empty list if no classification is possible (no intent).
+        """
+        primary = self.classify(profile, mortgage_rate, median_price)
+        if primary.segment_id is None:
+            return []
+
+        # Score all segments in the same intent group
+        if profile.intent == "occupy":
+            candidate_pool = OCCUPY_SEGMENTS
+        else:
+            candidate_pool = INVEST_SEGMENTS
+
+        scored: list[SegmentCandidate] = []
+        for seg_id in candidate_pool:
+            if seg_id == primary.segment_id:
+                scored.append(SegmentCandidate(
+                    segment_id=seg_id,
+                    confidence=primary.confidence,
+                    reasoning=primary.reasoning,
+                    distinguishing_factor="",
+                ))
+            else:
+                # Score how plausible this alternative is
+                alt_conf = self._score_alternative(
+                    seg_id, profile, mortgage_rate, median_price,
+                    primary.factor_coverage,
+                )
+                if alt_conf > 0.0:
+                    factor = _DISTINGUISHING_FACTORS.get(
+                        (primary.segment_id, seg_id),
+                        _DISTINGUISHING_FACTORS.get(
+                            (seg_id, primary.segment_id),
+                            "additional financial details",
+                        ),
+                    )
+                    scored.append(SegmentCandidate(
+                        segment_id=seg_id,
+                        confidence=alt_conf,
+                        reasoning=f"Alternative to {primary.segment_id}",
+                        distinguishing_factor=factor,
+                    ))
+
+        # Sort by confidence descending, take top N
+        scored.sort(key=lambda c: c.confidence, reverse=True)
+        return scored[:max_candidates]
+
+    def _score_alternative(
+        self,
+        segment_id: str,
+        profile: BuyerProfile,
+        rate: float,
+        median_price: int,
+        factor_coverage: float,
+    ) -> float:
+        """Score how plausible an alternative segment is.
+
+        Returns 0.0 if the segment is clearly impossible given known data.
+        Returns a reduced confidence score if it's plausible but not the
+        primary classification.
+        """
+        base = self._base_confidence(factor_coverage)
+        capital = profile.capital
+        equity = profile.equity
+        income = profile.income
+        has_existing = profile.owns_current_home is True
+
+        # --- Invest segments ---
+        if segment_id == CASH_BUYER:
+            # Plausible if capital unknown (could be high) or capital > 0
+            if capital is None:
+                return base * 0.7  # unknown capital = maybe
+            if capital >= median_price:
+                return base  # definitely cash buyer
+            return 0.0  # known capital too low
+
+        if segment_id == LEVERAGED_INVESTOR:
+            # Plausible if income exists or is unknown
+            if income is not None and income > 0 and (capital is None or capital > 0):
+                return base * 0.8
+            if income is None and capital is None:
+                return base * 0.5  # both unknown = maybe
+            return 0.0
+
+        if segment_id == EQUITY_LEVERAGING_INVESTOR:
+            if has_existing and (equity is None or (equity is not None and equity > 0)):
+                return base * 0.7
+            return 0.0
+
+        if segment_id == VALUE_ADD_INVESTOR:
+            dev_signals = [
+                s for s in profile.signals
+                if any(kw in s.implication.lower() for kw in (
+                    "development", "renovation", "adu", "value_add", "flip",
+                ))
+            ]
+            return base * 0.6 if dev_signals else 0.0
+
+        if segment_id == APPRECIATION_BETTOR:
+            # Always plausible as invest fallback
+            return max(0.2, base * 0.5)
+
+        # --- Occupy segments ---
+        if segment_id == FIRST_TIME_BUYER:
+            if not has_existing and (equity is None or equity == 0):
+                return base * 0.7
+            return 0.0
+
+        if segment_id == STRETCHER:
+            if income is not None and income > 0:
+                return base * 0.6
+            if income is None:
+                return base * 0.4
+            return 0.0
+
+        if segment_id == DOWN_PAYMENT_CONSTRAINED:
+            if capital is not None and capital > 0:
+                cap_val = capital
+                dp_pct = cap_val / median_price if median_price > 0 else 0
+                if dp_pct < 0.20:
+                    return base * 0.7
+            if capital is None:
+                return base * 0.4
+            return 0.0
+
+        if segment_id == NOT_VIABLE:
+            # Only plausible if capital is known and very low
+            if capital is not None and capital < median_price * _FHA_MINIMUM_PCT:
+                return base * 0.5
+            return 0.0
+
+        if segment_id == EQUITY_TRAPPED_UPGRADER:
+            if has_existing and (equity is not None and equity > 0):
+                return base * 0.6
+            return 0.0
+
+        if segment_id == COMPETITIVE_BIDDER:
+            if (capital is not None and capital > 0
+                    and equity is not None and equity > 0
+                    and income is not None and income > 0):
+                return base * 0.7
+            return 0.0
+
+        return 0.0
+
     @staticmethod
     def _base_confidence(factor_coverage: float) -> float:
         """Compute base confidence from factor coverage.
@@ -577,3 +749,35 @@ class SegmentClassifier:
         """
         # Linear interpolation: 0.3 at 0% coverage → 0.95 at 100%
         return 0.3 + factor_coverage * 0.65
+
+
+# ---------------------------------------------------------------------------
+# Distinguishing factor lookup — what question disambiguates two segments
+# ---------------------------------------------------------------------------
+
+_DISTINGUISHING_FACTORS: dict[tuple[str, str], str] = {
+    # Invest segment pairs
+    (CASH_BUYER, APPRECIATION_BETTOR): "capital availability (can you purchase outright?)",
+    (CASH_BUYER, LEVERAGED_INVESTOR): "financing plan (all-cash or mortgage?)",
+    (CASH_BUYER, EQUITY_LEVERAGING_INVESTOR): "source of funds (cash savings or home equity?)",
+    (LEVERAGED_INVESTOR, APPRECIATION_BETTOR): "income and financing capacity",
+    (LEVERAGED_INVESTOR, EQUITY_LEVERAGING_INVESTOR): (
+        "source of capital (savings + income or existing home equity?)"
+    ),
+    (APPRECIATION_BETTOR, VALUE_ADD_INVESTOR): (
+        "investment strategy (buy-and-hold or renovate/develop?)"
+    ),
+    (APPRECIATION_BETTOR, EQUITY_LEVERAGING_INVESTOR): (
+        "whether you own property with equity to leverage"
+    ),
+    # Occupy segment pairs
+    (STRETCHER, FIRST_TIME_BUYER): "budget tightness relative to income",
+    (STRETCHER, DOWN_PAYMENT_CONSTRAINED): "whether the budget or down payment is the bottleneck",
+    (FIRST_TIME_BUYER, DOWN_PAYMENT_CONSTRAINED): "down payment amount relative to purchase price",
+    (FIRST_TIME_BUYER, COMPETITIVE_BIDDER): "available capital and equity",
+    (EQUITY_TRAPPED_UPGRADER, COMPETITIVE_BIDDER): (
+        "current homeownership and interest rate lock-in"
+    ),
+    (NOT_VIABLE, STRETCHER): "income level and savings",
+    (NOT_VIABLE, DOWN_PAYMENT_CONSTRAINED): "total savings available for down payment",
+}
