@@ -66,11 +66,11 @@ _TOOL_LABELS: dict[str, str] = {
     "pmi_model": "Modeling PMI costs...",
     "rate_penalty": "Calculating rate penalty...",
     "appreciation_stress_test": "Running appreciation stress test...",
-    "competition": "Analyzing competition...",
+    "competition_assessment": "Analyzing competition...",
     "neighborhood_lifestyle": "Matching neighborhoods to lifestyle...",
-    "dual_property": "Comparing two properties...",
+    "dual_property_model": "Comparing two properties...",
     "yield_ranking": "Ranking by investment yield...",
-    "adjacent_market": "Exploring adjacent markets...",
+    "adjacent_market_comparison": "Exploring adjacent markets...",
 }
 
 

@@ -49,7 +49,7 @@ homebuyer predict                      # Run batch predictions
 FastAPI serves both the API and the built frontend SPA from a single process. All ~50 endpoints live in `src/homebuyer/api.py`. An `AppState` singleton is initialized at lifespan startup, loading the DB connection, ML model, zoning classifier, geocoder, and development calculator. Middleware stack: CORS → SecurityHeaders → SlowAPI rate limiter.
 
 ### Dual-mode database
-`src/homebuyer/storage/database.py` handles SQLite (dev) and PostgreSQL (prod). Mode is selected by the `DATABASE_URL` env var — when set, PostgreSQL is used; otherwise SQLite at `data/berkeley_homebuyer.db`. Schema DDL is written in SQLite dialect and auto-translated for Postgres at runtime. Current schema version: 3.
+`src/homebuyer/storage/database.py` handles SQLite (dev) and PostgreSQL (prod). Mode is selected by the `DATABASE_URL` env var — when set, PostgreSQL is used; otherwise SQLite at `data/berkeley_homebuyer.db`. Schema DDL is written in SQLite dialect and auto-translated for Postgres at runtime. Current schema version: 5.
 
 ### Frontend routing
 The React app uses **state-based routing** (`useState<PageId>` in `App.tsx`), not React Router. Pages are switched via a `renderPage()` switch statement. Two context providers: `AuthContext` (JWT tokens, Google OAuth) and `PropertyContext` (active property, tracked properties, working-set metadata).
@@ -58,7 +58,7 @@ The React app uses **state-based routing** (`useState<PageId>` in `App.tsx`), no
 JWT HS256 (30 min access tokens) + opaque rotating refresh tokens (7 days, SHA-256 hashed in DB). Access token stored in HttpOnly cookie (`homebuyer_access`). Google OAuth via Authlib with tokens passed as URL hash fragments post-callback. TOS version-gated via `CURRENT_TOS_VERSION` in config.py. Rate limits on auth endpoints (register 3/min, login 5/min, refresh 10/min).
 
 ### Faketor AI agent
-Claude-powered property analyst in `src/homebuyer/services/faketor.py`. Uses `claude-sonnet-4-20250514` with 18 tools, max 12 iterations per turn. `AnalysisAccumulator` injects a `VERIFIED DATA SUMMARY` into each subsequent system prompt. `SessionWorkingSet` manages a per-session property filter stack with undo support — implemented as a `_working_set` temp table injected into SQL queries. Chat streams via SSE with event types: `tool_start`, `tool_end`, `text_delta`, `working_set`, `discussed_property`, `done`, `error`.
+Claude-powered property analyst in `src/homebuyer/services/faketor/` (modular package). Uses `claude-sonnet-4-20250514` with 28 tools (18 built-in + 10 gap analysis), max 12 iterations per turn. When `USE_SEGMENT_ORCHESTRATION=true`, requests are routed through `TurnOrchestrator` (9-step pipeline: load context → extract signals → classify segment → resolve job → pre-execute gap tools → build prompt → LLM loop → post-process → persist). `ResearchContext` persists buyer state, market snapshot, and property analyses per user. `SessionWorkingSet` manages a per-session property filter stack with undo support. Chat streams via SSE with event types: `tool_start`, `tool_result`, `text_delta`, `working_set`, `discussed_property`, `segment_update`, `resume_briefing`, `suggestion_chips`, `done`, `error`.
 
 ### ML model
 `HistGradientBoostingRegressor` (3 models: point estimate + upper/lower quantile bounds). Features include property attributes joined with market metrics and mortgage rates. Stored as joblib at `data/models/berkeley_price_model.joblib`. SHAP values provide per-feature contribution explanations.
@@ -76,7 +76,11 @@ Render: PostgreSQL 16 + Python web service (free tier). `render-build.sh` runs `
 | `src/homebuyer/api.py` | All API endpoints (~4400 lines), AppState, lifespan |
 | `src/homebuyer/config.py` | All configuration, paths, env vars, constants |
 | `src/homebuyer/auth.py` | JWT, bcrypt, refresh tokens, OAuth2 |
-| `src/homebuyer/services/faketor.py` | AI agent tools and orchestration |
+| `src/homebuyer/services/faketor/orchestrator.py` | Segment-driven 9-step turn pipeline |
+| `src/homebuyer/services/faketor/service.py` | Faketor service entry point, legacy + orchestrated paths |
+| `src/homebuyer/services/faketor/classification.py` | Buyer segment classifier (11 segments) |
+| `src/homebuyer/services/faketor/extraction.py` | Signal extraction from user messages via Haiku |
+| `src/homebuyer/services/faketor/jobs.py` | Job resolution, proactive analysis registry, suggestion chips |
 | `src/homebuyer/services/session_cache.py` | Working set / filter stack |
 | `src/homebuyer/storage/database.py` | Dual-mode DB (SQLite/PostgreSQL) |
 | `src/homebuyer/prediction/model.py` | ML model artifact and prediction |
@@ -91,7 +95,7 @@ Auth tests (`tests/test_auth.py`, 49 tests) use `TestClient` with an in-memory S
 
 ## Environment variables
 
-Required for production: `DATABASE_URL`, `JWT_SECRET_KEY`, `ANTHROPIC_API_KEY`. Optional: `RENTCAST_API_KEY` (property enrichment), `RESEND_API_KEY` + `EMAIL_FROM` (transactional email), `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` + `GOOGLE_REDIRECT_URI` (OAuth), `ENVIRONMENT` (controls CSP strictness), `APP_URL` (email link base), `FRONTEND_URL` (extra CORS origin).
+Required for production: `DATABASE_URL`, `JWT_SECRET_KEY`, `ANTHROPIC_API_KEY`. Optional: `RENTCAST_API_KEY` (property enrichment), `RESEND_API_KEY` + `EMAIL_FROM` (transactional email), `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` + `GOOGLE_REDIRECT_URI` (OAuth), `ENVIRONMENT` (controls CSP strictness), `APP_URL` (email link base), `FRONTEND_URL` (extra CORS origin), `USE_SEGMENT_ORCHESTRATION` (feature flag: `true` enables segment-driven orchestrator, default `false` uses legacy Faketor path).
 
 ## Data directory
 

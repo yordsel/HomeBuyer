@@ -176,12 +176,12 @@ PROACTIVE_ANALYSES: dict[tuple[str, RequestType], list[AnalysisSpec]] = {
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("get_comparable_sales", ("property_context",), "Recent comp sales"),
         AnalysisSpec("compute_true_cost", ("property_context",), "True monthly cost breakdown"),
-        AnalysisSpec("compute_rent_vs_buy", ("property_context",), "Rent vs buy comparison"),
+        AnalysisSpec("rent_vs_buy", ("property_context",), "Rent vs buy comparison"),
     ],
     (STRETCHER, RequestType.AFFORDABILITY): [
         AnalysisSpec("get_market_summary", (), "Current market conditions"),
         AnalysisSpec("compute_true_cost", ("property_context",), "True monthly cost breakdown"),
-        AnalysisSpec("compute_rent_vs_buy", ("property_context",), "Rent vs buy comparison"),
+        AnalysisSpec("rent_vs_buy", ("property_context",), "Rent vs buy comparison"),
     ],
 
     # --- First-Time Buyer ---
@@ -189,52 +189,52 @@ PROACTIVE_ANALYSES: dict[tuple[str, RequestType], list[AnalysisSpec]] = {
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("get_comparable_sales", ("property_context",), "Recent comp sales"),
         AnalysisSpec("compute_true_cost", ("property_context",), "True monthly cost breakdown"),
-        AnalysisSpec("compute_pmi_model", ("property_context",), "PMI cost and timeline"),
+        AnalysisSpec("pmi_model", ("property_context",), "PMI cost and timeline"),
     ],
     (FIRST_TIME_BUYER, RequestType.AFFORDABILITY): [
         AnalysisSpec("get_market_summary", (), "Current market conditions"),
-        AnalysisSpec("compute_pmi_model", ("property_context",), "PMI cost and timeline"),
+        AnalysisSpec("pmi_model", ("property_context",), "PMI cost and timeline"),
     ],
 
     # --- Down Payment Constrained ---
     (DOWN_PAYMENT_CONSTRAINED, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
-        AnalysisSpec("compute_pmi_model", ("property_context",), "PMI cost and timeline"),
+        AnalysisSpec("pmi_model", ("property_context",), "PMI cost and timeline"),
         AnalysisSpec("compute_true_cost", ("property_context",), "True monthly cost breakdown"),
     ],
     (DOWN_PAYMENT_CONSTRAINED, RequestType.AFFORDABILITY): [
         AnalysisSpec("get_market_summary", (), "Current market conditions"),
-        AnalysisSpec("compute_pmi_model", ("property_context",), "PMI cost and timeline"),
+        AnalysisSpec("pmi_model", ("property_context",), "PMI cost and timeline"),
     ],
 
     # --- Equity-Trapped Upgrader ---
     (EQUITY_TRAPPED_UPGRADER, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("get_comparable_sales", ("property_context",), "Recent comp sales"),
-        AnalysisSpec("compute_rate_penalty", ("property_context", "buyer_profile"), "Rate lock penalty"),
+        AnalysisSpec("rate_penalty", ("property_context", "buyer_profile"), "Rate lock penalty"),
     ],
     (EQUITY_TRAPPED_UPGRADER, RequestType.INVESTMENT_ANALYSIS): [
-        AnalysisSpec("compute_dual_property", ("property_context", "buyer_profile"), "Dual property strategy"),
+        AnalysisSpec("dual_property_model", ("property_context", "buyer_profile"), "Dual property strategy"),
     ],
 
     # --- Competitive Bidder ---
     (COMPETITIVE_BIDDER, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("get_comparable_sales", ("property_context",), "Recent comp sales"),
-        AnalysisSpec("compute_competition", ("property_context",), "Market competition assessment"),
+        AnalysisSpec("competition_assessment", ("property_context",), "Market competition assessment"),
     ],
 
     # --- Not Viable ---
     (NOT_VIABLE, RequestType.AFFORDABILITY): [
         AnalysisSpec("get_market_summary", (), "Current market conditions"),
-        AnalysisSpec("compute_adjacent_market", ("buyer_profile",), "Adjacent market comparison"),
+        AnalysisSpec("adjacent_market_comparison", ("buyer_profile",), "Adjacent market comparison"),
     ],
 
     # --- Cash Buyer ---
     (CASH_BUYER, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("get_comparable_sales", ("property_context",), "Recent comp sales"),
-        AnalysisSpec("compute_appreciation_stress", ("property_context",), "Appreciation scenarios"),
+        AnalysisSpec("appreciation_stress_test", ("property_context",), "Appreciation scenarios"),
     ],
     (CASH_BUYER, RequestType.INVESTMENT_ANALYSIS): [
         AnalysisSpec("estimate_rental_income", ("property_context",), "Rental yield estimate"),
@@ -244,7 +244,7 @@ PROACTIVE_ANALYSES: dict[tuple[str, RequestType], list[AnalysisSpec]] = {
     (EQUITY_LEVERAGING_INVESTOR, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("estimate_rental_income", ("property_context",), "Rental yield estimate"),
-        AnalysisSpec("compute_dual_property", ("property_context", "buyer_profile"), "Dual property strategy"),
+        AnalysisSpec("dual_property_model", ("property_context", "buyer_profile"), "Dual property strategy"),
     ],
     (EQUITY_LEVERAGING_INVESTOR, RequestType.INVESTMENT_ANALYSIS): [
         AnalysisSpec("estimate_rental_income", ("property_context",), "Rental yield estimate"),
@@ -254,18 +254,18 @@ PROACTIVE_ANALYSES: dict[tuple[str, RequestType], list[AnalysisSpec]] = {
     (LEVERAGED_INVESTOR, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("estimate_rental_income", ("property_context",), "Rental yield estimate"),
-        AnalysisSpec("compute_appreciation_stress", ("property_context",), "Appreciation scenarios"),
+        AnalysisSpec("appreciation_stress_test", ("property_context",), "Appreciation scenarios"),
     ],
     (LEVERAGED_INVESTOR, RequestType.INVESTMENT_ANALYSIS): [
         AnalysisSpec("estimate_rental_income", ("property_context",), "Rental yield estimate"),
-        AnalysisSpec("compute_rate_penalty", ("property_context", "buyer_profile"), "Rate penalty analysis"),
+        AnalysisSpec("rate_penalty", ("property_context", "buyer_profile"), "Rate penalty analysis"),
     ],
 
     # --- Value-Add Investor ---
     (VALUE_ADD_INVESTOR, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_development_potential", ("property_context",), "Zoning & dev potential"),
         AnalysisSpec("get_price_prediction", ("property_context",), "As-is fair value"),
-        AnalysisSpec("compute_appreciation_stress", ("property_context",), "Appreciation scenarios"),
+        AnalysisSpec("appreciation_stress_test", ("property_context",), "Appreciation scenarios"),
     ],
     (VALUE_ADD_INVESTOR, RequestType.DEVELOPMENT_QUESTION): [
         AnalysisSpec("get_development_potential", ("property_context",), "Zoning & dev potential"),
@@ -275,11 +275,11 @@ PROACTIVE_ANALYSES: dict[tuple[str, RequestType], list[AnalysisSpec]] = {
     (APPRECIATION_BETTOR, RequestType.PROPERTY_EVALUATION): [
         AnalysisSpec("get_price_prediction", ("property_context",), "Fair value estimate"),
         AnalysisSpec("get_neighborhood_stats", ("property_context",), "Neighborhood trends"),
-        AnalysisSpec("compute_appreciation_stress", ("property_context",), "Appreciation scenarios"),
+        AnalysisSpec("appreciation_stress_test", ("property_context",), "Appreciation scenarios"),
     ],
     (APPRECIATION_BETTOR, RequestType.MARKET_QUESTION): [
         AnalysisSpec("get_market_summary", (), "Current market conditions"),
-        AnalysisSpec("compute_neighborhood_lifestyle", (), "Neighborhood lifestyle comparison"),
+        AnalysisSpec("neighborhood_lifestyle", (), "Neighborhood lifestyle comparison"),
     ],
 }
 

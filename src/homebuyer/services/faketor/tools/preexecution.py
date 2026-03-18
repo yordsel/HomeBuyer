@@ -245,7 +245,7 @@ def _build_tool_input(
             if prop.get("year_built"):
                 tool_input["year_built"] = prop["year_built"]
 
-        elif spec.tool_name == "compute_rent_vs_buy":
+        elif spec.tool_name == "rent_vs_buy":
             tool_input["purchase_price"] = prop.get("price", 0)
             tool_input["mortgage_rate"] = prop.get("mortgage_rate", 7.0)
             tool_input["current_rent"] = buyer.get("current_rent", 3000)
@@ -256,7 +256,7 @@ def _build_tool_input(
             else:
                 tool_input["down_payment_pct"] = 20.0
 
-        elif spec.tool_name == "compute_pmi_model":
+        elif spec.tool_name == "pmi_model":
             tool_input["purchase_price"] = prop.get("price", 0)
             tool_input["mortgage_rate"] = prop.get("mortgage_rate", 7.0)
             if buyer.get("capital") and prop.get("price"):
@@ -268,14 +268,14 @@ def _build_tool_input(
             if buyer.get("capital"):
                 tool_input["monthly_savings"] = int(buyer["capital"] * 0.02)
 
-        elif spec.tool_name == "compute_competition":
+        elif spec.tool_name == "competition_assessment":
             if prop.get("neighborhood"):
                 tool_input["neighborhood"] = prop["neighborhood"]
             if prop.get("price"):
                 tool_input["price_min"] = int(prop["price"] * 0.8)
                 tool_input["price_max"] = int(prop["price"] * 1.2)
 
-        elif spec.tool_name == "compute_appreciation_stress":
+        elif spec.tool_name == "appreciation_stress_test":
             tool_input["purchase_price"] = prop.get("price", 0)
             tool_input["mortgage_rate"] = prop.get("mortgage_rate", 7.0)
             if buyer.get("capital") and prop.get("price"):
@@ -285,7 +285,7 @@ def _build_tool_input(
             else:
                 tool_input["down_payment_pct"] = 20.0
 
-        elif spec.tool_name == "compute_rate_penalty":
+        elif spec.tool_name == "rate_penalty":
             # Requires buyer profile for existing mortgage data
             if has_buyer and buyer.get("equity") and prop.get("price"):
                 # Estimate existing balance from equity + home value
@@ -298,7 +298,7 @@ def _build_tool_input(
                 tool_input["new_purchase_price"] = prop.get("price", 0)
                 tool_input["new_rate"] = prop.get("mortgage_rate", 7.0)
 
-        elif spec.tool_name == "compute_dual_property":
+        elif spec.tool_name == "dual_property_model":
             if has_buyer and buyer.get("equity") and prop.get("price"):
                 tool_input["investment_price"] = prop["price"]
                 tool_input["investment_rate"] = prop.get("mortgage_rate", 7.0)
@@ -315,11 +315,11 @@ def _build_tool_input(
 
     # --- Gap tools: buyer-only (no property_context required) ---
     if not has_property:
-        if spec.tool_name == "compute_neighborhood_lifestyle":
+        if spec.tool_name == "neighborhood_lifestyle":
             # No required params — defaults to comparing all neighborhoods
             pass
 
-        elif spec.tool_name == "compute_adjacent_market":
+        elif spec.tool_name == "adjacent_market_comparison":
             if has_buyer and buyer.get("capital"):
                 tool_input["budget"] = buyer["capital"]
             else:

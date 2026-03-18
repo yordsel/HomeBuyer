@@ -222,7 +222,7 @@ class TestBuildToolInput:
         assert result["down_payment_pct"] == 20.0
 
     def test_pmi_model_low_down_payment(self):
-        spec = AnalysisSpec("compute_pmi_model", ("property_context",))
+        spec = AnalysisSpec("pmi_model", ("property_context",))
         prop = {"price": 1_000_000, "mortgage_rate": 7.0}
         buyer = {"capital": 100_000}  # 10% down
         result = _build_tool_input(spec, prop, buyer)
@@ -230,7 +230,7 @@ class TestBuildToolInput:
         assert result["monthly_savings"] == 2000  # capital * 0.02
 
     def test_competition_uses_neighborhood_and_price_band(self):
-        spec = AnalysisSpec("compute_competition", ("property_context",))
+        spec = AnalysisSpec("competition_assessment", ("property_context",))
         prop = {"neighborhood": "North Berkeley", "price": 1_000_000}
         result = _build_tool_input(spec, prop)
         assert result["neighborhood"] == "North Berkeley"
@@ -238,7 +238,7 @@ class TestBuildToolInput:
         assert result["price_max"] == 1_200_000
 
     def test_appreciation_stress_with_buyer(self):
-        spec = AnalysisSpec("compute_appreciation_stress", ("property_context",))
+        spec = AnalysisSpec("appreciation_stress_test", ("property_context",))
         prop = {"price": 900_000, "mortgage_rate": 6.5}
         buyer = {"capital": 180_000}
         result = _build_tool_input(spec, prop, buyer)
@@ -246,7 +246,7 @@ class TestBuildToolInput:
         assert result["down_payment_pct"] == 20
 
     def test_rent_vs_buy_uses_current_rent(self):
-        spec = AnalysisSpec("compute_rent_vs_buy", ("property_context",))
+        spec = AnalysisSpec("rent_vs_buy", ("property_context",))
         prop = {"price": 800_000, "mortgage_rate": 6.5}
         buyer = {"capital": 160_000, "current_rent": 4000}
         result = _build_tool_input(spec, prop, buyer)
@@ -254,23 +254,23 @@ class TestBuildToolInput:
         assert result["down_payment_pct"] == 20
 
     def test_neighborhood_lifestyle_no_property(self):
-        spec = AnalysisSpec("compute_neighborhood_lifestyle", ())
+        spec = AnalysisSpec("neighborhood_lifestyle", ())
         result = _build_tool_input(spec, None)
         assert result == {}
 
     def test_adjacent_market_uses_buyer_budget(self):
-        spec = AnalysisSpec("compute_adjacent_market", ("buyer_profile",))
+        spec = AnalysisSpec("adjacent_market_comparison", ("buyer_profile",))
         buyer = {"capital": 800_000}
         result = _build_tool_input(spec, None, buyer)
         assert result["budget"] == 800_000
 
     def test_adjacent_market_default_budget(self):
-        spec = AnalysisSpec("compute_adjacent_market", ("buyer_profile",))
+        spec = AnalysisSpec("adjacent_market_comparison", ("buyer_profile",))
         result = _build_tool_input(spec, None, None)
         assert result["budget"] == 1_000_000
 
     def test_rate_penalty_with_buyer_income(self):
-        spec = AnalysisSpec("compute_rate_penalty", ("property_context", "buyer_profile"))
+        spec = AnalysisSpec("rate_penalty", ("property_context", "buyer_profile"))
         prop = {"price": 1_200_000, "mortgage_rate": 7.0}
         buyer = {"equity": 300_000, "income": 250_000}
         result = _build_tool_input(spec, prop, buyer)
@@ -278,7 +278,7 @@ class TestBuildToolInput:
         assert result["annual_gross_income"] == 250_000
 
     def test_dual_property_with_buyer_equity(self):
-        spec = AnalysisSpec("compute_dual_property", ("property_context", "buyer_profile"))
+        spec = AnalysisSpec("dual_property_model", ("property_context", "buyer_profile"))
         prop = {"price": 700_000, "mortgage_rate": 6.5}
         buyer = {"equity": 400_000, "income": 200_000}
         result = _build_tool_input(spec, prop, buyer)
