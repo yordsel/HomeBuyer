@@ -19,6 +19,16 @@ from homebuyer.services.faketor.facts import (
     compute_rental_facts,
     compute_search_facts,
     compute_sell_vs_hold_facts,
+    compute_true_cost_facts,
+    compute_rent_vs_buy_facts,
+    compute_pmi_model_facts,
+    compute_rate_penalty_facts,
+    compute_competition_facts,
+    compute_dual_property_facts,
+    compute_yield_ranking_facts,
+    compute_appreciation_stress_facts,
+    compute_neighborhood_lifestyle_facts,
+    compute_adjacent_market_facts,
     compute_undo_filter_facts,
 )
 from homebuyer.services.faketor.tools.registry import ToolDefinition
@@ -996,5 +1006,503 @@ _TOOL_DEFINITIONS: list[ToolDefinition] = [
         },
         "block_type": "glossary_info",
         "fact_computer": compute_glossary_facts,
+    },
+    # ------------------------------------------------------------------
+    # Phase F gap tools
+    # ------------------------------------------------------------------
+    {
+        "name": "compute_true_cost",
+        "description": (
+            "Compute the all-in monthly ownership cost for a Berkeley property. "
+            "Includes principal & interest, property tax, hazard insurance, "
+            "earthquake insurance (construction-type-aware), maintenance reserve "
+            "(age-based), PMI (if LTV > 80%), and HOA. Optionally compares to "
+            "the buyer's current rent. Use this when the buyer asks about "
+            "monthly costs, affordability, or rent-vs-own comparisons."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "purchase_price": {
+                    "type": "number",
+                    "description": "Purchase price in dollars.",
+                },
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": (
+                        "Down payment as percent of price, e.g. 10 for 10%. "
+                        "Default 20."
+                    ),
+                },
+                "mortgage_rate": {
+                    "type": "number",
+                    "description": (
+                        "Annual mortgage rate as percent, e.g. 7.25. "
+                        "If omitted, current market rate is used."
+                    ),
+                },
+                "year_built": {
+                    "type": "integer",
+                    "description": (
+                        "Year the property was built. Used to compute "
+                        "age-based maintenance reserve."
+                    ),
+                },
+                "construction_type": {
+                    "type": "string",
+                    "enum": ["wood_frame", "masonry", "soft_story", "concrete"],
+                    "description": (
+                        "Construction type for earthquake insurance estimate. "
+                        "Defaults to wood_frame."
+                    ),
+                },
+                "hoa_monthly": {
+                    "type": "number",
+                    "description": "Monthly HOA dues, 0 if none.",
+                },
+                "current_rent": {
+                    "type": "number",
+                    "description": (
+                        "Buyer's current monthly rent, for rent-vs-own comparison."
+                    ),
+                },
+            },
+            "required": ["purchase_price"],
+        },
+        "block_type": "true_cost_card",
+        "fact_computer": compute_true_cost_facts,
+    },
+    {
+        "name": "rent_vs_buy",
+        "description": (
+            "Compare renting vs. buying over a multi-year horizon. Models rent "
+            "escalation, home appreciation, equity buildup, tax benefits "
+            "(mortgage interest + property tax deductions), PMI drop-off, and "
+            "opportunity cost of the down payment. Produces a crossover year "
+            "(when buying becomes cheaper) and year-by-year comparison. Use this "
+            "for Stretcher and First-Time Buyer segments asking whether to buy "
+            "or keep renting."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "purchase_price": {
+                    "type": "number",
+                    "description": "Purchase price in dollars.",
+                },
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": "Down payment as percent, e.g. 20. Default 20.",
+                },
+                "mortgage_rate": {
+                    "type": "number",
+                    "description": (
+                        "Annual mortgage rate as percent. "
+                        "If omitted, current market rate is used."
+                    ),
+                },
+                "current_rent": {
+                    "type": "number",
+                    "description": "Buyer's current monthly rent in dollars.",
+                },
+                "annual_appreciation_pct": {
+                    "type": "number",
+                    "description": (
+                        "Expected annual home appreciation as percent. Default 3.0."
+                    ),
+                },
+                "annual_rent_increase_pct": {
+                    "type": "number",
+                    "description": (
+                        "Expected annual rent increase as percent. Default 4.0."
+                    ),
+                },
+                "horizon_years": {
+                    "type": "integer",
+                    "description": "Number of years to model. Default 15, max 30.",
+                },
+                "monthly_ownership_cost": {
+                    "type": "number",
+                    "description": (
+                        "Total monthly ownership cost (from compute_true_cost). "
+                        "If omitted, a rough estimate is computed."
+                    ),
+                },
+                "monthly_pmi": {
+                    "type": "number",
+                    "description": "Monthly PMI amount (for PMI drop-off modeling).",
+                },
+                "hoa_monthly": {
+                    "type": "number",
+                    "description": "Monthly HOA dues.",
+                },
+                "year_built": {
+                    "type": "integer",
+                    "description": "Year property was built (for maintenance estimate).",
+                },
+            },
+            "required": ["purchase_price", "current_rent"],
+        },
+        "block_type": "rent_vs_buy_card",
+        "fact_computer": compute_rent_vs_buy_facts,
+    },
+    {
+        "name": "pmi_model",
+        "description": (
+            "Model PMI costs and elimination timeline for a buyer with less than "
+            "20% down. Computes: monthly PMI at the buyer's LTV using tiered rate "
+            "brackets (85-95% LTV pays more than 80-85% LTV), the month PMI drops "
+            "off via combined appreciation + principal paydown, total PMI paid over "
+            "the life of the loan, and a buy-now-vs-wait comparison that determines "
+            "whether saving more down payment beats market appreciation. Use this "
+            "for Down Payment Constrained and Stretcher segments asking about PMI, "
+            "how long they'll pay it, and whether to delay purchase."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "purchase_price": {
+                    "type": "number",
+                    "description": "Purchase price in dollars.",
+                },
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": (
+                        "Down payment as percent of price, e.g. 10 for 10%. "
+                        "Default 10. Must be less than 20 for PMI to apply."
+                    ),
+                },
+                "mortgage_rate": {
+                    "type": "number",
+                    "description": (
+                        "Annual mortgage rate as percent, e.g. 7.25. "
+                        "If omitted, current market rate is used."
+                    ),
+                },
+                "annual_appreciation_pct": {
+                    "type": "number",
+                    "description": (
+                        "Expected annual home appreciation as percent. Default 3.0. "
+                        "Used to model accelerated PMI drop-off via rising home value."
+                    ),
+                },
+                "monthly_savings": {
+                    "type": "number",
+                    "description": (
+                        "How much the buyer can save per month toward down payment. "
+                        "Required to enable the buy-now-vs-wait analysis."
+                    ),
+                },
+                "wait_months": {
+                    "type": "integer",
+                    "description": (
+                        "Number of months to wait before buying, for the "
+                        "buy-now-vs-wait comparison. Default 12."
+                    ),
+                },
+            },
+            "required": ["purchase_price"],
+        },
+        "block_type": "pmi_model_card",
+        "fact_computer": compute_pmi_model_facts,
+    },
+    {
+        "name": "rate_penalty",
+        "description": (
+            "Calculate the mortgage rate penalty for an equity-trapped upgrader. "
+            "Compares the existing low-rate mortgage payment to a new purchase at "
+            "current market rates. Shows the monthly/annual dollar penalty, penalty "
+            "as a percentage of gross income, rate scenarios (what happens at "
+            "different future rates), and the breakeven rate where the new payment "
+            "matches the old one. Use this for Equity-Trapped Upgrader segments "
+            "evaluating whether to sell and buy at today's higher rates."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "existing_balance": {
+                    "type": "number",
+                    "description": "Remaining balance on current mortgage in dollars.",
+                },
+                "existing_rate": {
+                    "type": "number",
+                    "description": (
+                        "Current mortgage rate as percent, e.g. 3.25."
+                    ),
+                },
+                "existing_remaining_months": {
+                    "type": "integer",
+                    "description": (
+                        "Months remaining on current loan. Default 360 (30y)."
+                    ),
+                },
+                "new_purchase_price": {
+                    "type": "number",
+                    "description": "Purchase price of the new property in dollars.",
+                },
+                "new_down_payment_pct": {
+                    "type": "number",
+                    "description": (
+                        "Down payment on new purchase as percent. Default 20."
+                    ),
+                },
+                "new_rate": {
+                    "type": "number",
+                    "description": (
+                        "Mortgage rate for new purchase as percent. "
+                        "If omitted, current market rate is used."
+                    ),
+                },
+                "annual_gross_income": {
+                    "type": "number",
+                    "description": (
+                        "Buyer's annual gross income for affordability context."
+                    ),
+                },
+            },
+            "required": ["existing_balance", "existing_rate", "new_purchase_price"],
+        },
+        "block_type": "rate_penalty_card",
+        "fact_computer": compute_rate_penalty_facts,
+    },
+    {
+        "name": "competition_assessment",
+        "description": (
+            "Assess competitive dynamics for a neighborhood or price band. "
+            "Computes sale-to-list ratios, days-on-market distribution, "
+            "percentage of sales above/below asking, absorption rate, months "
+            "of inventory, and a synthesized competition score (0-100). "
+            "Use for Competitive Bidder segments evaluating how aggressive "
+            "they need to be with offers."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "neighborhood": {
+                    "type": "string",
+                    "description": "Neighborhood name to assess.",
+                },
+                "price_min": {
+                    "type": "number",
+                    "description": "Minimum price for the analysis band.",
+                },
+                "price_max": {
+                    "type": "number",
+                    "description": "Maximum price for the analysis band.",
+                },
+            },
+            "required": ["neighborhood"],
+        },
+        "block_type": "competition_card",
+        "fact_computer": compute_competition_facts,
+    },
+    {
+        "name": "dual_property_model",
+        "description": (
+            "Model combined cash flow for a primary residence + investment property. "
+            "Computes equity extraction cost (HELOC or cash-out refi) from the primary, "
+            "investment property cash flow with vacancy/management/maintenance, combined "
+            "monthly cash flow, cash-on-cash return, and stress tests (high vacancy, "
+            "rate increase, maintenance spike, combined worst-case). Use for "
+            "Equity-Leveraging Investor segments evaluating whether to tap home equity "
+            "for an investment property."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "primary_value": {
+                    "type": "number",
+                    "description": "Current market value of primary residence.",
+                },
+                "primary_mortgage_balance": {
+                    "type": "number",
+                    "description": "Remaining mortgage balance on primary.",
+                },
+                "primary_mortgage_rate": {
+                    "type": "number",
+                    "description": "Current mortgage rate on primary (percent).",
+                },
+                "extraction_method": {
+                    "type": "string",
+                    "enum": ["heloc", "cashout_refi"],
+                    "description": "How to extract equity. Default 'heloc'.",
+                },
+                "extraction_amount": {
+                    "type": "number",
+                    "description": "Amount to extract from primary equity.",
+                },
+                "investment_price": {
+                    "type": "number",
+                    "description": "Purchase price of investment property.",
+                },
+                "investment_down_payment_pct": {
+                    "type": "number",
+                    "description": "Down payment on investment (percent). Default 25.",
+                },
+                "investment_rate": {
+                    "type": "number",
+                    "description": "Mortgage rate for investment (percent).",
+                },
+                "investment_monthly_rent": {
+                    "type": "number",
+                    "description": "Expected monthly rent from investment property.",
+                },
+            },
+            "required": ["primary_value", "investment_price", "investment_monthly_rent"],
+        },
+        "block_type": "dual_property_card",
+        "fact_computer": compute_dual_property_facts,
+    },
+    {
+        "name": "yield_ranking",
+        "description": (
+            "Rank properties by investment yield metrics: leverage spread "
+            "(cap rate minus borrowing cost), DSCR, and cash-on-cash return. "
+            "Ranks the working set or a list of properties at a given down "
+            "payment and mortgage rate. Use for Leveraged Investor segments "
+            "comparing multiple investment options."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "properties": {
+                    "type": "array",
+                    "description": "List of properties with price and monthly_rent.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "address": {"type": "string"},
+                            "price": {"type": "number"},
+                            "monthly_rent": {"type": "number"},
+                            "hoa_monthly": {"type": "number"},
+                        },
+                        "required": ["price", "monthly_rent"],
+                    },
+                },
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": "Down payment as percent. Default 25.",
+                },
+                "mortgage_rate": {
+                    "type": "number",
+                    "description": "Investor mortgage rate as percent. Default 7.5.",
+                },
+            },
+            "required": ["properties"],
+        },
+        "block_type": "yield_ranking_card",
+        "fact_computer": compute_yield_ranking_facts,
+    },
+    {
+        "name": "appreciation_stress_test",
+        "description": (
+            "Stress test a property's appreciation under multiple scenarios "
+            "(bull, base, flat, bear, crash). Models breakeven between negative "
+            "carry and appreciation, exit analysis at configurable horizons, "
+            "and optional refinance scenario. Use for Appreciation Bettor "
+            "segments evaluating risk-reward tradeoffs."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "purchase_price": {
+                    "type": "number",
+                    "description": "Purchase price in dollars.",
+                },
+                "down_payment_pct": {
+                    "type": "number",
+                    "description": "Down payment as percent. Default 20.",
+                },
+                "mortgage_rate": {
+                    "type": "number",
+                    "description": "Mortgage rate as percent. Default 7.0.",
+                },
+                "monthly_rental_income": {
+                    "type": "number",
+                    "description": "Monthly rental income if held as rental. Default 0.",
+                },
+                "exit_years": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Exit horizons to analyze. Default [3, 5, 7, 10].",
+                },
+                "refi_rate": {
+                    "type": "number",
+                    "description": "Potential refinance rate for refi scenario.",
+                },
+            },
+            "required": ["purchase_price"],
+        },
+        "block_type": "appreciation_stress_card",
+        "fact_computer": compute_appreciation_stress_facts,
+    },
+    {
+        "name": "neighborhood_lifestyle",
+        "description": (
+            "Compare Berkeley neighborhoods across lifestyle factors: "
+            "walkability, transit access, schools, dining, parks, safety. "
+            "Produces weighted composite scores and identifies best matches "
+            "based on buyer priorities. Use for Occupy segments choosing "
+            "between neighborhoods."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "neighborhoods": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Neighborhoods to compare. Empty = all available."
+                    ),
+                },
+                "priority_walkability": {"type": "number", "description": "Weight 0-5. Default 1."},
+                "priority_transit": {"type": "number", "description": "Weight 0-5. Default 1."},
+                "priority_schools": {"type": "number", "description": "Weight 0-5. Default 1."},
+                "priority_dining": {"type": "number", "description": "Weight 0-5. Default 1."},
+                "priority_parks": {"type": "number", "description": "Weight 0-5. Default 1."},
+                "priority_safety": {"type": "number", "description": "Weight 0-5. Default 1."},
+            },
+            "required": [],
+        },
+        "block_type": "neighborhood_lifestyle_card",
+        "fact_computer": compute_neighborhood_lifestyle_facts,
+    },
+    {
+        "name": "adjacent_market_comparison",
+        "description": (
+            "Compare what the buyer's budget buys in Berkeley vs. adjacent "
+            "markets (Oakland neighborhoods, Albany, El Cerrito, Richmond, "
+            "Kensington). Shows affordability, typical home size, school "
+            "ratings, commute times, and BART access for each market. "
+            "Use when buyers want to understand their options beyond Berkeley."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "budget": {
+                    "type": "number",
+                    "description": "Buyer's total budget in dollars.",
+                },
+                "min_beds": {
+                    "type": "integer",
+                    "description": "Minimum bedrooms. Default 3.",
+                },
+                "min_baths": {
+                    "type": "number",
+                    "description": "Minimum bathrooms. Default 1.5.",
+                },
+                "must_have_bart": {
+                    "type": "boolean",
+                    "description": "Require BART access. Default false.",
+                },
+                "max_commute_minutes": {
+                    "type": "integer",
+                    "description": "Max commute to SF in minutes. Default 60.",
+                },
+            },
+            "required": ["budget"],
+        },
+        "block_type": "adjacent_market_card",
+        "fact_computer": compute_adjacent_market_facts,
     },
 ]

@@ -189,10 +189,11 @@ class TestToolRegistryDuplicates:
 class TestPopulatedRegistry:
     """Test the module-level singleton from faketor.tools."""
 
-    def test_all_18_tools_registered(self):
+    def test_all_tools_registered(self):
         from homebuyer.services.faketor.tools import registry
 
-        assert len(registry) == 18
+        # 18 original + Phase F gap tools (compute_true_cost, ...)
+        assert len(registry) >= 19
 
     def test_known_tools_present(self):
         from homebuyer.services.faketor.tools import registry
@@ -216,6 +217,17 @@ class TestPopulatedRegistry:
             "update_working_set",
             "lookup_regulation",
             "lookup_glossary_term",
+            # Phase F gap tools
+            "compute_true_cost",
+            "rent_vs_buy",
+            "pmi_model",
+            "rate_penalty",
+            "competition_assessment",
+            "dual_property_model",
+            "yield_ranking",
+            "appreciation_stress_test",
+            "neighborhood_lifestyle",
+            "adjacent_market_comparison",
         }
         assert registry.names == expected
 
@@ -275,7 +287,7 @@ class TestPopulatedRegistry:
         from homebuyer.services.faketor.tools import registry
 
         schemas = registry.get_tool_schemas()
-        assert len(schemas) == 18
+        assert len(schemas) >= 19  # 18 original + Phase F gap tools
         for s in schemas:
             assert "name" in s
             assert "description" in s

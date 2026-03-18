@@ -5,7 +5,10 @@
       "name": "api",
       "runtimeExecutable": "/Users/srinivasjagannathan/projects/HomeBuyer/.venv/bin/python",
       "runtimeArgs": ["-m", "uvicorn", "homebuyer.api:app", "--host", "127.0.0.1", "--port", "8787"],
-      "port": 8787
+      "port": 8787,
+      "env": {
+        "USE_SEGMENT_ORCHESTRATION": "true"
+      }
     },
     {
       "name": "ui",

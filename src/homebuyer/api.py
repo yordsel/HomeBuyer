@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path as _Path
@@ -29,7 +30,7 @@ import json
 
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
-from homebuyer.auth import get_current_user_id
+from homebuyer.auth import get_current_user_id, get_optional_user_id
 from homebuyer.config import (
     CURRENT_TOS_VERSION,
     DATABASE_URL,
@@ -607,6 +608,55 @@ class AppState:
             cache_get=self.cache_get,
             cache_set=self.cache_set,
         )
+
+        # Segment-driven orchestration (Phase C shadow mode + Phase E orchestrator)
+        from homebuyer.services.faketor.classification import SegmentClassifier
+        from homebuyer.services.faketor.extraction import SignalExtractor
+        from homebuyer.services.faketor.state.context import ResearchContextStore
+
+        self.segment_classifier = SegmentClassifier()
+        self.context_store = ResearchContextStore(ttl_seconds=1800, db=self.db)
+
+        # SignalExtractor needs the Anthropic client — reuse faketor's
+        if self.faketor.enabled and hasattr(self.faketor, "_client"):
+            self.signal_extractor: SignalExtractor | None = SignalExtractor(
+                self.faketor._client
+            )
+            logger.info("Segment extraction + classification enabled (shadow mode)")
+        else:
+            self.signal_extractor = None
+            logger.info("Segment extraction disabled (no Anthropic client)")
+
+        # TurnOrchestrator — enabled when USE_SEGMENT_ORCHESTRATION=true
+        self.turn_orchestrator = None
+        from homebuyer.config import USE_SEGMENT_ORCHESTRATION
+        if USE_SEGMENT_ORCHESTRATION and self.faketor.enabled and self.signal_extractor:
+            try:
+                from homebuyer.services.faketor.jobs import JobResolver
+                from homebuyer.services.faketor.orchestrator import TurnOrchestrator
+                from homebuyer.services.faketor.tools import registry as tool_reg
+                from homebuyer.services.faketor.tools.executor import ToolExecutor
+                from homebuyer.services.faketor.tools.preexecution import PreExecutor
+
+                self.turn_orchestrator = TurnOrchestrator(
+                    client=self.faketor._client,
+                    context_store=self.context_store,
+                    signal_extractor=self.signal_extractor,
+                    segment_classifier=self.segment_classifier,
+                    tool_executor=ToolExecutor(
+                        lambda name, inp: _faketor_tool_executor(name, inp),
+                        tool_reg,
+                    ),
+                    pre_executor=PreExecutor(
+                        lambda name, inp: _faketor_tool_executor(name, inp),
+                    ),
+                    registry=tool_reg,
+                    job_resolver=JobResolver(),
+                )
+                logger.info("TurnOrchestrator enabled (segment-driven mode)")
+            except Exception as e:
+                logger.warning("TurnOrchestrator init failed: %s", e)
+                self.turn_orchestrator = None
 
     def get_analyzer(self):
         from homebuyer.analysis.market_analysis import MarketAnalyzer
@@ -2338,8 +2388,9 @@ class FaketorChatRequest(BaseModel):
 
     model_config = {"coerce_numbers_to_str": True}
 
-    latitude: float
-    longitude: float
+    # lat/lon optional — conversations work without property focus (Phase H)
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     message: str
     history: list[dict] = []
     session_id: Optional[str] = None
@@ -2355,6 +2406,8 @@ class FaketorChatRequest(BaseModel):
     year_built: Optional[float] = None
     property_type: Optional[str] = "Single Family Residential"
     property_category: Optional[str] = None  # sfr, condo, duplex, etc.
+    # Buyer context from intake form (Phase H)
+    buyer_context: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -2808,6 +2861,9 @@ def _execute_update_working_set(tool_input: dict) -> str:
     requested_limit = min(tool_input.get("limit", 10), 25)
     adu_filter = tool_input.get("adu_eligible")
     sb9_filter = tool_input.get("sb9_eligible")
+    # E-7 (#64): Affordability filtering
+    max_monthly_cost = tool_input.get("max_monthly_cost")
+    affordability_dp_pct = tool_input.get("down_payment_pct", 20.0)
 
     if sql:
         # --- SQL mode ---
@@ -2882,8 +2938,9 @@ def _execute_update_working_set(tool_input: dict) -> str:
         # Get true total count
         total_matching = _state.db.count_properties_advanced(**_search_filters)
 
-        # Over-fetch when post-filtering on dev potential flags
-        sql_limit = requested_limit * 4 if (adu_filter or sb9_filter) else requested_limit
+        # Over-fetch when post-filtering on dev potential or affordability flags
+        needs_overfetch = adu_filter or sb9_filter or max_monthly_cost
+        sql_limit = requested_limit * 4 if needs_overfetch else requested_limit
 
         rows = _state.db.search_properties_advanced(
             **_search_filters,
@@ -2980,6 +3037,19 @@ def _execute_update_working_set(tool_input: dict) -> str:
                 data_quality = "shared_lot_no_size"
                 data_quality_note = "Condo unit with shared lot — lot size may be zero or shared."
 
+            # E-7 (#64): Compute estimated monthly cost for affordability filtering
+            est_monthly_cost = None
+            price_for_cost = predicted_price or row.get("last_sale_price")
+            if price_for_cost:
+                est_monthly_cost = _estimate_monthly_cost(
+                    int(price_for_cost), affordability_dp_pct,
+                )
+
+            # E-7: Skip properties exceeding monthly cost limit
+            if max_monthly_cost and est_monthly_cost is not None:
+                if est_monthly_cost > int(max_monthly_cost):
+                    continue
+
             results.append({
                 "id": row.get("id"),
                 "address": row.get("address"),
@@ -3002,6 +3072,7 @@ def _execute_update_working_set(tool_input: dict) -> str:
                 "last_sale_date": row.get("last_sale_date"),
                 "predicted_price": predicted_price,
                 "prediction_confidence": prediction_confidence,
+                "estimated_monthly_cost": est_monthly_cost,
                 "data_quality": data_quality,
                 "data_quality_note": data_quality_note,
                 "development": dev_summary,
@@ -3174,6 +3245,55 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             return safe_json_dumps(cached)
         analyzer = _state.get_analyzer()
         result_dict = analyzer.generate_summary_report()
+
+        # E-5 (#64): Add rate sensitivity / affordability context
+        median_price = None
+        rate_30yr = None
+        cm = result_dict.get("current_market", {})
+        if cm:
+            median_price = cm.get("median_sale_price")
+            rate_30yr = cm.get("mortgage_rate_30yr")
+
+        if median_price and rate_30yr:
+            monthly_rate = (rate_30yr / 100) / 12
+            affordability_snapshots = []
+            for dp_pct, dp_label in [
+                (20.0, "20% down"), (10.0, "10% down"),
+                (5.0, "5% down"), (3.5, "3.5% down (FHA)"),
+            ]:
+                dp_amount = int(median_price * dp_pct / 100)
+                loan = median_price - dp_amount
+                if monthly_rate > 0:
+                    n = 360  # 30-year
+                    monthly_pi = int(
+                        loan * (monthly_rate * (1 + monthly_rate) ** n)
+                        / ((1 + monthly_rate) ** n - 1)
+                    )
+                else:
+                    monthly_pi = int(loan / 360)
+                # Rough PITI: add ~25% for taxes + insurance
+                monthly_piti = int(monthly_pi * 1.25)
+                # Income required at 28% front-end DTI
+                income_required_annual = int(monthly_piti * 12 / 0.28)
+                affordability_snapshots.append({
+                    "down_payment_pct": dp_pct,
+                    "down_payment_label": dp_label,
+                    "down_payment_amount": dp_amount,
+                    "loan_amount": int(loan),
+                    "monthly_pi": monthly_pi,
+                    "monthly_piti_estimate": monthly_piti,
+                    "income_required_28pct_dti": income_required_annual,
+                })
+            result_dict["rate_sensitivity"] = {
+                "median_price": int(median_price),
+                "mortgage_rate_30yr": rate_30yr,
+                "note": (
+                    f"At {rate_30yr}% rate on a ${int(median_price):,} median home, "
+                    f"here's what different down payments look like:"
+                ),
+                "scenarios": affordability_snapshots,
+            }
+
         _state.cache_set(cache_key, result_dict)
         logger.info("TTL cache MISS for %s — stored", cache_key)
         return safe_json_dumps(result_dict)
@@ -3244,8 +3364,11 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             neighborhood=neighborhood,
             property_value=current_value,
         )
+        _yb = tool_input.get("year_built")
+        _year_built = int(_yb) if _yb is not None else None
         expenses = _state.rental_analyzer.calculate_expenses(
             expense_basis, rent_est.annual_rent,
+            year_built=_year_built,
         )
         noi = rent_est.annual_rent - expenses.total_annual
         cap_rate = round(noi / current_value * 100, 2) if current_value > 0 else 0
@@ -3287,6 +3410,53 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 )
         if purchase_date:
             result["purchase_date"] = purchase_date
+
+        # E-6 (#64): Rate penalty dimension for homeowners considering selling
+        # Shows monthly payment increase from selling current and buying new
+        owner_rate = mortgage_rate_override
+        if owner_rate is not None and mortgage_rate is not None:
+            owner_rate_float = float(owner_rate)
+            current_rate_float = float(mortgage_rate)
+            if owner_rate_float < current_rate_float and purchase_price:
+                pp = int(purchase_price)
+                remaining_loan = pp * 0.8  # approximate remaining balance
+                # Current payment at owner's locked rate
+                old_monthly_r = (owner_rate_float / 100) / 12
+                if old_monthly_r > 0:
+                    old_pi = int(
+                        remaining_loan * (old_monthly_r * (1 + old_monthly_r) ** 360)
+                        / ((1 + old_monthly_r) ** 360 - 1)
+                    )
+                else:
+                    old_pi = int(remaining_loan / 360)
+                # New payment at today's rate on current value with 20% down
+                new_loan = int(current_value * 0.80)
+                new_monthly_r = (current_rate_float / 100) / 12
+                if new_monthly_r > 0:
+                    new_pi = int(
+                        new_loan * (new_monthly_r * (1 + new_monthly_r) ** 360)
+                        / ((1 + new_monthly_r) ** 360 - 1)
+                    )
+                else:
+                    new_pi = int(new_loan / 360)
+
+                monthly_penalty = new_pi - old_pi
+                annual_penalty = monthly_penalty * 12
+                result["rate_penalty"] = {
+                    "current_rate": owner_rate_float,
+                    "new_rate": current_rate_float,
+                    "rate_difference_pct": round(current_rate_float - owner_rate_float, 2),
+                    "current_monthly_pi": old_pi,
+                    "new_monthly_pi": new_pi,
+                    "monthly_penalty": monthly_penalty,
+                    "annual_penalty": annual_penalty,
+                    "note": (
+                        f"Selling and buying at today's {current_rate_float}% rate "
+                        f"(vs your {owner_rate_float}% locked rate) would increase "
+                        f"your monthly P&I by ${monthly_penalty:,} "
+                        f"(${annual_penalty:,}/year)"
+                    ),
+                }
 
         return safe_json_dumps(result)
 
@@ -3520,6 +3690,9 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         requested_limit = min(tool_input.get("limit", 10), 25)
         adu_filter = tool_input.get("adu_eligible")
         sb9_filter = tool_input.get("sb9_eligible")
+        # E-7 (#64): Affordability filtering by estimated monthly cost
+        max_monthly_cost = tool_input.get("max_monthly_cost")
+        affordability_dp_pct = tool_input.get("down_payment_pct", 20.0)
 
         # Shared filter kwargs for both count and search
         _search_filters = dict(
@@ -3547,8 +3720,9 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
         # Get true total count (before LIMIT)
         total_matching = _state.db.count_properties_advanced(**_search_filters)
 
-        # Over-fetch when post-filtering on dev potential flags
-        sql_limit = requested_limit * 4 if (adu_filter or sb9_filter) else requested_limit
+        # Over-fetch when post-filtering on dev potential or affordability flags
+        needs_overfetch = adu_filter or sb9_filter or max_monthly_cost
+        sql_limit = requested_limit * 4 if needs_overfetch else requested_limit
 
         rows = _state.db.search_properties_advanced(
             **_search_filters,
@@ -3646,6 +3820,19 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 data_quality = "shared_lot_no_size"
                 data_quality_note = "Condo unit with shared lot — lot size may be zero or shared across units."
 
+            # E-7 (#64): Compute estimated monthly cost for affordability filtering
+            est_monthly_cost = None
+            price_for_cost = predicted_price or row.get("last_sale_price")
+            if price_for_cost:
+                est_monthly_cost = _estimate_monthly_cost(
+                    int(price_for_cost), affordability_dp_pct,
+                )
+
+            # E-7: Skip properties exceeding monthly cost limit
+            if max_monthly_cost and est_monthly_cost is not None:
+                if est_monthly_cost > int(max_monthly_cost):
+                    continue
+
             results.append({
                 "id": row.get("id"),
                 "address": row.get("address"),
@@ -3668,6 +3855,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 "last_sale_date": row.get("last_sale_date"),
                 "predicted_price": predicted_price,
                 "prediction_confidence": prediction_confidence,
+                "estimated_monthly_cost": est_monthly_cost,
                 "data_quality": data_quality,
                 "data_quality_note": data_quality_note,
                 "development": dev_summary,
@@ -3768,12 +3956,379 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 pass
             return json.dumps({"error": f"SQL error: {error_msg}", "query": sql})
 
+    elif tool_name == "compute_true_cost":
+        from homebuyer.services.faketor.tools.gap.true_cost import (
+            TrueCostParams,
+            compute_true_cost,
+        )
+        from homebuyer.utils.mortgage import get_current_mortgage_rate
+
+        rate = tool_input.get("mortgage_rate")
+        if rate is None and _state and _state.db:
+            rate = get_current_mortgage_rate(_state.db)
+        if rate is None:
+            rate = 6.5  # hard fallback
+
+        params = TrueCostParams(
+            purchase_price=int(tool_input["purchase_price"]),
+            down_payment_pct=float(tool_input.get("down_payment_pct", 20.0)),
+            mortgage_rate=float(rate),
+            year_built=tool_input.get("year_built"),
+            construction_type=tool_input.get("construction_type", "wood_frame"),
+            hoa_monthly=int(tool_input.get("hoa_monthly") or 0),
+            current_rent=(
+                int(tool_input["current_rent"])
+                if tool_input.get("current_rent")
+                else None
+            ),
+        )
+        return safe_json_dumps(compute_true_cost(params))
+
+    elif tool_name == "rent_vs_buy":
+        from homebuyer.services.faketor.tools.gap.rent_vs_buy import (
+            RentVsBuyParams,
+            compute_rent_vs_buy,
+        )
+        from homebuyer.services.faketor.tools.gap.true_cost import (
+            TrueCostParams,
+            compute_true_cost,
+            calc_pmi_dropoff_month,
+            PROPERTY_TAX_RATE,
+        )
+        from homebuyer.utils.mortgage import get_current_mortgage_rate
+
+        rate = tool_input.get("mortgage_rate")
+        if rate is None and _state and _state.db:
+            rate = get_current_mortgage_rate(_state.db)
+        if rate is None:
+            rate = 6.5
+
+        purchase_price = int(tool_input["purchase_price"])
+        down_pct = float(tool_input.get("down_payment_pct", 20.0))
+        current_rent = int(tool_input["current_rent"])
+
+        # Compute ownership cost via true_cost if not provided
+        monthly_ownership = tool_input.get("monthly_ownership_cost")
+        monthly_pmi = int(tool_input.get("monthly_pmi") or 0)
+        pmi_dropoff = None
+
+        if monthly_ownership is None:
+            tc_params = TrueCostParams(
+                purchase_price=purchase_price,
+                down_payment_pct=down_pct,
+                mortgage_rate=float(rate),
+                year_built=tool_input.get("year_built"),
+                hoa_monthly=int(tool_input.get("hoa_monthly") or 0),
+                current_rent=current_rent,
+            )
+            tc = compute_true_cost(tc_params)
+            monthly_ownership = tc["total_monthly_cost"]
+            monthly_pmi = tc["monthly_pmi"]
+
+        # Compute PMI dropoff month
+        down_amount = int(round(purchase_price * down_pct / 100))
+        loan_amount = purchase_price - down_amount
+        if monthly_pmi > 0:
+            pmi_dropoff = calc_pmi_dropoff_month(
+                loan_amount, purchase_price, float(rate)
+            )
+
+        annual_prop_tax = int(round(purchase_price * PROPERTY_TAX_RATE))
+
+        rvb_params = RentVsBuyParams(
+            purchase_price=purchase_price,
+            down_payment_pct=down_pct,
+            mortgage_rate=float(rate),
+            annual_appreciation_pct=float(
+                tool_input.get("annual_appreciation_pct", 3.0)
+            ),
+            monthly_ownership_cost=int(monthly_ownership),
+            monthly_pmi=monthly_pmi,
+            pmi_dropoff_month=pmi_dropoff,
+            annual_property_tax=annual_prop_tax,
+            current_rent=current_rent,
+            annual_rent_increase_pct=float(
+                tool_input.get("annual_rent_increase_pct", 4.0)
+            ),
+            horizon_years=int(tool_input.get("horizon_years", 15)),
+        )
+        return safe_json_dumps(compute_rent_vs_buy(rvb_params))
+
+    elif tool_name == "pmi_model":
+        from homebuyer.services.faketor.tools.gap.pmi_model import (
+            PmiModelParams,
+            compute_pmi_model,
+        )
+        from homebuyer.utils.mortgage import get_current_mortgage_rate
+
+        rate = tool_input.get("mortgage_rate")
+        if rate is None and _state and _state.db:
+            rate = get_current_mortgage_rate(_state.db)
+        if rate is None:
+            rate = 6.5
+
+        monthly_savings = tool_input.get("monthly_savings")
+
+        params = PmiModelParams(
+            purchase_price=int(tool_input["purchase_price"]),
+            down_payment_pct=float(tool_input.get("down_payment_pct", 10.0)),
+            mortgage_rate=float(rate),
+            annual_appreciation_pct=float(
+                tool_input.get("annual_appreciation_pct", 3.0)
+            ),
+            monthly_savings=(
+                int(monthly_savings) if monthly_savings is not None else None
+            ),
+            wait_months=int(tool_input.get("wait_months", 12)),
+        )
+        return safe_json_dumps(compute_pmi_model(params))
+
+    elif tool_name == "rate_penalty":
+        from homebuyer.services.faketor.tools.gap.rate_penalty import (
+            RatePenaltyParams,
+            compute_rate_penalty,
+        )
+        from homebuyer.utils.mortgage import get_current_mortgage_rate
+
+        new_rate = tool_input.get("new_rate")
+        if new_rate is None and _state and _state.db:
+            new_rate = get_current_mortgage_rate(_state.db)
+        if new_rate is None:
+            new_rate = 7.0
+
+        params = RatePenaltyParams(
+            existing_balance=int(tool_input["existing_balance"]),
+            existing_rate=float(tool_input["existing_rate"]),
+            existing_remaining_months=int(
+                tool_input.get("existing_remaining_months", 360)
+            ),
+            new_purchase_price=int(tool_input["new_purchase_price"]),
+            new_down_payment_pct=float(
+                tool_input.get("new_down_payment_pct", 20.0)
+            ),
+            new_rate=float(new_rate),
+            annual_gross_income=(
+                int(tool_input["annual_gross_income"])
+                if tool_input.get("annual_gross_income") is not None
+                else None
+            ),
+        )
+        return safe_json_dumps(compute_rate_penalty(params))
+
+    elif tool_name == "competition_assessment":
+        from homebuyer.services.faketor.tools.gap.competition import (
+            CompetitionParams,
+            compute_competition,
+        )
+
+        neighborhood = tool_input.get("neighborhood", "Berkeley")
+        price_min = tool_input.get("price_min")
+        price_max = tool_input.get("price_max")
+
+        # Fetch recent sales data from DB
+        sale_to_list_ratios: list[float] = []
+        dom_values: list[int] = []
+        above_asking_flags: list[bool] = []
+        active_listings = 0
+        monthly_closed = 0.0
+
+        if _state and _state.db:
+            db = _state.db
+            # Build price-band filter
+            price_clause = ""
+            query_params: list = [neighborhood]
+            if price_min is not None:
+                price_clause += " AND s.last_sale_price >= ?"
+                query_params.append(int(price_min))
+            if price_max is not None:
+                price_clause += " AND s.last_sale_price <= ?"
+                query_params.append(int(price_max))
+
+            # Recent sales (last 6 months) for competition metrics
+            rows = db.execute(
+                f"""
+                SELECT s.last_sale_price, s.list_price, s.dom
+                FROM sales s
+                WHERE s.neighborhood = ?
+                  AND s.sale_date >= date('now', '-6 months')
+                  {price_clause}
+                ORDER BY s.sale_date DESC
+                """,
+                query_params,
+            ).fetchall()
+
+            for row in rows:
+                sale_price = row[0] or 0
+                list_price = row[1] or 0
+                dom = row[2]
+                if list_price > 0 and sale_price > 0:
+                    sale_to_list_ratios.append(sale_price / list_price)
+                    above_asking_flags.append(sale_price > list_price)
+                if dom is not None and dom >= 0:
+                    dom_values.append(int(dom))
+
+            # Active listings count
+            try:
+                # Apply same price-band filter to active listings
+                active_price_clause = ""
+                active_params: list = [neighborhood]
+                if price_min is not None:
+                    active_price_clause += " AND last_sale_price >= ?"
+                    active_params.append(int(price_min))
+                if price_max is not None:
+                    active_price_clause += " AND last_sale_price <= ?"
+                    active_params.append(int(price_max))
+                active_row = db.execute(
+                    f"""
+                    SELECT COUNT(*) FROM sales
+                    WHERE neighborhood = ? AND status = 'Active'
+                    {active_price_clause}
+                    """,
+                    active_params,
+                ).fetchone()
+                active_listings = active_row[0] if active_row else 0
+            except Exception:
+                active_listings = 0
+
+            # Monthly closed sales (last 6 months averaged)
+            monthly_closed = len(rows) / 6.0 if rows else 0.0
+
+        comp_params = CompetitionParams(
+            neighborhood=neighborhood,
+            sale_to_list_ratios=sale_to_list_ratios,
+            dom_values=dom_values,
+            above_asking_flags=above_asking_flags,
+            active_listings=active_listings,
+            monthly_closed_sales=monthly_closed,
+            price_min=int(price_min) if price_min is not None else None,
+            price_max=int(price_max) if price_max is not None else None,
+        )
+        return safe_json_dumps(compute_competition(comp_params))
+
+    elif tool_name == "dual_property_model":
+        from homebuyer.services.faketor.tools.gap.dual_property import (
+            DualPropertyParams,
+            compute_dual_property,
+        )
+
+        params = DualPropertyParams(
+            primary_value=int(tool_input["primary_value"]),
+            primary_mortgage_balance=int(
+                tool_input.get("primary_mortgage_balance", 0)
+            ),
+            primary_mortgage_rate=float(
+                tool_input.get("primary_mortgage_rate", 3.25)
+            ),
+            primary_mortgage_remaining_months=int(
+                tool_input.get("primary_mortgage_remaining_months", 300)
+            ),
+            extraction_method=tool_input.get("extraction_method", "heloc"),
+            extraction_amount=int(tool_input.get("extraction_amount", 0)),
+            heloc_rate=float(tool_input.get("heloc_rate", 8.5)),
+            cashout_refi_rate=(
+                float(tool_input["cashout_refi_rate"])
+                if tool_input.get("cashout_refi_rate") is not None
+                else None
+            ),
+            investment_price=int(tool_input["investment_price"]),
+            investment_down_payment_pct=float(
+                tool_input.get("investment_down_payment_pct", 25.0)
+            ),
+            investment_rate=float(tool_input.get("investment_rate", 7.5)),
+            investment_monthly_rent=int(tool_input["investment_monthly_rent"]),
+            investment_hoa=int(tool_input.get("investment_hoa", 0)),
+        )
+        return safe_json_dumps(compute_dual_property(params))
+
+    elif tool_name == "yield_ranking":
+        from homebuyer.services.faketor.tools.gap.yield_ranking import (
+            PropertyForRanking,
+            YieldRankingParams,
+            compute_yield_ranking,
+        )
+
+        props = [
+            PropertyForRanking(
+                address=p.get("address", ""),
+                price=int(p["price"]),
+                monthly_rent=int(p["monthly_rent"]),
+                hoa_monthly=int(p.get("hoa_monthly", 0)),
+                property_id=p.get("property_id"),
+            )
+            for p in (tool_input.get("properties") or [])
+        ]
+        params = YieldRankingParams(
+            properties=props,
+            down_payment_pct=float(tool_input.get("down_payment_pct", 25.0)),
+            mortgage_rate=float(tool_input.get("mortgage_rate", 7.5)),
+        )
+        return safe_json_dumps(compute_yield_ranking(params))
+
+    elif tool_name == "appreciation_stress_test":
+        from homebuyer.services.faketor.tools.gap.appreciation_stress import (
+            AppreciationStressParams,
+            compute_appreciation_stress,
+        )
+
+        params = AppreciationStressParams(
+            purchase_price=int(tool_input["purchase_price"]),
+            down_payment_pct=float(tool_input.get("down_payment_pct", 20.0)),
+            mortgage_rate=float(tool_input.get("mortgage_rate", 7.0)),
+            monthly_rental_income=int(
+                tool_input.get("monthly_rental_income", 0)
+            ),
+            exit_years=tool_input.get("exit_years", [3, 5, 7, 10]),
+            refi_rate=(
+                float(tool_input["refi_rate"])
+                if tool_input.get("refi_rate") is not None else None
+            ),
+        )
+        return safe_json_dumps(compute_appreciation_stress(params))
+
+    elif tool_name == "neighborhood_lifestyle":
+        from homebuyer.services.faketor.tools.gap.neighborhood_lifestyle import (
+            NeighborhoodLifestyleParams,
+            compute_neighborhood_lifestyle,
+        )
+
+        params = NeighborhoodLifestyleParams(
+            neighborhoods=tool_input.get("neighborhoods", []),
+            priority_walkability=float(tool_input.get("priority_walkability", 1.0)),
+            priority_transit=float(tool_input.get("priority_transit", 1.0)),
+            priority_schools=float(tool_input.get("priority_schools", 1.0)),
+            priority_dining=float(tool_input.get("priority_dining", 1.0)),
+            priority_parks=float(tool_input.get("priority_parks", 1.0)),
+            priority_safety=float(tool_input.get("priority_safety", 1.0)),
+        )
+        return safe_json_dumps(compute_neighborhood_lifestyle(params))
+
+    elif tool_name == "adjacent_market_comparison":
+        from homebuyer.services.faketor.tools.gap.adjacent_market import (
+            AdjacentMarketParams,
+            compute_adjacent_market,
+        )
+
+        params = AdjacentMarketParams(
+            budget=int(tool_input["budget"]),
+            min_beds=int(tool_input.get("min_beds", 3)),
+            min_baths=float(tool_input.get("min_baths", 1.5)),
+            min_sqft=int(tool_input.get("min_sqft", 0)),
+            must_have_bart=bool(tool_input.get("must_have_bart", False)),
+            max_commute_minutes=int(tool_input.get("max_commute_minutes", 60)),
+            markets=tool_input.get("markets", []),
+        )
+        return safe_json_dumps(compute_adjacent_market(params))
+
     else:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
 
 def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
-    """Resolve property context from request + DB for Faketor chat."""
+    """Resolve property context from request + DB for Faketor chat.
+
+    Requires _state to be initialized (callers must guard with 503 check).
+    """
+    assert _state is not None, "_resolve_faketor_context called before _state init"
     # Truncate float→int for fields that downstream code treats as int
     _sqft = int(req.sqft) if req.sqft is not None else None
     _lot = int(req.lot_size_sqft) if req.lot_size_sqft is not None else None
@@ -3792,6 +4347,12 @@ def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
             "property_type": req.property_type,
         }.items() if v is not None
     }
+
+    # If no lat/lon, return minimal context (property-less conversation)
+    if req.latitude is None or req.longitude is None:
+        prop = dict(overrides)
+        prop["property_category"] = req.property_category
+        return prop
 
     prop = _resolve_property_from_db(
         req.latitude, req.longitude,
@@ -3821,11 +4382,153 @@ def _resolve_faketor_context(req: FaketorChatRequest) -> dict:
     return prop
 
 
+async def _run_shadow_extraction(message: str, session_id: str | None, user_id: str | None = None):
+    """Run signal extraction + classification in shadow mode (Phase C).
+
+    This runs before the main chat and stores results in ResearchContext.
+    It does NOT affect user-facing behavior — purely for monitoring and
+    data collection. Failures are logged and swallowed.
+    """
+    if not _state or not _state.signal_extractor:
+        return
+
+    try:
+        import time as _time
+
+        start = _time.time()
+
+        # Load or create research context
+        ctx = await _state.context_store.load_or_create(
+            user_id=user_id, session_id=session_id
+        )
+
+        # Extract signals from user message
+        extraction = _state.signal_extractor.extract(
+            message=message,
+            current_profile=ctx.buyer.profile,
+            prior_signals=ctx.buyer.profile.signals,
+        )
+
+        # Apply extractions to buyer profile
+        if not extraction.is_empty():
+            extractions = extraction.to_extractions()
+            updated = ctx.buyer.profile.apply_extraction(extractions)
+            ctx.buyer.profile.signals.extend(extraction.signals)
+
+            # Classify segment
+            result = _state.segment_classifier.classify(
+                profile=ctx.buyer.profile,
+                mortgage_rate=ctx.market.mortgage_rate_30yr or 6.5,
+                median_price=(
+                    ctx.market.berkeley_wide.median_sale_price
+                    or 1_300_000
+                ),
+            )
+
+            # Check if transition should occur
+            from homebuyer.services.faketor.classification import SegmentResult
+
+            current_result = SegmentResult(
+                segment_id=ctx.buyer.segment_id,
+                confidence=ctx.buyer.segment_confidence,
+                reasoning="",
+                factor_coverage=ctx.buyer.profile.known_factor_count() / 4.0,
+            )
+            trigger = extraction.signals[0] if extraction.signals else None
+
+            if _state.segment_classifier.should_transition(current_result, result, trigger):
+                ctx.buyer.record_transition(
+                    from_segment=ctx.buyer.segment_id,
+                    to_segment=result.segment_id,
+                    confidence=result.confidence,
+                    trigger=trigger,
+                )
+
+            # Persist context
+            await _state.context_store.persist(ctx)
+
+            elapsed_ms = (_time.time() - start) * 1000
+
+            # Structured logging (C-6, #37)
+            logger.info(
+                "shadow_extraction",
+                extra={
+                    "event": "signal_extraction",
+                    "session_id": session_id,
+                    "extraction_time_ms": extraction.extraction_time_ms,
+                    "total_time_ms": elapsed_ms,
+                    "fields_extracted": updated,
+                    "signal_count": len(extraction.signals),
+                    "segment_id": ctx.buyer.segment_id,
+                    "segment_confidence": ctx.buyer.segment_confidence,
+                    "factor_coverage": ctx.buyer.profile.known_factor_count() / 4.0,
+                },
+            )
+        else:
+            elapsed_ms = (_time.time() - start) * 1000
+            logger.debug(
+                "shadow_extraction: no signals in message (%.0fms)", elapsed_ms
+            )
+
+    except Exception:
+        logger.warning("Shadow extraction failed", exc_info=True)
+
+
 @app.post("/api/faketor/chat")
-def faketor_chat(req: FaketorChatRequest):
+async def faketor_chat(
+    req: FaketorChatRequest,
+    auth_user_id: int | None = Depends(get_optional_user_id),
+):
     """Chat with Faketor, the AI real estate advisor."""
     if not _state:
         raise HTTPException(status_code=503, detail="Server not initialized")
+
+    # --- Orchestrated path (Phase E, feature-flag-gated) ---
+    if _state.turn_orchestrator is not None:
+        user_id = str(auth_user_id) if auth_user_id else (req.session_id or str(uuid.uuid4()))
+        property_context = _resolve_faketor_context(req)
+        working_set = None
+        if req.session_id:
+            working_set = _state.sessions.get_or_create(req.session_id)
+
+        # Create session-aware ToolExecutor for working-set scoping
+        from homebuyer.services.faketor.tools import registry as tool_reg
+        from homebuyer.services.faketor.tools.executor import ToolExecutor
+
+        session_executor = ToolExecutor(
+            _make_session_tool_executor(working_set),
+            tool_reg,
+        )
+
+        result = await _state.turn_orchestrator.run(
+            user_id=user_id,
+            message=req.message,
+            history=req.history,
+            property_context=property_context,
+            working_set_descriptor=(
+                working_set.get_descriptor() if working_set else ""
+            ),
+            tool_executor=session_executor,
+            buyer_context=req.buyer_context,
+        )
+        response = result.to_dict()
+        if working_set is not None:
+            response["working_set"] = _build_working_set_metadata(
+                working_set, req.session_id
+            )
+        return response
+
+    # --- Legacy path (original FaketorService) ---
+    # Shadow mode: run extraction + classification (non-blocking on failure)
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(_run_shadow_extraction(req.message, req.session_id))
+        else:
+            asyncio.run(_run_shadow_extraction(req.message, req.session_id))
+    except Exception:
+        pass  # Shadow mode — never block the main chat
 
     # Resolve session working set
     working_set = None
@@ -3852,10 +4555,75 @@ def faketor_chat(req: FaketorChatRequest):
 
 
 @app.post("/api/faketor/chat/stream")
-def faketor_chat_stream(req: FaketorChatRequest):
+async def faketor_chat_stream(
+    req: FaketorChatRequest,
+    auth_user_id: int | None = Depends(get_optional_user_id),
+):
     """SSE streaming version of Faketor chat."""
     if not _state:
         raise HTTPException(status_code=503, detail="Server not initialized")
+
+    # --- Orchestrated path (Phase E, feature-flag-gated) ---
+    if _state.turn_orchestrator is not None:
+        user_id = str(auth_user_id) if auth_user_id else (req.session_id or str(uuid.uuid4()))
+        property_context = _resolve_faketor_context(req)
+        working_set = None
+        if req.session_id:
+            working_set = _state.sessions.get_or_create(req.session_id)
+
+        # Create session-aware ToolExecutor for working-set scoping
+        from homebuyer.services.faketor.tools import registry as tool_reg
+        from homebuyer.services.faketor.tools.executor import ToolExecutor
+
+        session_executor = ToolExecutor(
+            _make_session_tool_executor(working_set),
+            tool_reg,
+        )
+
+        async def orchestrated_event_generator():
+            async for event in _state.turn_orchestrator.run_stream(
+                user_id=user_id,
+                message=req.message,
+                history=req.history,
+                property_context=property_context,
+                working_set_descriptor=(
+                    working_set.get_descriptor() if working_set else ""
+                ),
+                tool_executor=session_executor,
+                buyer_context=req.buyer_context,
+            ):
+                event_type = event["event"]
+                data = safe_json_dumps(event["data"])
+                yield f"event: {event_type}\ndata: {data}\n\n"
+
+            # Emit working set metadata after the chat is done
+            if working_set is not None:
+                ws_data = safe_json_dumps(
+                    _build_working_set_metadata(working_set, req.session_id),
+                )
+                yield f"event: working_set\ndata: {ws_data}\n\n"
+
+        return StreamingResponse(
+            orchestrated_event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # --- Legacy path (original FaketorService) ---
+    # Shadow mode: run extraction + classification (non-blocking on failure)
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(_run_shadow_extraction(req.message, req.session_id))
+        else:
+            asyncio.run(_run_shadow_extraction(req.message, req.session_id))
+    except Exception:
+        pass  # Shadow mode — never block the main chat
 
     # Resolve session working set
     working_set = None
@@ -4113,8 +4881,79 @@ def _get_or_compute_prediction(tool_input: dict, source: str = "chat") -> dict:
     return pred_dict
 
 
+def _estimate_monthly_cost(
+    price: int,
+    down_payment_pct: float = 20.0,
+    rate: float | None = None,
+) -> int:
+    """Quick estimate of monthly housing cost (P&I + 25% for taxes/insurance).
+
+    E-7 (#64): Used by search_properties and update_working_set for
+    affordability post-filtering.
+    """
+    if rate is None:
+        # Try to pull cached market rate
+        try:
+            mkt = _state.cache_get("market_summary") if _state else None
+            if mkt:
+                rate = mkt.get("current_market", {}).get("mortgage_rate_30yr")
+        except Exception:
+            pass
+        rate = rate or 6.5
+    dp = int(price * down_payment_pct / 100)
+    loan = price - dp
+    monthly_r = (rate / 100) / 12
+    if monthly_r > 0 and loan > 0:
+        n = 360
+        pi = int(
+            loan * (monthly_r * (1 + monthly_r) ** n)
+            / ((1 + monthly_r) ** n - 1)
+        )
+    else:
+        pi = int(loan / 360) if loan > 0 else 0
+    # Add ~25% for property tax + insurance + maintenance
+    return int(pi * 1.25)
+
+
 def _prediction_to_dict(result) -> dict:
-    """Convert PredictionResult to JSON-serializable dict."""
+    """Convert PredictionResult to JSON-serializable dict.
+
+    E-4 (#64): Adds top_value_drivers — sorted, human-readable summary of
+    the most impactful SHAP feature contributions for prominent surfacing.
+    """
+    contributions = result.feature_contributions or {}
+
+    # Build sorted list of top value drivers from SHAP
+    top_drivers: list[dict] = []
+    if contributions:
+        _FEATURE_LABELS: dict[str, str] = {
+            "sqft": "Living area (sqft)",
+            "lot_size_sqft": "Lot size",
+            "beds": "Bedrooms",
+            "baths": "Bathrooms",
+            "year_built": "Year built",
+            "latitude": "Location (latitude)",
+            "longitude": "Location (longitude)",
+            "property_type": "Property type",
+            "neighborhood": "Neighborhood",
+            "zip_code": "ZIP code",
+            "days_on_market": "Days on market",
+            "sale_to_list_ratio": "Sale-to-list ratio",
+            "mortgage_rate_30yr": "Mortgage rate",
+        }
+        for feature, impact in sorted(
+            contributions.items(), key=lambda x: abs(x[1]), reverse=True
+        ):
+            if abs(impact) < 1000:  # skip negligible contributions
+                continue
+            top_drivers.append({
+                "feature": feature,
+                "label": _FEATURE_LABELS.get(feature, feature.replace("_", " ").title()),
+                "impact": int(round(impact)),
+                "direction": "increases" if impact > 0 else "decreases",
+                "impact_formatted": f"${abs(int(round(impact))):,}",
+            })
+
     return {
         "predicted_price": result.predicted_price,
         "price_lower": result.price_lower,
@@ -4123,7 +4962,8 @@ def _prediction_to_dict(result) -> dict:
         "list_price": result.list_price,
         "predicted_premium_pct": result.predicted_premium_pct,
         "base_value": result.base_value,
-        "feature_contributions": result.feature_contributions,
+        "feature_contributions": contributions,
+        "top_value_drivers": top_drivers[:8],  # top 8 most impactful features
     }
 
 

@@ -13,17 +13,23 @@ import {
   Send, Loader2, Bot, User, MessageCircle, Search,
   Home, BarChart3, GitCompare, MapPin, Building2,
   TrendingUp, DollarSign, Wrench, FileText, Database,
-  Undo2, CheckCircle2, Plus,
+  Undo2, CheckCircle2, Plus, Calculator, ArrowRightLeft,
+  Shield, ArrowUpDown, Flame, Trophy, TrendingDown, Map,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import * as api from '../lib/api';
 import { formatToolName } from '../lib/utils';
 import { usePropertyContext } from '../context/PropertyContext';
+import { useBuyerContext } from '../context/BuyerContext';
 import type { PropertyContextData, TrackedProperty } from '../context/PropertyContext';
 import { MarkdownLite } from '../components/chat/MarkdownLite';
 import { BlockRenderer } from '../components/chat/BlockRenderer';
 import { SuggestionChips } from '../components/chat/SuggestionChips';
+import { SegmentBadge } from '../components/chat/SegmentBadge';
+import { ResumeBriefingCard } from '../components/chat/ResumeBriefingCard';
+// BuyerIntakeForm — available for inline use when Faketor requests financial details
+// import { BuyerIntakeForm } from '../components/chat/BuyerIntakeForm';
 import { AddressSearch } from '../components/AddressSearch';
 import { PropertyDetailModal } from '../components/context/PropertyDetailModal';
 import type {
@@ -50,6 +56,16 @@ const TOOL_ICONS: Record<string, typeof Home> = {
   query_database: Database,
   undo_filter: Undo2,
   generate_investment_prospectus: FileText,
+  compute_true_cost: Calculator,
+  rent_vs_buy: ArrowRightLeft,
+  pmi_model: Shield,
+  rate_penalty: ArrowUpDown,
+  competition_assessment: Flame,
+  dual_property_model: Building2,
+  yield_ranking: Trophy,
+  appreciation_stress_test: TrendingDown,
+  neighborhood_lifestyle: MapPin,
+  adjacent_market_comparison: Map,
 };
 
 // ---------------------------------------------------------------------------
@@ -78,6 +94,8 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
   // Deferred blocks: processBlocks must run AFTER onWorkingSet so that
   // setTrackedFromServer doesn't overwrite the property we just tracked.
   const deferredBlocksRef = useRef<ResponseBlock[] | null>(null);
+  // Ref to always access the latest processBlocks (avoids stale closure in timeouts)
+  const processBlocksRef = useRef<(blocks: ResponseBlock[]) => void>(() => {});
 
   // Conversation persistence — use ref so callbacks always see latest value
   const convIdRef = useRef<number | null>(initialConvId ?? null);
@@ -93,6 +111,22 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
     setSendChatMessage,
     setWorkingSetMeta,
   } = usePropertyContext();
+
+  const {
+    segment,
+    segmentConfidence,
+    resumeBriefing,
+    intakeData,
+    updateSegment,
+    setResumeBriefing,
+    setPreExecuting,
+    clearPreExecuting,
+    dismissBriefing,
+    resetBuyer,
+  } = useBuyerContext();
+
+  // Dynamic suggestion chips from orchestrator SSE events
+  const [dynamicChips, setDynamicChips] = useState<string[]>([]);
 
   // Stable session ID for this conversation
   const [sessionId] = useState(() => crypto.randomUUID());
@@ -161,11 +195,15 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
     }
   }, [messages, streaming, streamText, streamToolEvents]);
 
-  // Clear stale context on mount
+  // Clear stale context on mount — only reset buyer state for new conversations,
+  // not when reopening an existing one (segment persists across turns)
   useEffect(() => {
     clearTrackedProperties();
     setActiveProperty(null);
     setWorkingSetMeta(null);
+    if (!initialConvId) {
+      resetBuyer();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -242,6 +280,11 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
     [activeProperty, setActiveProperty, trackProperty, addBlocksToProperty],
   );
 
+  // Keep processBlocks ref in sync so deferred timeouts use the latest version
+  useEffect(() => {
+    processBlocksRef.current = processBlocks;
+  }, [processBlocks]);
+
   // ---- Persist a user+assistant message pair to the backend ----
   const persistMessages = useCallback(
     async (userMsg: ChatMessage, assistantMsg: ChatMessage) => {
@@ -302,8 +345,8 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
 
       const controller = api.streamFaketorMessage(
         {
-          latitude: activeProperty?.latitude ?? 37.8716,
-          longitude: activeProperty?.longitude ?? -122.2727,
+          latitude: activeProperty?.latitude,
+          longitude: activeProperty?.longitude,
           message: msg,
           history,
           session_id: sessionId,
@@ -317,6 +360,7 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
           year_built: safeInt(activeProperty?.year_built),
           property_type: activeProperty?.property_type,
           property_category: activeProperty?.property_category,
+          buyer_context: intakeData,
         },
         {
           onTextDelta: (text) => {
@@ -384,7 +428,7 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
                 const pending = deferredBlocksRef.current;
                 if (pending) {
                   deferredBlocksRef.current = null;
-                  processBlocks(pending);
+                  processBlocksRef.current(pending);
                 }
               }, 2000);
             }
@@ -400,7 +444,7 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
               deferredBlocksRef.current = null;
               // Use setTimeout(0) so the setTrackedFromServer state update
               // is enqueued first, then processBlocks runs on top of it.
-              setTimeout(() => processBlocks(pending), 0);
+              setTimeout(() => processBlocksRef.current(pending), 0);
             }
           },
           onError: (message) => {
@@ -410,12 +454,29 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
             setStreamToolEvents([]);
             setActiveToolLabel(null);
           },
+          // Phase H: segment-driven redesign callbacks
+          onSegmentUpdate: (data) => {
+            updateSegment(data);
+          },
+          onResumeBriefing: (data) => {
+            setResumeBriefing(data);
+          },
+          onPreExecutionStart: (tools) => {
+            setPreExecuting(tools);
+            setActiveToolLabel('Preparing analysis...');
+          },
+          onPreExecutionComplete: () => {
+            clearPreExecuting();
+          },
+          onSuggestionChips: (chips) => {
+            setDynamicChips(chips);
+          },
         },
       );
 
       abortRef.current = controller;
     },
-    [input, streaming, messages, activeProperty, sessionId, processBlocks, setWorkingSetMeta, setTrackedFromServer, persistMessages],
+    [input, streaming, messages, activeProperty, sessionId, processBlocks, setWorkingSetMeta, setTrackedFromServer, persistMessages, intakeData, updateSegment, setResumeBriefing, setPreExecuting, clearPreExecuting],
   );
 
   // ---- Handle address search selection ----
@@ -428,6 +489,11 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
     },
     [setActiveProperty, trackProperty, handleSend],
   );
+
+  // Handle buyer intake form submission (available for future inline mode)
+  // const handleIntakeComplete = useCallback((data: BuyerIntakeData) => {
+  //   completeIntake(data);
+  // }, [completeIntake]);
 
   // Register handleSend in context
   useEffect(() => {
@@ -452,7 +518,12 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
             <Bot size={18} />
           </div>
           <div>
-            <h1 className="text-base font-bold text-gray-900">Faketor</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base font-bold text-gray-900">Faketor</h1>
+              {segment && segmentConfidence != null && (
+                <SegmentBadge segment={segment} confidence={segmentConfidence} />
+              )}
+            </div>
             <p className="text-[11px] text-gray-500">
               {activeProperty
                 ? `Analyzing: ${activeProperty.address}`
@@ -490,7 +561,15 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
           </div>
         )}
 
-        {/* Welcome state */}
+        {/* Resume briefing card for returning users */}
+        {resumeBriefing && (
+          <ResumeBriefingCard
+            briefing={resumeBriefing}
+            onDismiss={dismissBriefing}
+          />
+        )}
+
+        {/* Welcome state — no intake form gate, just the welcome screen */}
         {messages.length === 0 && !streaming && !loadingConversation && (
           <WelcomeScreen
             onSelect={handleSend}
@@ -553,6 +632,7 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
             toolsUsed={allToolsUsed}
             onSelect={handleSend}
             propertyCategory={activeProperty?.property_category}
+            dynamicChips={dynamicChips}
           />
         )}
 
@@ -599,6 +679,13 @@ export function ChatPage({ conversationId: initialConvId, onNewChat }: ChatPageP
 // Sub-components
 // ---------------------------------------------------------------------------
 
+interface MarketSnapshot {
+  median_sale_price?: number | null;
+  sale_to_list_ratio?: number | null;
+  median_days_on_market?: number | null;
+  mortgage_rate_30yr?: number | null;
+}
+
 function WelcomeScreen({
   onSelect,
   hasProperty,
@@ -607,26 +694,44 @@ function WelcomeScreen({
   hasProperty: boolean;
 }) {
   const [funFact, setFunFact] = useState<string | null>(null);
+  const [market, setMarket] = useState<MarketSnapshot | null>(null);
 
   useEffect(() => {
+    // Fetch fun fact and market data in parallel
     api.getRandomFunFact()
       .then((f) => setFunFact(f.display_text))
-      .catch(() => {/* non-critical — silently hide */});
+      .catch(() => {/* non-critical */});
+
+    api.getMarketSummary()
+      .then((data) => {
+        const m = data?.current_market;
+        if (m) setMarket(m);
+      })
+      .catch(() => {/* non-critical */});
   }, []);
 
-  const prompts = hasProperty
-    ? [
-        'What\u2019s this property worth?',
-        'What can I build on this lot?',
-        'Show comparable sales',
-        'Should I sell or hold?',
-      ]
-    : [
-        'Tell me about 1234 Cedar St',
-        'What\u2019s the Berkeley market like?',
-        'Compare Elmwood vs Thousand Oaks',
-        'What neighborhoods have the best value?',
-      ];
+  // Intent discovery chips for new users (no property active)
+  const intentChips = [
+    "I'm looking to buy my first home",
+    "I want to invest in rental property",
+    "I'm thinking of upgrading from my current home",
+    "Just exploring the market",
+  ];
+
+  // Property-aware chips when a property is already selected
+  const propertyChips = [
+    'What\u2019s this property worth?',
+    'What can I build on this lot?',
+    'Show comparable sales',
+    'Should I sell or hold?',
+  ];
+
+  const prompts = hasProperty ? propertyChips : intentChips;
+
+  const formatPrice = (n: number) =>
+    n >= 1_000_000
+      ? `$${(n / 1_000_000).toFixed(1)}M`
+      : `$${Math.round(n / 1000)}K`;
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60%] text-center px-4">
@@ -634,15 +739,55 @@ function WelcomeScreen({
         <Bot size={32} />
       </div>
       <h2 className="text-xl font-bold text-gray-900 mb-1">Welcome to Faketor</h2>
-      <p className="text-sm text-gray-500 mb-6 max-w-md">
-        Your AI real estate advisor for Berkeley. Ask about any property, neighborhood,
-        or the market — I'll pull live data and give you data-driven insights.
+      <p className="text-sm text-gray-500 mb-4 max-w-md">
+        Your AI real estate advisor for Berkeley. I'll pull live data and give you
+        brutally honest, data-driven insights.
       </p>
+
+      {/* Market snapshot */}
+      {market && (
+        <div className="mb-4 max-w-lg w-full px-4 py-3 rounded-xl bg-blue-50 border border-blue-200">
+          <p className="text-xs font-semibold text-blue-700 mb-2">Berkeley Market Right Now</p>
+          <div className="grid grid-cols-4 gap-2 text-center">
+            {market.median_sale_price != null && (
+              <div>
+                <p className="text-lg font-bold text-blue-900">{formatPrice(market.median_sale_price)}</p>
+                <p className="text-[10px] text-blue-500 uppercase">Median</p>
+              </div>
+            )}
+            {market.sale_to_list_ratio != null && (
+              <div>
+                <p className="text-lg font-bold text-blue-900">{(market.sale_to_list_ratio * 100).toFixed(0)}%</p>
+                <p className="text-[10px] text-blue-500 uppercase">Sale/List</p>
+              </div>
+            )}
+            {market.median_days_on_market != null && (
+              <div>
+                <p className="text-lg font-bold text-blue-900">{market.median_days_on_market}</p>
+                <p className="text-[10px] text-blue-500 uppercase">Days</p>
+              </div>
+            )}
+            {market.mortgage_rate_30yr != null && (
+              <div>
+                <p className="text-lg font-bold text-blue-900">{market.mortgage_rate_30yr.toFixed(1)}%</p>
+                <p className="text-[10px] text-blue-500 uppercase">30yr Rate</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Fun fact */}
       {funFact && (
         <div className="mb-6 max-w-lg w-full px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-left">
           <p className="text-xs font-semibold text-amber-700 mb-1">Did you know?</p>
           <p className="text-sm text-amber-900">{funFact}</p>
         </div>
+      )}
+
+      {/* Intent / context chips */}
+      {!hasProperty && (
+        <p className="text-xs text-gray-400 mb-3">What brings you to Berkeley real estate?</p>
       )}
       <div className="grid grid-cols-2 gap-2 w-full max-w-lg">
         {prompts.map((prompt) => (
@@ -653,7 +798,7 @@ function WelcomeScreen({
                        hover:border-indigo-300 hover:text-indigo-700 hover:bg-indigo-50
                        hover:shadow-sm transition-all"
           >
-            <Search size={14} className="inline mr-1.5 text-gray-400" />
+            <MessageCircle size={14} className="inline mr-1.5 text-gray-400" />
             {prompt}
           </button>
         ))}
@@ -696,9 +841,19 @@ function ToolChip({ event }: { event: ToolEvent }) {
 
 /** Block types that should be rendered inline below the text bubble. */
 const INLINE_BLOCK_TYPES = new Set([
-  'investment_prospectus',  // has download button, doesn't fit sidebar
-  'market_summary',         // standalone data, no per-property sidebar slot
-  'neighborhood_stats',     // standalone data, no per-property sidebar slot
+  'investment_prospectus',           // has download button, doesn't fit sidebar
+  'market_summary',                  // standalone data, no per-property sidebar slot
+  'neighborhood_stats',              // standalone data
+  'true_cost_card',                  // gap tool — renders inline when no property active
+  'rent_vs_buy_card',                // gap tool — standalone comparison
+  'pmi_model_card',                  // gap tool — standalone analysis
+  'rate_penalty_card',               // gap tool — standalone analysis
+  'competition_card',                // gap tool — standalone by neighborhood
+  'dual_property_card',              // gap tool — standalone strategy
+  'yield_ranking_card',              // gap tool — multi-property comparison
+  'appreciation_stress_card',        // gap tool — scenario analysis
+  'neighborhood_lifestyle_card',     // gap tool — multi-neighborhood comparison
+  'adjacent_market_card',            // gap tool — multi-market comparison
 ]);
 
 function InlineBlocks({

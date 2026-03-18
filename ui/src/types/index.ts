@@ -704,21 +704,6 @@ export interface FaketorMessage {
   content: string;
 }
 
-export type ResponseBlockType =
-  | 'prediction_card'
-  | 'comps_table'
-  | 'neighborhood_stats'
-  | 'development_potential'
-  | 'improvement_sim'
-  | 'sell_vs_hold'
-  | 'rental_income'
-  | 'investment_scenarios'
-  | 'investment_prospectus'
-  | 'market_summary'
-  | 'property_detail'
-  | 'property_search_results'
-  | 'query_result';
-
 // ---------------------------------------------------------------------------
 // Block data interfaces (used by the discriminated union ResponseBlock)
 // ---------------------------------------------------------------------------
@@ -930,12 +915,431 @@ export interface RentalIncomeBlockData {
 }
 
 // ---------------------------------------------------------------------------
+// Gap-tool block data interfaces (Phase F tools)
+// ---------------------------------------------------------------------------
+
+export interface TrueCostBlockData {
+  purchase_price?: number;
+  down_payment_pct?: number;
+  down_payment_amount?: number;
+  loan_amount?: number;
+  mortgage_rate?: number;
+  is_pmi_applicable?: boolean;
+  monthly_principal_and_interest?: number;
+  monthly_property_tax?: number;
+  monthly_hoi?: number;
+  monthly_earthquake_insurance?: number;
+  monthly_maintenance_reserve?: number;
+  monthly_pmi?: number;
+  monthly_hoa?: number;
+  total_monthly_cost?: number;
+  total_monthly_cost_no_eq?: number;
+  current_rent?: number | null;
+  monthly_delta_vs_rent?: number | null;
+  delta_direction?: string | null;
+  construction_type?: string;
+  year_built?: number | null;
+  pmi_note?: string | null;
+}
+
+export interface RentVsBuyYearlySnapshot {
+  year?: number;
+  annual_rent?: number;
+  cumulative_rent?: number;
+  opportunity_gain?: number;
+  cumulative_rent_net?: number;
+  annual_ownership_cost?: number;
+  cumulative_ownership?: number;
+  home_value?: number;
+  home_equity?: number;
+  remaining_balance?: number;
+  tax_benefit_cumulative?: number;
+  selling_costs?: number;
+  cumulative_buy_net?: number;
+  buy_advantage?: number;
+}
+
+export interface RentVsBuyBlockData {
+  purchase_price?: number;
+  down_payment_pct?: number;
+  down_payment_amount?: number;
+  current_rent?: number;
+  mortgage_rate?: number;
+  annual_appreciation_pct?: number;
+  annual_rent_increase_pct?: number;
+  horizon_years?: number;
+  crossover_year?: number | null;
+  crossover_description?: string;
+  final_annual_rent?: number | null;
+  final_home_value?: number | null;
+  final_home_equity?: number | null;
+  final_buy_advantage?: number | null;
+  total_rent_paid?: number | null;
+  total_ownership_paid?: number | null;
+  total_tax_benefit?: number | null;
+  opportunity_cost_of_down_payment?: number | null;
+  yearly_comparison?: RentVsBuyYearlySnapshot[];
+}
+
+export interface PmiLtvBracket {
+  bracket?: string;
+  pmi_rate_pct?: number;
+  months_in_bracket?: number;
+  total_cost_in_bracket?: number;
+  entry_month?: number;
+  exit_month?: number;
+}
+
+export interface PmiWaitAnalysis {
+  wait_months?: number;
+  monthly_savings?: number;
+  savings_gained?: number;
+  projected_purchase_price?: number;
+  price_increase?: number;
+  new_down_payment_amount?: number;
+  new_down_payment_pct?: number;
+  new_monthly_pmi?: number;
+  new_pmi_dropoff_month?: number | null;
+  total_pmi_cost_buy_now?: number;
+  total_pmi_cost_after_wait?: number;
+  pmi_savings_from_waiting?: number;
+  net_cost_of_waiting?: number;
+  verdict?: string;
+  verdict_description?: string;
+}
+
+export interface PmiModelBlockData {
+  purchase_price?: number;
+  down_payment_pct?: number;
+  down_payment_amount?: number;
+  loan_amount?: number;
+  mortgage_rate?: number;
+  annual_appreciation_pct?: number;
+  initial_ltv?: number;
+  initial_ltv_pct?: number;
+  pmi_applicable?: boolean;
+  current_pmi_rate_pct?: number;
+  monthly_pmi?: number;
+  annual_pmi?: number;
+  pmi_dropoff_month?: number | null;
+  pmi_dropoff_years?: number | null;
+  pmi_dropoff_description?: string | null;
+  pmi_dropoff_via_amortization_only_month?: number | null;
+  appreciation_acceleration_months?: number | null;
+  total_pmi_cost?: number;
+  total_pmi_cost_description?: string;
+  ltv_brackets?: PmiLtvBracket[];
+  wait_analysis?: PmiWaitAnalysis | null;
+  no_pmi_note?: string | null;
+}
+
+export interface RatePenaltyScenario {
+  rate?: number;
+  monthly_payment?: number;
+  monthly_penalty?: number;
+  annual_penalty?: number;
+  penalty_pct_of_income?: number | null;
+  is_tolerable?: boolean | null;
+}
+
+export interface RatePenaltyBlockData {
+  existing_balance?: number;
+  existing_rate?: number;
+  existing_remaining_months?: number;
+  new_purchase_price?: number;
+  new_down_payment_pct?: number;
+  new_down_payment_amount?: number;
+  new_loan_amount?: number;
+  new_rate?: number;
+  existing_monthly_payment?: number;
+  new_monthly_payment?: number;
+  monthly_penalty?: number;
+  annual_penalty?: number;
+  penalty_description?: string;
+  annual_gross_income?: number | null;
+  monthly_gross_income?: number | null;
+  penalty_pct_of_income?: number | null;
+  is_tolerable?: boolean | null;
+  tolerable_threshold_pct?: number;
+  breakeven_rate?: number | null;
+  breakeven_description?: string;
+  rate_scenarios?: RatePenaltyScenario[];
+  tolerable_rate?: number | null;
+}
+
+export interface DomDistribution {
+  median?: number | null;
+  p25?: number | null;
+  p75?: number | null;
+  min?: number | null;
+  max?: number | null;
+  under_7_days_pct?: number | null;
+  under_14_days_pct?: number | null;
+  over_30_days_pct?: number | null;
+}
+
+export interface CompetitionScoreComponents {
+  sale_to_list_score?: number;
+  dom_score?: number;
+  above_asking_score?: number;
+  absorption_score?: number;
+}
+
+export interface CompetitionBlockData {
+  neighborhood?: string;
+  price_min?: number | null;
+  price_max?: number | null;
+  sample_size?: number;
+  sale_to_list_median?: number | null;
+  sale_to_list_min?: number | null;
+  sale_to_list_max?: number | null;
+  dom_distribution?: DomDistribution;
+  above_asking_pct?: number | null;
+  below_asking_pct?: number | null;
+  above_asking_count?: number;
+  active_listings?: number;
+  monthly_closed_sales?: number;
+  absorption_rate?: number | null;
+  months_of_inventory?: number | null;
+  competition_score?: number;
+  competition_label?: string;
+  score_components?: CompetitionScoreComponents;
+  interpretation?: string | null;
+}
+
+export interface DualPropertyExtraction {
+  method?: string;
+  extraction_amount?: number;
+  monthly_cost?: number;
+  new_primary_payment?: number;
+  original_primary_payment?: number;
+  monthly_increase?: number;
+  heloc_rate?: number;
+  heloc_monthly_payment?: number;
+  refi_rate?: number;
+  new_balance?: number;
+}
+
+export interface DualPropertyInvestment {
+  investment_price?: number;
+  down_payment_amount?: number;
+  loan_amount?: number;
+  monthly_gross_rent?: number;
+  vacancy_loss?: number;
+  effective_gross_rent?: number;
+  monthly_debt_service?: number;
+  monthly_noi?: number;
+  monthly_net_cash_flow?: number;
+  annual_net_cash_flow?: number;
+  cap_rate_pct?: number;
+  expense_breakdown?: {
+    property_tax?: number;
+    insurance?: number;
+    maintenance?: number;
+    management?: number;
+    hoa?: number;
+    total?: number;
+  };
+}
+
+export interface DualPropertyStressTest {
+  scenario?: string;
+  monthly_cash_flow?: number;
+  annual_cash_flow?: number;
+  delta_from_base?: number;
+  is_positive?: boolean;
+}
+
+export interface DualPropertyBlockData {
+  primary_value?: number;
+  primary_mortgage_balance?: number;
+  available_equity?: number;
+  max_heloc_amount?: number;
+  extraction?: DualPropertyExtraction;
+  investment?: DualPropertyInvestment;
+  combined_monthly_cash_flow?: number;
+  combined_annual_cash_flow?: number;
+  cash_on_cash_pct?: number;
+  is_cash_flow_positive?: boolean;
+  stress_tests?: DualPropertyStressTest[];
+  worst_case_scenario?: string;
+  worst_case_monthly?: number;
+  survives_worst_case?: boolean;
+}
+
+export interface YieldRankingProperty {
+  address?: string;
+  property_id?: number | null;
+  price?: number;
+  monthly_rent?: number;
+  down_payment?: number;
+  loan_amount?: number;
+  monthly_noi?: number;
+  annual_noi?: number;
+  cap_rate_pct?: number;
+  monthly_debt_service?: number;
+  dscr?: number;
+  monthly_cash_flow?: number;
+  annual_cash_flow?: number;
+  cash_on_cash_pct?: number;
+  leverage_spread_pct?: number;
+}
+
+export interface YieldRankingBlockData {
+  down_payment_pct?: number;
+  mortgage_rate?: number;
+  property_count?: number;
+  positive_cash_flow_count?: number;
+  negative_spread_count?: number;
+  ranked_by_spread?: YieldRankingProperty[];
+  ranked_by_dscr?: YieldRankingProperty[];
+  ranked_by_cash_on_cash?: YieldRankingProperty[];
+  best_leverage_spread?: YieldRankingProperty | null;
+  best_dscr?: YieldRankingProperty | null;
+  best_cash_on_cash?: YieldRankingProperty | null;
+}
+
+export interface AppreciationStressExit {
+  year?: number;
+  home_value?: number;
+  remaining_balance?: number;
+  selling_costs?: number;
+  net_proceeds?: number;
+  total_carry_cost?: number;
+  total_invested?: number;
+  profit?: number;
+  annualized_roi_pct?: number;
+  is_profitable?: boolean;
+}
+
+export interface AppreciationStressScenario {
+  scenario_name?: string;
+  annual_appreciation_pct?: number;
+  exits?: AppreciationStressExit[];
+  breakeven_year?: number | null;
+  best_exit?: AppreciationStressExit;
+  worst_exit?: AppreciationStressExit;
+}
+
+export interface AppreciationStressRefiAnalysis {
+  current_rate?: number;
+  refi_rate?: number;
+  current_monthly_pi?: number;
+  refi_monthly_pi?: number;
+  monthly_savings?: number;
+  annual_savings?: number;
+  new_monthly_carry?: number;
+}
+
+export interface AppreciationStressBlockData {
+  purchase_price?: number;
+  down_payment_pct?: number;
+  down_payment_amount?: number;
+  mortgage_rate?: number;
+  monthly_ownership_cost?: number;
+  monthly_rental_income?: number;
+  monthly_carry_cost?: number;
+  exit_years?: number[];
+  scenarios?: AppreciationStressScenario[];
+  refi_analysis?: AppreciationStressRefiAnalysis | null;
+  all_scenarios_profitable?: boolean;
+  any_scenario_profitable?: boolean;
+  scenario_count?: number;
+}
+
+export interface NeighborhoodLifestyleScores {
+  walkability?: number;
+  transit?: number;
+  schools?: number;
+  dining?: number;
+  parks?: number;
+  safety?: number;
+}
+
+export interface NeighborhoodLifestyleComparison {
+  neighborhood?: string;
+  scores?: NeighborhoodLifestyleScores;
+  composite_score?: number;
+  character?: string;
+  bart_station?: string | null;
+  bart_minutes?: number | null;
+  median_price_tier?: string;
+}
+
+export interface NeighborhoodLifestyleBlockData {
+  neighborhoods_compared?: number;
+  comparisons?: NeighborhoodLifestyleComparison[];
+  best_overall?: string | null;
+  best_per_factor?: Record<string, string>;
+  available_neighborhoods?: string[];
+  weights_used?: NeighborhoodLifestyleScores;
+}
+
+export interface AdjacentMarketComparison {
+  market?: string;
+  median_price?: number;
+  price_per_sqft?: number;
+  budget_ratio?: number;
+  budget_delta?: number;
+  affordability?: string;
+  affordable_sqft?: number;
+  typical_sqft?: number;
+  sqft_bonus?: number;
+  typical_beds?: number;
+  typical_baths?: number;
+  typical_lot_sqft?: number;
+  school_rating?: number;
+  bart_access?: boolean;
+  commute_sf_minutes?: number;
+  property_tax_rate?: number;
+  character?: string;
+  meets_requirements?: boolean;
+}
+
+export interface AdjacentMarketBlockData {
+  budget?: number;
+  markets_compared?: number;
+  comparisons?: AdjacentMarketComparison[];
+  affordable_markets?: string[];
+  affordable_count?: number;
+  meets_requirements_count?: number;
+  berkeley_baseline?: AdjacentMarketComparison | null;
+  best_value?: string | null;
+  available_markets?: string[];
+}
+
+// ---------------------------------------------------------------------------
 // Discriminated union: ResponseBlock
 // ---------------------------------------------------------------------------
 
 interface ResponseBlockBase {
   tool_name: string;
 }
+
+export type ResponseBlockType =
+  | 'prediction_card'
+  | 'comps_table'
+  | 'neighborhood_stats'
+  | 'development_potential'
+  | 'improvement_sim'
+  | 'sell_vs_hold'
+  | 'rental_income'
+  | 'investment_scenarios'
+  | 'investment_prospectus'
+  | 'market_summary'
+  | 'property_detail'
+  | 'property_search_results'
+  | 'query_result'
+  | 'true_cost_card'
+  | 'rent_vs_buy_card'
+  | 'pmi_model_card'
+  | 'rate_penalty_card'
+  | 'competition_card'
+  | 'dual_property_card'
+  | 'yield_ranking_card'
+  | 'appreciation_stress_card'
+  | 'neighborhood_lifestyle_card'
+  | 'adjacent_market_card';
 
 export type ResponseBlock =
   | (ResponseBlockBase & { type: 'property_detail'; data: PropertyDetailBlockData })
@@ -950,7 +1354,17 @@ export type ResponseBlock =
   | (ResponseBlockBase & { type: 'rental_income'; data: RentalIncomeBlockData })
   | (ResponseBlockBase & { type: 'property_search_results'; data: PropertySearchResultsData })
   | (ResponseBlockBase & { type: 'query_result'; data: QueryResultData })
-  | (ResponseBlockBase & { type: 'investment_prospectus'; data: InvestmentProspectusResponse });
+  | (ResponseBlockBase & { type: 'investment_prospectus'; data: InvestmentProspectusResponse })
+  | (ResponseBlockBase & { type: 'true_cost_card'; data: TrueCostBlockData })
+  | (ResponseBlockBase & { type: 'rent_vs_buy_card'; data: RentVsBuyBlockData })
+  | (ResponseBlockBase & { type: 'pmi_model_card'; data: PmiModelBlockData })
+  | (ResponseBlockBase & { type: 'rate_penalty_card'; data: RatePenaltyBlockData })
+  | (ResponseBlockBase & { type: 'competition_card'; data: CompetitionBlockData })
+  | (ResponseBlockBase & { type: 'dual_property_card'; data: DualPropertyBlockData })
+  | (ResponseBlockBase & { type: 'yield_ranking_card'; data: YieldRankingBlockData })
+  | (ResponseBlockBase & { type: 'appreciation_stress_card'; data: AppreciationStressBlockData })
+  | (ResponseBlockBase & { type: 'neighborhood_lifestyle_card'; data: NeighborhoodLifestyleBlockData })
+  | (ResponseBlockBase & { type: 'adjacent_market_card'; data: AdjacentMarketBlockData });
 
 // ---------------------------------------------------------------------------
 // Search result types (from search_properties tool)
@@ -1083,6 +1497,48 @@ export interface FaketorChatResponse {
   blocks?: ResponseBlock[];
   error?: string;
   working_set?: WorkingSetMeta;
+}
+
+// ---------------------------------------------------------------------------
+// Segment-driven redesign types (Phase H)
+// ---------------------------------------------------------------------------
+
+/** Buyer segment update from the orchestrator. */
+export interface SegmentUpdateData {
+  segment: string;
+  confidence: number;
+  profile_summary: string;
+}
+
+/** Market change in a resume briefing. */
+export interface MarketChange {
+  type: 'mortgage_rate' | 'median_price' | 'inventory';
+  direction: 'up' | 'down';
+  change: number;
+  change_pct: number;
+}
+
+/** Resume briefing for returning users. */
+export interface ResumeBriefingData {
+  market_changes: MarketChange[];
+  focus_property?: {
+    address: string;
+    last_known_status: string;
+  };
+  stale_analyses?: {
+    tool: string;
+    address: string;
+    property_id: number;
+  }[];
+}
+
+/** Buyer context from the intake form. */
+export interface BuyerIntakeData {
+  intent?: 'occupy' | 'invest';
+  capital?: number;
+  income?: number;
+  current_rent?: number;
+  is_first_time_buyer?: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ import { Modal } from '../Modal';
 import { BlockRenderer } from '../chat/BlockRenderer';
 import type { TrackedProperty } from '../../context/PropertyContext';
 import { usePropertyContext } from '../../context/PropertyContext';
+import { useBuyerContext } from '../../context/BuyerContext';
 import { formatCurrency, formatNumber } from '../../lib/utils';
 
 interface PropertyDetailModalProps {
@@ -33,6 +34,7 @@ export function PropertyDetailModal({
   tracked,
 }: PropertyDetailModalProps) {
   const { sendChatMessage, clearPropertyBlocks } = usePropertyContext();
+  const { segment } = useBuyerContext();
 
   if (!tracked) return null;
 
@@ -147,7 +149,7 @@ export function PropertyDetailModal({
         {/* Run / Refresh analysis button */}
         {(() => {
           const hasAnalysis = blocks.filter((b) => b.type !== 'property_detail').length > 0;
-          const analysisPrompt = getAnalysisPrompt(property.address, property.property_category);
+          const analysisPrompt = getAnalysisPrompt(property.address, property.property_category, segment);
           return (
             <div className="text-center py-6">
               {!hasAnalysis && (
@@ -191,28 +193,62 @@ export function PropertyDetailModal({
   );
 }
 
-/** Build a property-type-aware prompt for full analysis. */
-function getAnalysisPrompt(address: string, category?: string): string {
+/** Build a property-type and segment-aware prompt for full analysis. */
+function getAnalysisPrompt(address: string, category?: string, segment?: string): string {
+  // Base prompt varies by property type
+  let base: string;
   switch (category) {
     case 'condo':
     case 'coop':
     case 'townhouse':
-      return (
+      base =
         `Give me a full analysis of ${address} including price prediction, ` +
-        `comparable unit sales, sell vs hold outlook, improvement ROI, and as-is rental income.`
-      );
+        `comparable unit sales, sell vs hold outlook, improvement ROI, and as-is rental income.`;
+      break;
     case 'land':
-      return (
+      base =
         `Give me a full analysis of ${address} including price prediction, ` +
-        `comparable land sales, sell vs hold outlook, and what can be built based on zoning.`
-      );
+        `comparable land sales, sell vs hold outlook, and what can be built based on zoning.`;
+      break;
     case 'apartment':
-      return (
+      base =
         `Give me a full analysis of ${address} including price prediction, ` +
-        `comparable sales, sell vs hold outlook, improvement ROI, and rental income for existing units.`
-      );
+        `comparable sales, sell vs hold outlook, improvement ROI, and rental income for existing units.`;
+      break;
     default:
-      return `Give me a full analysis of ${address}`;
+      base = `Give me a full analysis of ${address}.`;
+  }
+
+  // Enrich with segment-specific analysis requests
+  const segmentExtra = _segmentAnalysisExtra(segment);
+  return segmentExtra ? `${base} ${segmentExtra}` : base;
+}
+
+/** Segment-specific additions to the full analysis prompt. */
+function _segmentAnalysisExtra(segment?: string): string {
+  switch (segment) {
+    case 'stretcher':
+      return 'Include a true monthly cost breakdown and rent-vs-buy comparison.';
+    case 'first_time_buyer':
+      return 'Include true monthly cost breakdown and PMI analysis with timeline.';
+    case 'down_payment_constrained':
+      return 'Include PMI cost modeling and true monthly cost breakdown.';
+    case 'equity_trapped_upgrader':
+      return 'Include rate lock penalty analysis for my existing mortgage.';
+    case 'competitive_bidder':
+      return 'Include a competition assessment for this neighborhood and price range.';
+    case 'cash_buyer':
+      return 'Include appreciation stress test scenarios.';
+    case 'equity_leveraging_investor':
+      return 'Include a dual property strategy analysis using my existing equity.';
+    case 'leveraged_investor':
+      return 'Include appreciation stress test and rate penalty analysis.';
+    case 'value_add_investor':
+      return 'Include appreciation stress test with different renovation exit scenarios.';
+    case 'appreciation_bettor':
+      return 'Include appreciation stress test with multiple exit horizons.';
+    default:
+      return '';
   }
 }
 

@@ -43,6 +43,7 @@ class ExpenseBreakdown:
 
     property_tax: int
     insurance: int
+    earthquake_insurance: int
     maintenance: int
     vacancy_reserve: int
     management_fee: int
@@ -136,6 +137,11 @@ class InvestmentScenario:
     development_feasible: bool = True
     development_notes: str = ""
 
+    # E-3 (#64): Carrying costs during construction/development period
+    carrying_cost_months: int = 0
+    carrying_cost_total: int = 0
+    carrying_cost_monthly: int = 0
+
 
 @dataclass
 class RentalAnalysisResponse:
@@ -176,10 +182,47 @@ _PTR_MULTI = 20.0
 
 # Expense rates
 _PROPERTY_TAX_RATE = 0.0117  # 1.17% (Berkeley)
-_INSURANCE_RATE = 0.0035  # 0.35% of value
-_MAINTENANCE_RATE = 0.01  # 1% of value annually
+_INSURANCE_RATE = 0.0035  # 0.35% of value (hazard only)
+_EARTHQUAKE_INSURANCE_RATE = 0.002  # 0.20% of value (Berkeley baseline)
+_MAINTENANCE_RATE = 0.01  # 1% of value annually (baseline for newer homes)
 _VACANCY_RATE = 0.05  # 5% of gross rent
 _MANAGEMENT_FEE_RATE = 0.08  # 8% of gross rent
+
+
+def _earthquake_insurance_rate(year_built: int | None) -> float:
+    """Return earthquake insurance rate based on construction era.
+
+    Older homes (pre-1940 unreinforced masonry, balloon-frame) cost more
+    to insure against earthquakes. Berkeley's older housing stock is
+    particularly vulnerable. Rates from CEA residential tier data.
+    """
+    if year_built is None:
+        return _EARTHQUAKE_INSURANCE_RATE  # default 0.20%
+    if year_built < 1940:
+        return 0.0040  # 0.40% — older, riskier construction
+    if year_built < 1970:
+        return 0.0030  # 0.30% — pre-modern seismic codes
+    if year_built < 2000:
+        return 0.0020  # 0.20% — post-UBC era
+    return 0.0015  # 0.15% — modern seismic-code construction
+
+
+def _maintenance_rate(year_built: int | None) -> float:
+    """Return age-adjusted annual maintenance reserve rate as % of value.
+
+    Berkeley's housing stock is among the oldest in the Bay Area; pre-1940
+    homes need meaningfully higher maintenance budgets for foundations,
+    knob-and-tube wiring, old plumbing, etc.
+    """
+    if year_built is None:
+        return _MAINTENANCE_RATE  # default 1%
+    if year_built < 1940:
+        return 0.020  # 2.0% — historic, extensive deferred maintenance risk
+    if year_built < 1970:
+        return 0.015  # 1.5% — aging systems, possible lead/asbestos
+    if year_built < 2000:
+        return 0.010  # 1.0% — baseline
+    return 0.007  # 0.7% — newer construction, most systems under warranty
 
 # Appreciation and growth
 _DEFAULT_APPRECIATION = 0.04  # 4% Berkeley long-term
@@ -363,20 +406,28 @@ class RentalAnalyzer:
         annual_gross_rent: int,
         hoa: int = 0,
         self_managed: bool = True,
+        year_built: int | None = None,
     ) -> ExpenseBreakdown:
-        """Calculate itemized annual operating expenses."""
+        """Calculate itemized annual operating expenses.
+
+        E-1 (#64): Earthquake insurance computed dynamically from year_built.
+        E-2 (#64): Maintenance reserve adjusted by property age.
+        """
         prop_tax = int(round(property_value * _PROPERTY_TAX_RATE))
         insurance = int(round(property_value * _INSURANCE_RATE))
-        maintenance = int(round(property_value * _MAINTENANCE_RATE))
+        eq_insurance = int(round(property_value * _earthquake_insurance_rate(year_built)))
+        maint_rate = _maintenance_rate(year_built)
+        maintenance = int(round(property_value * maint_rate))
         vacancy = int(round(annual_gross_rent * _VACANCY_RATE))
         mgmt = 0 if self_managed else int(round(annual_gross_rent * _MANAGEMENT_FEE_RATE))
 
-        total = prop_tax + insurance + maintenance + vacancy + mgmt + hoa
+        total = prop_tax + insurance + eq_insurance + maintenance + vacancy + mgmt + hoa
         ratio = round(total / annual_gross_rent * 100, 1) if annual_gross_rent > 0 else 0.0
 
         return ExpenseBreakdown(
             property_tax=prop_tax,
             insurance=insurance,
+            earthquake_insurance=eq_insurance,
             maintenance=maintenance,
             vacancy_reserve=vacancy,
             management_fee=mgmt,
@@ -509,6 +560,7 @@ class RentalAnalyzer:
         appreciation_rate: Optional[float] = None,
         rent_growth_rate: float = _DEFAULT_RENT_GROWTH,
         years: list[int] | None = None,
+        year_built: int | None = None,
     ) -> list[AnnualCashFlow]:
         """Project cash flow over multiple horizons."""
         if years is None:
@@ -533,10 +585,12 @@ class RentalAnalyzer:
             yr_gross_rent = int(round(annual_gross_rent * rent_factor))
             yr_property_value = int(round(property_value * value_factor))
 
-            # Expenses grow with property value (tax, insurance, maintenance)
+            # Expenses grow with property value (tax, insurance, eq insurance, maintenance)
             # and with rent (vacancy, management)
+            eq_rate = _earthquake_insurance_rate(year_built)
+            maint_rate = _maintenance_rate(year_built)
             yr_expenses = int(round(
-                yr_property_value * (_PROPERTY_TAX_RATE + _INSURANCE_RATE + _MAINTENANCE_RATE)
+                yr_property_value * (_PROPERTY_TAX_RATE + _INSURANCE_RATE + eq_rate + maint_rate)
                 + yr_gross_rent * _VACANCY_RATE
                 + (yr_gross_rent * _MANAGEMENT_FEE_RATE if expenses.management_fee > 0 else 0)
                 + expenses.hoa
@@ -607,6 +661,9 @@ class RentalAnalyzer:
         sqft = property_dict.get("sqft")
         neighborhood = property_dict.get("neighborhood")
         hoa = int(property_dict.get("hoa_per_month") or 0) * 12
+        year_built = property_dict.get("year_built")
+        if year_built is not None:
+            year_built = int(year_built)
 
         rent = self.estimate_rent(
             beds=beds,
@@ -617,14 +674,17 @@ class RentalAnalyzer:
             unit_type="main_house",
         )
 
-        expenses = self.calculate_expenses(value, rent.annual_rent, hoa=hoa, self_managed=self_managed)
+        expenses = self.calculate_expenses(
+            value, rent.annual_rent, hoa=hoa, self_managed=self_managed,
+            year_built=year_built,
+        )
         mortgage = self.analyze_mortgage(value, down_payment_pct)
         tax_benefits = self.estimate_tax_benefits(value, mortgage, expenses)
 
         appreciation = self._get_neighborhood_appreciation(neighborhood)
         projections = self.project_cash_flow(
             value, rent.annual_rent, expenses, mortgage,
-            appreciation_rate=appreciation,
+            appreciation_rate=appreciation, year_built=year_built,
         )
 
         noi = rent.annual_rent - expenses.total_annual
@@ -669,6 +729,9 @@ class RentalAnalyzer:
         sqft = property_dict.get("sqft")
         neighborhood = property_dict.get("neighborhood")
         hoa = int(property_dict.get("hoa_per_month") or 0) * 12
+        year_built = property_dict.get("year_built")
+        if year_built is not None:
+            year_built = int(year_built)
 
         adu_sqft = dev_potential.adu.max_adu_sqft or 800
         adu_cost = self._get_adu_construction_cost(adu_sqft)
@@ -687,20 +750,29 @@ class RentalAnalyzer:
         total_annual = total_monthly * 12
         total_value = value + adu_cost
 
-        expenses = self.calculate_expenses(total_value, total_annual, hoa=hoa, self_managed=self_managed)
+        expenses = self.calculate_expenses(
+            total_value, total_annual, hoa=hoa, self_managed=self_managed,
+            year_built=year_built,
+        )
         mortgage = self.analyze_mortgage(value, down_payment_pct)  # mortgage on original value
         tax_benefits = self.estimate_tax_benefits(total_value, mortgage, expenses)
 
         appreciation = self._get_neighborhood_appreciation(neighborhood)
         projections = self.project_cash_flow(
             total_value, total_annual, expenses, mortgage,
-            appreciation_rate=appreciation,
+            appreciation_rate=appreciation, year_built=year_built,
         )
 
         noi = total_annual - expenses.total_annual
         annual_mortgage = mortgage.monthly_pi * 12
         annual_cf = noi - annual_mortgage
         cash_invested = mortgage.down_payment_amount + adu_cost
+
+        # E-3 (#64): Carrying costs during ADU construction (typically 9-12 months)
+        adu_construction_months = 12
+        # During construction: pay mortgage + taxes + insurance, but no ADU rent
+        monthly_carry = mortgage.monthly_pi + mortgage.monthly_tax + mortgage.monthly_insurance
+        carrying_total = monthly_carry * adu_construction_months
 
         return InvestmentScenario(
             scenario_name="Add ADU",
@@ -720,7 +792,14 @@ class RentalAnalyzer:
             monthly_cash_flow=int(round(annual_cf / 12)),
             projections=projections,
             tax_benefits=tax_benefits,
-            development_notes=f"ADU: {adu_sqft} sqft, estimated construction cost ${adu_cost:,}",
+            carrying_cost_months=adu_construction_months,
+            carrying_cost_total=carrying_total,
+            carrying_cost_monthly=monthly_carry,
+            development_notes=(
+                f"ADU: {adu_sqft} sqft, estimated construction cost ${adu_cost:,}. "
+                f"Carrying costs during {adu_construction_months}-month construction: "
+                f"${carrying_total:,} (${monthly_carry:,}/mo)"
+            ),
         )
 
     def build_scenario_sb9(
@@ -737,6 +816,9 @@ class RentalAnalyzer:
         value = self._resolve_property_value(property_dict)
         neighborhood = property_dict.get("neighborhood")
         hoa = int(property_dict.get("hoa_per_month") or 0) * 12
+        year_built = property_dict.get("year_built")
+        if year_built is not None:
+            year_built = int(year_built)
         lot_sizes = dev_potential.sb9.resulting_lot_sizes or []
 
         # Model 2 units: keep existing house + build new unit on split lot
@@ -764,14 +846,17 @@ class RentalAnalyzer:
         total_annual = total_monthly * 12
         total_value = value + _SB9_SPLIT_COST
 
-        expenses = self.calculate_expenses(total_value, total_annual, hoa=hoa, self_managed=self_managed)
+        expenses = self.calculate_expenses(
+            total_value, total_annual, hoa=hoa, self_managed=self_managed,
+            year_built=year_built,
+        )
         mortgage = self.analyze_mortgage(value, down_payment_pct)
         tax_benefits = self.estimate_tax_benefits(total_value, mortgage, expenses)
 
         appreciation = self._get_neighborhood_appreciation(neighborhood)
         projections = self.project_cash_flow(
             total_value, total_annual, expenses, mortgage,
-            appreciation_rate=appreciation,
+            appreciation_rate=appreciation, year_built=year_built,
         )
 
         noi = total_annual - expenses.total_annual
@@ -780,6 +865,11 @@ class RentalAnalyzer:
         cash_invested = mortgage.down_payment_amount + _SB9_SPLIT_COST
 
         lot_info = f"Resulting lots: {', '.join(str(s) for s in lot_sizes)} sqft" if lot_sizes else ""
+
+        # E-3 (#64): Carrying costs during SB9 construction (typically 12-18 months)
+        sb9_construction_months = 18
+        monthly_carry = mortgage.monthly_pi + mortgage.monthly_tax + mortgage.monthly_insurance
+        carrying_total = monthly_carry * sb9_construction_months
 
         return InvestmentScenario(
             scenario_name="SB 9 Lot Split",
@@ -799,9 +889,14 @@ class RentalAnalyzer:
             monthly_cash_flow=int(round(annual_cf / 12)),
             projections=projections,
             tax_benefits=tax_benefits,
+            carrying_cost_months=sb9_construction_months,
+            carrying_cost_total=carrying_total,
+            carrying_cost_monthly=monthly_carry,
             development_notes=(
                 f"SB 9 lot split with new 2br/1ba unit. "
-                f"Estimated split + construction cost: ${_SB9_SPLIT_COST:,}. {lot_info}"
+                f"Estimated split + construction cost: ${_SB9_SPLIT_COST:,}. {lot_info} "
+                f"Carrying costs during {sb9_construction_months}-month construction: "
+                f"${carrying_total:,} (${monthly_carry:,}/mo)"
             ),
         )
 
@@ -859,14 +954,18 @@ class RentalAnalyzer:
         total_annual = total_monthly * 12
         total_value = value + additional
 
-        expenses = self.calculate_expenses(total_value, total_annual, self_managed=self_managed)
+        # New construction → modern seismic codes
+        expenses = self.calculate_expenses(
+            total_value, total_annual, self_managed=self_managed,
+            year_built=2026,  # new construction
+        )
         mortgage = self.analyze_mortgage(value, down_payment_pct)
         tax_benefits = self.estimate_tax_benefits(total_value, mortgage, expenses)
 
         appreciation = self._get_neighborhood_appreciation(neighborhood)
         projections = self.project_cash_flow(
             total_value, total_annual, expenses, mortgage,
-            appreciation_rate=appreciation,
+            appreciation_rate=appreciation, year_built=2026,
         )
 
         noi = total_annual - expenses.total_annual
@@ -1166,6 +1265,7 @@ def _scenario_to_dict(s: InvestmentScenario) -> dict:
         "expenses": {
             "property_tax": s.expenses.property_tax,
             "insurance": s.expenses.insurance,
+            "earthquake_insurance": s.expenses.earthquake_insurance,
             "maintenance": s.expenses.maintenance,
             "vacancy_reserve": s.expenses.vacancy_reserve,
             "management_fee": s.expenses.management_fee,
@@ -1218,6 +1318,9 @@ def _scenario_to_dict(s: InvestmentScenario) -> dict:
         },
         "development_feasible": s.development_feasible,
         "development_notes": s.development_notes,
+        "carrying_cost_months": s.carrying_cost_months,
+        "carrying_cost_total": s.carrying_cost_total,
+        "carrying_cost_monthly": s.carrying_cost_monthly,
     }
 
 

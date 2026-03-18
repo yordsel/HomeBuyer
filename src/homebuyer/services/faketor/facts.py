@@ -309,6 +309,169 @@ def compute_glossary_facts(data: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Gap tools (Phase F)
+# ---------------------------------------------------------------------------
+
+
+def compute_true_cost_facts(data: dict) -> dict:
+    """Facts for ``compute_true_cost`` results."""
+    return {
+        "total_monthly_cost": data.get("total_monthly_cost"),
+        "monthly_pi": data.get("monthly_principal_and_interest"),
+        "monthly_tax": data.get("monthly_property_tax"),
+        "monthly_insurance": data.get("monthly_hoi"),
+        "monthly_earthquake": data.get("monthly_earthquake_insurance"),
+        "monthly_maintenance": data.get("monthly_maintenance_reserve"),
+        "monthly_pmi": data.get("monthly_pmi"),
+        "monthly_hoa": data.get("monthly_hoa"),
+        "is_pmi_applicable": data.get("is_pmi_applicable"),
+        "down_payment_amount": data.get("down_payment_amount"),
+        "loan_amount": data.get("loan_amount"),
+        "monthly_delta_vs_rent": data.get("monthly_delta_vs_rent"),
+        "delta_direction": data.get("delta_direction"),
+        "pmi_note": data.get("pmi_note"),
+    }
+
+
+def compute_rent_vs_buy_facts(data: dict) -> dict:
+    """Facts for ``rent_vs_buy`` results."""
+    return {
+        "crossover_year": data.get("crossover_year"),
+        "crossover_description": data.get("crossover_description"),
+        "horizon_years": data.get("horizon_years"),
+        "final_annual_rent": data.get("final_annual_rent"),
+        "final_home_value": data.get("final_home_value"),
+        "final_home_equity": data.get("final_home_equity"),
+        "final_buy_advantage": data.get("final_buy_advantage"),
+        "total_rent_paid": data.get("total_rent_paid"),
+        "total_ownership_paid": data.get("total_ownership_paid"),
+        "total_tax_benefit": data.get("total_tax_benefit"),
+        "opportunity_cost_of_down_payment": data.get("opportunity_cost_of_down_payment"),
+    }
+
+
+def compute_dual_property_facts(data: dict) -> dict:
+    """Facts for ``dual_property_model`` results."""
+    extraction = data.get("extraction") or {}
+    investment = data.get("investment") or {}
+    return {
+        "available_equity": data.get("available_equity"),
+        "extraction_method": extraction.get("method"),
+        "extraction_amount": extraction.get("extraction_amount"),
+        "monthly_extraction_cost": extraction.get("monthly_increase"),
+        "investment_monthly_rent": investment.get("monthly_gross_rent"),
+        "investment_monthly_cf": investment.get("monthly_net_cash_flow"),
+        "cap_rate_pct": investment.get("cap_rate_pct"),
+        "combined_monthly_cash_flow": data.get("combined_monthly_cash_flow"),
+        "combined_annual_cash_flow": data.get("combined_annual_cash_flow"),
+        "cash_on_cash_pct": data.get("cash_on_cash_pct"),
+        "is_cash_flow_positive": data.get("is_cash_flow_positive"),
+        "worst_case_scenario": data.get("worst_case_scenario"),
+        "survives_worst_case": data.get("survives_worst_case"),
+    }
+
+
+def compute_competition_facts(data: dict) -> dict:
+    """Facts for ``competition_assessment`` results."""
+    dom = data.get("dom_distribution") or {}
+    return {
+        "neighborhood": data.get("neighborhood"),
+        "sample_size": data.get("sample_size"),
+        "competition_score": data.get("competition_score"),
+        "competition_label": data.get("competition_label"),
+        "sale_to_list_median": data.get("sale_to_list_median"),
+        "dom_median": dom.get("median"),
+        "above_asking_pct": data.get("above_asking_pct"),
+        "months_of_inventory": data.get("months_of_inventory"),
+        "interpretation": data.get("interpretation"),
+    }
+
+
+def compute_rate_penalty_facts(data: dict) -> dict:
+    """Facts for ``rate_penalty`` results."""
+    return {
+        "existing_rate": data.get("existing_rate"),
+        "new_rate": data.get("new_rate"),
+        "existing_monthly_payment": data.get("existing_monthly_payment"),
+        "new_monthly_payment": data.get("new_monthly_payment"),
+        "monthly_penalty": data.get("monthly_penalty"),
+        "annual_penalty": data.get("annual_penalty"),
+        "penalty_description": data.get("penalty_description"),
+        "penalty_pct_of_income": data.get("penalty_pct_of_income"),
+        "is_tolerable": data.get("is_tolerable"),
+        "breakeven_rate": data.get("breakeven_rate"),
+        "breakeven_description": data.get("breakeven_description"),
+        "tolerable_rate": data.get("tolerable_rate"),
+    }
+
+
+def compute_pmi_model_facts(data: dict) -> dict:
+    """Facts for ``pmi_model`` results."""
+    wait = data.get("wait_analysis") or {}
+    return {
+        "pmi_applicable": data.get("pmi_applicable"),
+        "initial_ltv_pct": data.get("initial_ltv_pct"),
+        "monthly_pmi": data.get("monthly_pmi"),
+        "annual_pmi": data.get("annual_pmi"),
+        "pmi_dropoff_month": data.get("pmi_dropoff_month"),
+        "pmi_dropoff_years": data.get("pmi_dropoff_years"),
+        "pmi_dropoff_description": data.get("pmi_dropoff_description"),
+        "total_pmi_cost": data.get("total_pmi_cost"),
+        "appreciation_acceleration_months": data.get("appreciation_acceleration_months"),
+        "wait_verdict": wait.get("verdict"),
+        "wait_verdict_description": wait.get("verdict_description"),
+        "net_cost_of_waiting": wait.get("net_cost_of_waiting"),
+    }
+
+
+def compute_yield_ranking_facts(data: dict) -> dict:
+    """Facts for ``yield_ranking`` results."""
+    best_spread = data.get("best_leverage_spread") or {}
+    best_coc = data.get("best_cash_on_cash") or {}
+    return {
+        "property_count": data.get("property_count"),
+        "positive_cash_flow_count": data.get("positive_cash_flow_count"),
+        "negative_spread_count": data.get("negative_spread_count"),
+        "best_spread_address": best_spread.get("address"),
+        "best_spread_pct": best_spread.get("leverage_spread_pct"),
+        "best_coc_address": best_coc.get("address"),
+        "best_coc_pct": best_coc.get("cash_on_cash_pct"),
+    }
+
+
+def compute_appreciation_stress_facts(data: dict) -> dict:
+    """Facts for ``appreciation_stress_test`` results."""
+    return {
+        "scenario_count": data.get("scenario_count"),
+        "all_scenarios_profitable": data.get("all_scenarios_profitable"),
+        "any_scenario_profitable": data.get("any_scenario_profitable"),
+        "monthly_carry_cost": data.get("monthly_carry_cost"),
+        "purchase_price": data.get("purchase_price"),
+    }
+
+
+def compute_neighborhood_lifestyle_facts(data: dict) -> dict:
+    """Facts for ``neighborhood_lifestyle`` results."""
+    return {
+        "neighborhoods_compared": data.get("neighborhoods_compared"),
+        "best_overall": data.get("best_overall"),
+        "best_per_factor": data.get("best_per_factor"),
+    }
+
+
+def compute_adjacent_market_facts(data: dict) -> dict:
+    """Facts for ``adjacent_market_comparison`` results."""
+    return {
+        "budget": data.get("budget"),
+        "markets_compared": data.get("markets_compared"),
+        "affordable_count": data.get("affordable_count"),
+        "affordable_markets": data.get("affordable_markets"),
+        "best_value": data.get("best_value"),
+        "meets_requirements_count": data.get("meets_requirements_count"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -326,6 +489,16 @@ _FACT_COMPUTERS: dict[str, callable] = {
     "undo_filter": compute_undo_filter_facts,
     "lookup_regulation": compute_regulation_facts,
     "lookup_glossary_term": compute_glossary_facts,
+    "compute_true_cost": compute_true_cost_facts,
+    "rent_vs_buy": compute_rent_vs_buy_facts,
+    "pmi_model": compute_pmi_model_facts,
+    "rate_penalty": compute_rate_penalty_facts,
+    "competition_assessment": compute_competition_facts,
+    "dual_property_model": compute_dual_property_facts,
+    "yield_ranking": compute_yield_ranking_facts,
+    "appreciation_stress_test": compute_appreciation_stress_facts,
+    "neighborhood_lifestyle": compute_neighborhood_lifestyle_facts,
+    "adjacent_market_comparison": compute_adjacent_market_facts,
 }
 
 
