@@ -251,13 +251,21 @@ class TestOrchestratorEvalLive:
             context = _make_mock_context(scenario.segment)
             ctx_store.load_or_create = AsyncMock(return_value=context)
 
-            # Mock tool executor (we're testing LLM behavior, not tool results)
+            # Tool executor returns realistic Berkeley data per tool name
+            from tests.evals.fixtures import TOOL_RESULTS, realistic_tool_result
+
+            def _realistic_executor(tool_name, tool_input):
+                import json
+                result_str = realistic_tool_result(tool_name, tool_input)
+                return ExecToolResult(
+                    tool_name=tool_name,
+                    tool_input=tool_input or {},
+                    result_str=result_str,
+                    result_data=json.loads(result_str),
+                )
+
             tool_executor = MagicMock(spec=ToolExecutor)
-            tool_executor.execute.return_value = ExecToolResult(
-                tool_name="mock", tool_input={},
-                result_str='{"result": "mock data"}',
-                result_data={"result": "mock data"},
-            )
+            tool_executor.execute.side_effect = _realistic_executor
             pre_executor = MagicMock(spec=PreExecutor)
             pre_executor.execute.return_value = PreExecutionResult()
 
