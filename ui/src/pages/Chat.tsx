@@ -841,9 +841,19 @@ function ToolChip({ event }: { event: ToolEvent }) {
 
 /** Block types that should be rendered inline below the text bubble. */
 const INLINE_BLOCK_TYPES = new Set([
-  'investment_prospectus',  // has download button, doesn't fit sidebar
-  'market_summary',         // standalone data, no per-property sidebar slot
-  'neighborhood_stats',     // standalone data, no per-property sidebar slot
+  'investment_prospectus',           // has download button, doesn't fit sidebar
+  'market_summary',                  // standalone data, no per-property sidebar slot
+  'neighborhood_stats',              // standalone data
+  'true_cost_card',                  // gap tool — renders inline when no property active
+  'rent_vs_buy_card',                // gap tool — standalone comparison
+  'pmi_model_card',                  // gap tool — standalone analysis
+  'rate_penalty_card',               // gap tool — standalone analysis
+  'competition_card',                // gap tool — standalone by neighborhood
+  'dual_property_card',              // gap tool — standalone strategy
+  'yield_ranking_card',              // gap tool — multi-property comparison
+  'appreciation_stress_card',        // gap tool — scenario analysis
+  'neighborhood_lifestyle_card',     // gap tool — multi-neighborhood comparison
+  'adjacent_market_card',            // gap tool — multi-market comparison
 ]);
 
 function InlineBlocks({

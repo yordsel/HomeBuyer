@@ -34,12 +34,6 @@ function getSegmentColor(segment: string): string {
   return 'bg-blue-50 text-blue-700 border-blue-200';
 }
 
-function getConfidenceLabel(confidence: number): string {
-  if (confidence >= 0.8) return 'High';
-  if (confidence >= 0.5) return 'Medium';
-  return 'Low';
-}
-
 interface SegmentBadgeProps {
   segment: string;
   confidence: number;
@@ -48,7 +42,6 @@ interface SegmentBadgeProps {
 export function SegmentBadge({ segment, confidence }: SegmentBadgeProps) {
   const label = SEGMENT_LABELS[segment] ?? segment.replace(/_/g, ' ');
   const colorClass = getSegmentColor(segment);
-  const confLabel = getConfidenceLabel(confidence);
   const isInvestor = ['cash_buyer', 'equity_leveraging_investor', 'leveraged_investor', 'value_add_investor', 'appreciation_bettor'].includes(segment);
   const Icon = isInvestor ? TrendingUp : UserCheck;
 
