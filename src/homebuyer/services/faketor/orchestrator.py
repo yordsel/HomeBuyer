@@ -105,6 +105,68 @@ class TurnMetrics:
 
 
 @dataclass
+class PipelineTrace:
+    """Intermediate state captured at each pipeline stage for e2e evals.
+
+    Only populated when ``run(trace=True)`` is used. Each field holds the
+    output of its respective stage, enabling assertions at every step
+    rather than just on the final response.
+    """
+
+    # Stage 2: Extraction
+    extraction_intent: str | None = None
+    extraction_capital: int | None = None
+    extraction_income: int | None = None
+    extraction_equity: int | None = None
+    extraction_owns_home: bool | None = None
+    extraction_signals: list[str] = field(default_factory=list)
+
+    # Stage 3: Classification
+    segment_id: str | None = None
+    segment_confidence: float = 0.0
+    segment_candidates: list[dict] = field(default_factory=list)
+
+    # Stage 4: Job resolution
+    request_type: str | None = None
+    proactive_analyses: list[str] = field(default_factory=list)
+
+    # Stage 5: Pre-execution
+    pre_executed_tools: list[str] = field(default_factory=list)
+
+    # Stage 7: Response
+    tools_used: list[str] = field(default_factory=list)
+    reply_length: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "extraction": {
+                "intent": self.extraction_intent,
+                "capital": self.extraction_capital,
+                "income": self.extraction_income,
+                "equity": self.extraction_equity,
+                "owns_home": self.extraction_owns_home,
+                "signals": self.extraction_signals,
+            },
+            "classification": {
+                "segment_id": self.segment_id,
+                "confidence": self.segment_confidence,
+                "candidates": self.segment_candidates,
+            },
+            "job_resolution": {
+                "request_type": self.request_type,
+                "proactive_analyses": self.proactive_analyses,
+            },
+            "pre_execution": {
+                "tools": self.pre_executed_tools,
+            },
+            "response": {
+                "tools_used": self.tools_used,
+                "reply_length": self.reply_length,
+            },
+        }
+
+
+@dataclass
 class TurnResult:
     """Output of a non-streaming orchestrated turn."""
 
@@ -114,6 +176,7 @@ class TurnResult:
     discussed_properties: list[int] = field(default_factory=list)
     metrics: TurnMetrics = field(default_factory=TurnMetrics)
     error: str | None = None
+    trace: PipelineTrace | None = None
 
     def to_dict(self) -> dict[str, Any]:
         if self.error:
@@ -672,6 +735,7 @@ class TurnOrchestrator:
         working_set_descriptor: str = "",
         tool_executor: ToolExecutor | None = None,
         buyer_context: dict[str, Any] | None = None,
+        trace: bool = False,
     ) -> TurnResult:
         """Execute the full 9-step pipeline for a non-streaming turn.
 
@@ -681,6 +745,8 @@ class TurnOrchestrator:
                 working-set scoping. Falls back to the default executor
                 configured at init time.
             buyer_context: Optional buyer intake data from frontend form.
+            trace: When True, captures intermediate pipeline state on the
+                returned ``TurnResult.trace`` for e2e eval assertions.
         """
         total_start = time.monotonic()
         metrics = TurnMetrics()
@@ -695,14 +761,53 @@ class TurnOrchestrator:
         # Step 2: Extract signals (async — runs Haiku in thread pool)
         await self._extract_signals(message, context, metrics)
 
+        # Trace: capture extraction output
+        pipeline_trace: PipelineTrace | None = None
+        if trace:
+            profile = context.buyer.profile
+            pipeline_trace = PipelineTrace(
+                extraction_intent=profile.intent,
+                extraction_capital=profile.capital,
+                extraction_income=profile.income,
+                extraction_equity=profile.equity,
+                extraction_owns_home=profile.owns_current_home,
+                extraction_signals=[
+                    s.name for s in getattr(profile, "_signals", [])
+                ] if hasattr(profile, "_signals") else [],
+            )
+
         # Step 3: Classify segment
         self._classify_segment(context, metrics)
+
+        # Trace: capture classification output
+        if pipeline_trace is not None:
+            pipeline_trace.segment_id = context.buyer.segment_id
+            pipeline_trace.segment_confidence = context.buyer.segment_confidence
+            pipeline_trace.segment_candidates = [
+                {
+                    "segment_id": c.segment_id,
+                    "confidence": c.confidence,
+                    "reasoning": c.reasoning,
+                }
+                for c in (context.buyer.segment_candidates or [])
+            ]
 
         # Step 4: Resolve jobs
         plan = self._resolve_jobs(message, context, metrics)
 
+        # Trace: capture job resolution output
+        if pipeline_trace is not None:
+            pipeline_trace.request_type = plan.request_type.value
+            pipeline_trace.proactive_analyses = [
+                a.tool_name for a in plan.proactive_analyses
+            ]
+
         # Step 5: Pre-execute
         pre_result = self._pre_execute(plan, property_context, metrics, context)
+
+        # Trace: capture pre-execution output
+        if pipeline_trace is not None:
+            pipeline_trace.pre_executed_tools = list(pre_result.facts.keys())
 
         # Step 6: Assemble prompt
         system_prompt = self._assemble_prompt(
@@ -723,6 +828,11 @@ class TurnOrchestrator:
             system_prompt, messages, accumulator, metrics, effective_executor
         )
 
+        # Trace: capture response output
+        if pipeline_trace is not None:
+            pipeline_trace.tools_used = list(metrics.tools_used)
+            pipeline_trace.reply_length = len(result.reply)
+
         # Step 8: Post-process
         self._post_process(result, context, metrics)
 
@@ -731,6 +841,8 @@ class TurnOrchestrator:
 
         metrics.total_ms = (time.monotonic() - total_start) * 1000
         result.metrics = metrics
+        if pipeline_trace is not None:
+            result.trace = pipeline_trace
 
         logger.info(
             "Turn completed: user=%s segment=%s request=%s tools=%d time=%.0fms",

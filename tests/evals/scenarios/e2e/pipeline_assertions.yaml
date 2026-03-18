@@ -1,0 +1,49 @@
+scenarios:
+  # --- Cash buyer: implicit capital signal from "all-cash" ---
+  - id: e2e_03_cash_property
+    segment: cash_buyer
+    description: "Tests that 'all-cash' triggers capital inference through the full pipeline"
+    turns:
+      - message: "I want to buy 122 Vicente Rd all-cash as an investment. What's the rental income potential and cap rate?"
+        expected_extraction:
+          intent: invest
+        expected_classification:
+          segment_in: [cash_buyer, leveraged_investor, appreciation_bettor]
+          confidence_min: 0.25
+        expected_response:
+          topics_include: [rental income, cap rate]
+          helpfulness_min: 3.5
+
+  # --- Stretcher: explicit income + clear affordability question ---
+  - id: e2e_10_stretcher_afford
+    segment: stretcher
+    description: "Tests that income extraction feeds into correct stretcher classification"
+    turns:
+      - message: "I make $140k a year and have about $100k saved. Can I afford to buy a home in Berkeley?"
+        expected_extraction:
+          income: 140000
+          capital: 100000
+        expected_classification:
+          segment_in: [stretcher, down_payment_constrained, first_time_buyer]
+          confidence_min: 0.4
+        expected_pre_execution:
+          tools_include: [compute_true_cost]
+        expected_response:
+          topics_include: [afford, monthly, budget]
+          helpfulness_min: 3.5
+
+  # --- Appreciation bettor: explicit investment + growth focus ---
+  - id: e2e_22_appreciation
+    segment: appreciation_bettor
+    description: "Tests appreciation bettor classification and tool selection"
+    turns:
+      - message: "I'm less concerned about cash flow. I want the best 5-year appreciation potential. I have $500k to invest. Which areas are undervalued?"
+        expected_extraction:
+          intent: invest
+          capital: 500000
+        expected_classification:
+          segment_in: [appreciation_bettor, value_add_investor, leveraged_investor]
+          confidence_min: 0.35
+        expected_response:
+          topics_include: [appreciation, neighborhood, undervalued]
+          helpfulness_min: 3.5

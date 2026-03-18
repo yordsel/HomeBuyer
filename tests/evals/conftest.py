@@ -69,6 +69,40 @@ class OrchestratorScenario:
     description: str = ""
 
 
+@dataclass
+class E2EPipelineExpectation:
+    """Expected intermediate state at each pipeline stage."""
+
+    # Extraction
+    expected_extraction: dict[str, Any] = field(default_factory=dict)
+    # Classification
+    expected_classification: dict[str, Any] = field(default_factory=dict)
+    # Pre-execution
+    expected_pre_execution: dict[str, Any] = field(default_factory=dict)
+    # Response
+    expected_response: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class E2ETurn:
+    """A single turn in an e2e pipeline eval scenario."""
+
+    message: str
+    expectations: E2EPipelineExpectation = field(
+        default_factory=E2EPipelineExpectation
+    )
+
+
+@dataclass
+class E2EScenario:
+    """An e2e pipeline eval scenario."""
+
+    id: str
+    segment: str
+    turns: list[E2ETurn]
+    description: str = ""
+
+
 # ---------------------------------------------------------------------------
 # YAML loaders
 # ---------------------------------------------------------------------------
@@ -107,6 +141,31 @@ def load_extraction_scenarios() -> list[ExtractionScenario]:
                 turns=turns,
                 description=s.get("description", ""),
                 final_expected=s.get("final_expected"),
+            )
+        )
+    return result
+
+
+def load_e2e_scenarios() -> list[E2EScenario]:
+    """Load all e2e pipeline eval scenarios from YAML."""
+    raw = _load_yaml_scenarios("e2e")
+    result: list[E2EScenario] = []
+    for s in raw:
+        turns = []
+        for t in s.get("turns", []):
+            expectations = E2EPipelineExpectation(
+                expected_extraction=t.get("expected_extraction", {}),
+                expected_classification=t.get("expected_classification", {}),
+                expected_pre_execution=t.get("expected_pre_execution", {}),
+                expected_response=t.get("expected_response", {}),
+            )
+            turns.append(E2ETurn(message=t["message"], expectations=expectations))
+        result.append(
+            E2EScenario(
+                id=s["id"],
+                segment=s.get("segment", ""),
+                turns=turns,
+                description=s.get("description", ""),
             )
         )
     return result
@@ -178,6 +237,15 @@ def extraction_scenarios(request: pytest.FixtureRequest) -> list[ExtractionScena
 @pytest.fixture
 def orchestrator_scenarios(request: pytest.FixtureRequest) -> list[OrchestratorScenario]:
     scenarios = load_orchestrator_scenarios()
+    filt = _get_scenario_filter(request)
+    if filt:
+        scenarios = [s for s in scenarios if s.id.startswith(filt)]
+    return scenarios
+
+
+@pytest.fixture
+def e2e_scenarios(request: pytest.FixtureRequest) -> list[E2EScenario]:
+    scenarios = load_e2e_scenarios()
     filt = _get_scenario_filter(request)
     if filt:
         scenarios = [s for s in scenarios if s.id.startswith(filt)]
