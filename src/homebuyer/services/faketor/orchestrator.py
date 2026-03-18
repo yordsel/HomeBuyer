@@ -272,6 +272,9 @@ class TurnOrchestrator:
             if extraction and not extraction.is_empty():
                 extractions = extraction.to_extractions()
                 context.buyer.profile.apply_extraction(extractions)
+            # Store idk fields for the confidence nudge (ephemeral, per-turn)
+            if extraction and extraction.idk_fields:
+                context.buyer.idk_fields = extraction.idk_fields
         except Exception as e:
             logger.warning("Signal extraction failed: %s", e)
         metrics.extraction_ms = (time.monotonic() - start) * 1000

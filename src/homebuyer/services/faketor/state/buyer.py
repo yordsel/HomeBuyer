@@ -301,6 +301,9 @@ class BuyerState:
     segment_history: list[SegmentTransition] = field(default_factory=list)
     # Ephemeral per-turn: top-N segment candidates (not persisted)
     segment_candidates: list[Any] = field(default_factory=list)
+    # Ephemeral per-turn: idk fields from extraction (not persisted)
+    # Maps field_name → evidence string, e.g. {"owns_current_home": "mentioned rate lock"}
+    idk_fields: dict[str, str] = field(default_factory=dict)
 
     def record_transition(
         self,

@@ -55,6 +55,7 @@ class PromptAssembler:
                 context.buyer.segment_confidence,
                 context.buyer.profile,
                 candidates=getattr(context.buyer, "segment_candidates", None),
+                idk_fields=getattr(context.buyer, "idk_fields", None),
             ),
             property.render(context.property),
             preexecuted.render(accumulated_facts),

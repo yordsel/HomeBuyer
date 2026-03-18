@@ -26,6 +26,7 @@ def render(
     segment_confidence: float,
     profile: BuyerProfile,
     candidates: list[SegmentCandidate] | None = None,
+    idk_fields: dict[str, str] | None = None,
 ) -> str:
     """Render the segment context prompt fragment.
 
@@ -72,6 +73,11 @@ def render(
             nudge = _build_confidence_nudge(segment_confidence, profile)
             if nudge:
                 rendered = rendered + "\n\n" + nudge
+
+    # Append idk fields block if any ambiguous signals were detected
+    idk_block = _build_idk_block(idk_fields)
+    if idk_block:
+        rendered = rendered + "\n\n" + idk_block
 
     return rendered
 
@@ -181,6 +187,35 @@ def _build_confidence_nudge(confidence: float, profile: BuyerProfile) -> str:
         f"questions like a form.\n"
         f"=== END CONFIDENCE NOTE ==="
     )
+
+
+_IDK_FIELD_LABELS: dict[str, str] = {
+    "intent": "whether they want to live in the property or invest",
+    "owns_current_home": "whether they currently own a home",
+    "is_first_time_buyer": "whether this is their first purchase",
+}
+
+
+def _build_idk_block(idk_fields: dict[str, str] | None) -> str:
+    """Build a block surfacing ambiguous extraction signals for Sonnet.
+
+    When Haiku returns 'idk' for a field, it means there's a contextual
+    signal but no explicit statement. Sonnet should either reason about
+    it or ask a targeted clarifying question.
+    """
+    if not idk_fields:
+        return ""
+
+    lines = ["=== AMBIGUOUS SIGNALS ==="]
+    lines.append(
+        "The following were detected as likely but not explicitly stated. "
+        "You may reason about them or ask a brief clarifying question:"
+    )
+    for field_name, evidence in idk_fields.items():
+        label = _IDK_FIELD_LABELS.get(field_name, field_name)
+        lines.append(f"- Possible: {label} (evidence: \"{evidence}\")")
+    lines.append("=== END AMBIGUOUS SIGNALS ===")
+    return "\n".join(lines)
 
 
 def _build_profile_summary(profile: BuyerProfile) -> str:

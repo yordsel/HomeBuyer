@@ -52,6 +52,13 @@ class ExtractionResult:
     sophistication: Literal["novice", "informed", "professional"] | None = None
     signals: list[Signal] = field(default_factory=list)
 
+    # IDK fields — contextual signals that aren't certain enough to commit to.
+    # These are surfaced to Sonnet via the confidence nudge so it can reason
+    # about them or ask a clarifying question.
+    idk_fields: dict[str, str] = field(default_factory=dict)
+    # e.g. {"owns_current_home": "mentioned mortgage rate lock",
+    #        "intent": "asked about cap rates"}
+
     # Metadata
     extraction_time_ms: float = 0.0
     model_used: str = ""
@@ -121,18 +128,48 @@ You are analyzing a home buyer's message to extract financial and situational \
 signals. You are NOT having a conversation — just parsing.
 
 Extract any of the following if present. Return ONLY what you can confidently \
-extract. Do not infer aggressively — if the buyer says "I'm renting" that \
-implies they don't own, but it doesn't tell you their income.
+extract from this single message.
+
+THREE-VALUE PATTERN FOR BOOLEAN & INTENT FIELDS:
+For intent, owns_current_home, and is_first_time_buyer, use:
+- The definite value (e.g., "occupy", true, false) when EXPLICITLY stated
+- "idk" when there is a CONTEXTUAL SIGNAL but no explicit statement
+- null when there is NO relevant signal at all
+
+"idk" means "there is evidence pointing this direction but the user didn't \
+say it outright." This lets the downstream system ask a clarifying question.
 
 RULES:
-- Only extract what is explicitly stated or very strongly implied
 - Dollar amounts should be integers (no decimals)
 - If someone says "about 200k" → capital: 200000
 - If someone says "I make around 150" in context of salary → income: 150000
-- "I want to rent it out" → intent: "invest"
-- "I want to buy my first home" → intent: "occupy", is_first_time_buyer: true
-- If unsure about a field, omit it (return null)
 - Each signal should explain what was detected and why
+- When returning "idk", ALWAYS include a signal explaining the evidence
+
+INTENT EXTRACTION:
+- "I want to buy a home to live in" → intent: "occupy" (explicit)
+- "I want to invest in rental properties" → intent: "invest" (explicit)
+- "What's a realistic budget to settle down in Berkeley?" → intent: "idk" \
+(settling down implies occupy, but not stated)
+- "How are rents trending in South Berkeley?" → intent: "idk" \
+(rent question implies invest, but could be a renter asking)
+- "Tell me about the Berkeley market" → intent: null (no directional signal)
+
+OWNERSHIP EXTRACTION:
+- "I own a home in Oakland" → owns_current_home: true (explicit)
+- "I'm currently renting" → owns_current_home: false (explicit)
+- "My rate is locked at 3.1% and I'd hate to give it up" → \
+owns_current_home: "idk" (having a mortgage rate implies ownership)
+- "I want to tap into my home equity" → owns_current_home: "idk" \
+(equity implies ownership)
+- "I'm exploring Berkeley" → owns_current_home: null (no signal)
+
+FIRST-TIME BUYER EXTRACTION:
+- "This is my first home purchase" → is_first_time_buyer: true (explicit)
+- "I've bought and sold several properties" → is_first_time_buyer: false (explicit)
+- "I don't really understand what escrow means" → is_first_time_buyer: "idk" \
+(lack of knowledge suggests first-time, but not certain)
+- "Looking at Berkeley homes" → is_first_time_buyer: null (no signal)
 
 IMPLICIT CASH/FINANCING SIGNALS:
 - "all-cash", "pay cash", "no mortgage", "no financing needed" → add a signal \
@@ -150,8 +187,8 @@ _EXTRACTION_JSON_SCHEMA = {
     "properties": {
         "intent": {
             "type": ["string", "null"],
-            "enum": ["occupy", "invest", None],
-            "description": "Buy to live in (occupy) or as investment (invest)",
+            "enum": ["occupy", "invest", "idk", None],
+            "description": "Buy to live in (occupy), investment (invest), or idk if contextual signal exists but not explicit",
         },
         "capital": {
             "type": ["integer", "null"],
@@ -170,12 +207,12 @@ _EXTRACTION_JSON_SCHEMA = {
             "description": "Current monthly rent in dollars",
         },
         "owns_current_home": {
-            "type": ["boolean", "null"],
-            "description": "Whether the buyer currently owns a home",
+            "type": ["boolean", "string", "null"],
+            "description": "Whether the buyer currently owns a home. Use 'idk' if contextual signal (e.g., mentions mortgage rate, equity) but not explicitly stated",
         },
         "is_first_time_buyer": {
-            "type": ["boolean", "null"],
-            "description": "Whether this is their first home purchase",
+            "type": ["boolean", "string", "null"],
+            "description": "Whether this is their first home purchase. Use 'idk' if contextual signal (e.g., unfamiliar with terms) but not explicitly stated",
         },
         "sophistication": {
             "type": ["string", "null"],
@@ -372,16 +409,42 @@ class SignalExtractor:
                 if isinstance(s, dict)
             ]
 
+            # Collect idk fields with evidence from signals
+            idk_fields: dict[str, str] = {}
+            raw_intent = data.get("intent")
+            raw_owns = data.get("owns_current_home")
+            raw_first_time = data.get("is_first_time_buyer")
+
+            if raw_intent == "idk":
+                evidence = _find_signal_evidence(signals, "intent")
+                idk_fields["intent"] = evidence
+                raw_intent = None
+
+            if raw_owns == "idk":
+                evidence = _find_signal_evidence(
+                    signals, "owns_current_home", "ownership", "mortgage"
+                )
+                idk_fields["owns_current_home"] = evidence
+                raw_owns = None
+
+            if raw_first_time == "idk":
+                evidence = _find_signal_evidence(
+                    signals, "first_time", "first-time", "novice"
+                )
+                idk_fields["is_first_time_buyer"] = evidence
+                raw_first_time = None
+
             return ExtractionResult(
-                intent=data.get("intent"),
+                intent=raw_intent if raw_intent in ("occupy", "invest") else None,
                 capital=_safe_int(data.get("capital")),
                 equity=_safe_int(data.get("equity")),
                 income=_safe_int(data.get("income")),
                 current_rent=_safe_int(data.get("current_rent")),
-                owns_current_home=_safe_bool(data.get("owns_current_home")),
-                is_first_time_buyer=_safe_bool(data.get("is_first_time_buyer")),
+                owns_current_home=_safe_bool(raw_owns),
+                is_first_time_buyer=_safe_bool(raw_first_time),
                 sophistication=data.get("sophistication"),
                 signals=signals,
+                idk_fields=idk_fields,
                 extraction_time_ms=elapsed_ms,
                 model_used=_EXTRACTION_MODEL,
             )
@@ -403,6 +466,15 @@ _CONFIDENCE_WORDS: dict[str, float] = {
     "very high": 0.9,
     "very low": 0.2,
 }
+
+
+def _find_signal_evidence(signals: list[Signal], *keywords: str) -> str:
+    """Find the evidence string from signals matching any of the keywords."""
+    for signal in signals:
+        text = (signal.implication + " " + signal.evidence).lower()
+        if any(kw in text for kw in keywords):
+            return signal.evidence
+    return "contextual signal detected"
 
 
 def _safe_confidence(value: Any) -> float:
