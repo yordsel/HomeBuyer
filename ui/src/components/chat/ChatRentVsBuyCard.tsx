@@ -11,12 +11,21 @@ export function ChatRentVsBuyCard({ data }: { data: RentVsBuyBlockData }) {
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden my-2">
-      {/* Header */}
-      <div className="px-4 py-2.5 bg-gradient-to-r from-sky-50 to-blue-50 border-b border-gray-100 flex items-center gap-2">
-        <ArrowRightLeft size={14} className="text-blue-600" />
-        <h4 className="text-sm font-semibold text-gray-900">Rent vs Buy</h4>
-        {d.horizon_years != null && (
-          <span className="text-[10px] text-gray-400 ml-auto">{d.horizon_years}-year horizon</span>
+      {/* Header with input parameters */}
+      <div className="px-4 py-2.5 bg-gradient-to-r from-sky-50 to-blue-50 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <ArrowRightLeft size={14} className="text-blue-600" />
+          <h4 className="text-sm font-semibold text-gray-900">Rent vs Buy</h4>
+          {d.horizon_years != null && (
+            <span className="text-[10px] text-gray-400 ml-auto">{d.horizon_years}-year horizon</span>
+          )}
+        </div>
+        {d.purchase_price != null && (
+          <p className="text-[10px] text-gray-500 mt-0.5">
+            {formatCurrency(d.purchase_price)}
+            {d.down_payment_pct != null && ` · ${d.down_payment_pct}% down`}
+            {d.current_rent != null && ` · ${formatCurrency(d.current_rent)}/mo rent`}
+          </p>
         )}
       </div>
 

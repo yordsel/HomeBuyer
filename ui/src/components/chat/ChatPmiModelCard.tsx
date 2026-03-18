@@ -25,14 +25,23 @@ export function ChatPmiModelCard({ data }: { data: PmiModelBlockData }) {
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden my-2">
-      {/* Header */}
-      <div className="px-4 py-2.5 bg-gradient-to-r from-amber-50 to-yellow-50 border-b border-gray-100 flex items-center gap-2">
-        <Shield size={14} className="text-amber-600" />
-        <h4 className="text-sm font-semibold text-gray-900">PMI Analysis</h4>
-        {d.total_pmi_cost != null && (
-          <span className="ml-auto text-sm font-bold text-amber-700">
-            {formatCurrency(d.total_pmi_cost)} total
-          </span>
+      {/* Header with input parameters */}
+      <div className="px-4 py-2.5 bg-gradient-to-r from-amber-50 to-yellow-50 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <Shield size={14} className="text-amber-600" />
+          <h4 className="text-sm font-semibold text-gray-900">PMI Analysis</h4>
+          {d.total_pmi_cost != null && (
+            <span className="ml-auto text-sm font-bold text-amber-700">
+              {formatCurrency(d.total_pmi_cost)} total
+            </span>
+          )}
+        </div>
+        {d.purchase_price != null && (
+          <p className="text-[10px] text-gray-500 mt-0.5">
+            {formatCurrency(d.purchase_price)}
+            {d.down_payment_pct != null && ` · ${d.down_payment_pct}% down`}
+            {d.mortgage_rate != null && ` · ${d.mortgage_rate}% rate`}
+          </p>
         )}
       </div>
 

@@ -16,26 +16,35 @@ export function ChatAppreciationStressCard({ data }: { data: AppreciationStressB
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden my-2">
-      {/* Header */}
-      <div className="px-4 py-2.5 bg-gradient-to-r from-rose-50 to-red-50 border-b border-gray-100 flex items-center gap-2">
-        <TrendingDown size={14} className="text-red-500" />
-        <h4 className="text-sm font-semibold text-gray-900">Appreciation Stress Test</h4>
-        {d.all_scenarios_profitable != null && (
-          <span
-            className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-              d.all_scenarios_profitable
-                ? 'bg-green-100 text-green-700'
+      {/* Header with input parameters */}
+      <div className="px-4 py-2.5 bg-gradient-to-r from-rose-50 to-red-50 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <TrendingDown size={14} className="text-red-500" />
+          <h4 className="text-sm font-semibold text-gray-900">Appreciation Stress Test</h4>
+          {d.all_scenarios_profitable != null && (
+            <span
+              className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                d.all_scenarios_profitable
+                  ? 'bg-green-100 text-green-700'
+                  : d.any_scenario_profitable
+                    ? 'bg-yellow-100 text-yellow-700'
+                    : 'bg-red-100 text-red-700'
+              }`}
+            >
+              {d.all_scenarios_profitable
+                ? 'All Profitable'
                 : d.any_scenario_profitable
-                  ? 'bg-yellow-100 text-yellow-700'
-                  : 'bg-red-100 text-red-700'
-            }`}
-          >
-            {d.all_scenarios_profitable
-              ? 'All Profitable'
-              : d.any_scenario_profitable
-                ? 'Mixed'
-                : 'All Unprofitable'}
-          </span>
+                  ? 'Mixed'
+                  : 'All Unprofitable'}
+            </span>
+          )}
+        </div>
+        {d.purchase_price != null && (
+          <p className="text-[10px] text-gray-500 mt-0.5">
+            {formatCurrency(d.purchase_price)}
+            {d.down_payment_pct != null && ` · ${d.down_payment_pct}% down`}
+            {d.mortgage_rate != null && ` · ${d.mortgage_rate}% rate`}
+          </p>
         )}
       </div>
 

@@ -8,17 +8,27 @@ export function ChatRatePenaltyCard({ data }: { data: RatePenaltyBlockData }) {
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden my-2">
-      {/* Header */}
-      <div className="px-4 py-2.5 bg-gradient-to-r from-orange-50 to-amber-50 border-b border-gray-100 flex items-center gap-2">
-        <ArrowUpDown size={14} className="text-orange-600" />
-        <h4 className="text-sm font-semibold text-gray-900">Rate Lock Penalty</h4>
-        {d.monthly_penalty != null && (
-          <span
-            className={`ml-auto text-lg font-bold ${(d.monthly_penalty ?? 0) > 0 ? 'text-red-600' : 'text-green-600'}`}
-          >
-            {d.monthly_penalty > 0 ? '+' : ''}
-            {formatCurrency(d.monthly_penalty)}/mo
-          </span>
+      {/* Header with input parameters */}
+      <div className="px-4 py-2.5 bg-gradient-to-r from-orange-50 to-amber-50 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <ArrowUpDown size={14} className="text-orange-600" />
+          <h4 className="text-sm font-semibold text-gray-900">Rate Lock Penalty</h4>
+          {d.monthly_penalty != null && (
+            <span
+              className={`ml-auto text-lg font-bold ${(d.monthly_penalty ?? 0) > 0 ? 'text-red-600' : 'text-green-600'}`}
+            >
+              {d.monthly_penalty > 0 ? '+' : ''}
+              {formatCurrency(d.monthly_penalty)}/mo
+            </span>
+          )}
+        </div>
+        {(d.existing_rate != null || d.new_purchase_price != null) && (
+          <p className="text-[10px] text-gray-500 mt-0.5">
+            {d.existing_rate != null && `${d.existing_rate}% existing`}
+            {d.existing_rate != null && d.new_rate != null && ' → '}
+            {d.new_rate != null && `${d.new_rate}% new`}
+            {d.new_purchase_price != null && ` · ${formatCurrency(d.new_purchase_price)}`}
+          </p>
         )}
       </div>
 

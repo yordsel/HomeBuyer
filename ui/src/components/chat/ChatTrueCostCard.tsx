@@ -19,14 +19,24 @@ export function ChatTrueCostCard({ data }: { data: TrueCostBlockData }) {
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden my-2">
-      {/* Header */}
-      <div className="px-4 py-2.5 bg-gradient-to-r from-emerald-50 to-green-50 border-b border-gray-100 flex items-center gap-2">
-        <Home size={14} className="text-emerald-600" />
-        <h4 className="text-sm font-semibold text-gray-900">True Monthly Cost</h4>
-        {d.total_monthly_cost != null && (
-          <span className="ml-auto text-lg font-bold text-emerald-700">
-            {formatCurrency(d.total_monthly_cost)}
-          </span>
+      {/* Header with input parameters */}
+      <div className="px-4 py-2.5 bg-gradient-to-r from-emerald-50 to-green-50 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <Home size={14} className="text-emerald-600" />
+          <h4 className="text-sm font-semibold text-gray-900">True Monthly Cost</h4>
+          {d.total_monthly_cost != null && (
+            <span className="ml-auto text-lg font-bold text-emerald-700">
+              {formatCurrency(d.total_monthly_cost)}
+            </span>
+          )}
+        </div>
+        {/* Input parameters so multiple cards are distinguishable */}
+        {d.purchase_price != null && (
+          <p className="text-[10px] text-gray-500 mt-0.5">
+            {formatCurrency(d.purchase_price)}
+            {d.down_payment_pct != null && ` · ${d.down_payment_pct}% down`}
+            {d.mortgage_rate != null && ` · ${d.mortgage_rate}% rate`}
+          </p>
         )}
       </div>
 
