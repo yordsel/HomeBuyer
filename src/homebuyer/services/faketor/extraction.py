@@ -397,7 +397,26 @@ class SignalExtractor:
                 lines = [line for line in lines if not line.strip().startswith("```")]
                 cleaned = "\n".join(lines)
 
-            data = json.loads(cleaned)
+            # Try parsing directly first; if "Extra data" error, extract
+            # just the first JSON object (Haiku sometimes appends explanatory text)
+            try:
+                data = json.loads(cleaned)
+            except json.JSONDecodeError:
+                # Find the outermost JSON object by matching braces
+                start_idx = cleaned.find("{")
+                if start_idx == -1:
+                    raise
+                depth = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(cleaned)):
+                    if cleaned[i] == "{":
+                        depth += 1
+                    elif cleaned[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end_idx = i + 1
+                            break
+                data = json.loads(cleaned[start_idx:end_idx])
 
             signals = [
                 Signal(
