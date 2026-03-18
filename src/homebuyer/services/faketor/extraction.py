@@ -132,7 +132,18 @@ RULES:
 - "I want to rent it out" → intent: "invest"
 - "I want to buy my first home" → intent: "occupy", is_first_time_buyer: true
 - If unsure about a field, omit it (return null)
-- Each signal should explain what was detected and why"""
+- Each signal should explain what was detected and why
+
+IMPLICIT CASH/FINANCING SIGNALS:
+- "all-cash", "pay cash", "no mortgage", "no financing needed" → add a signal \
+with implication "cash_buyer" and confidence 0.8. Do NOT fabricate a capital \
+number — leave capital as null, but record the cash intent as a signal.
+- "for my client who has $X" or "my investor with $X budget" → capital: X \
+(third-party framing is still a capital statement)
+- "I have enough to buy outright" → signal with implication "cash_buyer", \
+confidence 0.7
+- "looking to use a mortgage" or "need financing" → signal with implication \
+"needs_financing", confidence 0.8"""
 
 _EXTRACTION_JSON_SCHEMA = {
     "type": "object",

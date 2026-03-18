@@ -464,6 +464,7 @@ class SegmentClassifier:
         has_existing = profile.owns_current_home is True
 
         # --- Cash Buyer ---
+        # Check explicit capital threshold
         if capital >= median_price:
             return SegmentResult(
                 segment_id=CASH_BUYER,
@@ -471,6 +472,27 @@ class SegmentClassifier:
                 reasoning=(
                     f"Capital ${capital:,} >= median price ${median_price:,}. "
                     f"Can buy outright without financing."
+                ),
+                factor_coverage=factor_coverage,
+            )
+
+        # Check for implicit cash signals (e.g., "all-cash", "no mortgage")
+        cash_signals = [
+            s for s in profile.signals
+            if "cash_buyer" in s.implication.lower()
+            and s.confidence >= 0.7
+        ]
+        if cash_signals:
+            return SegmentResult(
+                segment_id=CASH_BUYER,
+                confidence=min(
+                    self._base_confidence(factor_coverage),
+                    max(s.confidence for s in cash_signals),
+                ),
+                reasoning=(
+                    f"Cash buyer signal detected: "
+                    f"{cash_signals[0].evidence[:80]}. "
+                    f"Capital amount unknown but buyer indicated all-cash intent."
                 ),
                 factor_coverage=factor_coverage,
             )
@@ -663,6 +685,14 @@ class SegmentClassifier:
 
         # --- Invest segments ---
         if segment_id == CASH_BUYER:
+            # Check for explicit cash signals first
+            cash_signals = [
+                s for s in profile.signals
+                if "cash_buyer" in s.implication.lower()
+                and s.confidence >= 0.7
+            ]
+            if cash_signals:
+                return base * 0.9  # strong signal
             # Plausible if capital unknown (could be high) or capital > 0
             if capital is None:
                 return base * 0.7  # unknown capital = maybe
