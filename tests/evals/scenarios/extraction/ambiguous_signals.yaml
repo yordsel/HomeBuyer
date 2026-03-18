@@ -1,0 +1,211 @@
+scenarios:
+  # --- Implicit buy intent without saying "buy" ---
+  - id: ext_40_implicit_occupy
+    description: "User wants to buy but doesn't say 'buy' or 'purchase'"
+    turns:
+      - message: "Can I afford to live in Berkeley on a $140k salary with $100k saved?"
+        expected:
+          intent: occupy
+          income: 140000
+          capital: 100000
+        expected_null: [equity]
+        min_signals: 1
+
+  - id: ext_41_implicit_occupy_family
+    description: "Family context implies occupy intent"
+    turns:
+      - message: "We need a 3-bedroom near our kids' school in Berkeley. Our combined income is $220k."
+        expected:
+          intent: occupy
+          income: 220000
+        expected_null: [equity, capital]
+        min_signals: 1
+
+  # --- All-cash signals without dollar amounts ---
+  - id: ext_42_all_cash_no_amount
+    description: "'All-cash' without stating the dollar amount"
+    turns:
+      - message: "I want to buy 122 Vicente Rd all-cash as an investment."
+        expected:
+          intent: invest
+        expected_null: [income, current_rent]
+        min_signals: 1
+
+  - id: ext_43_no_mortgage_needed
+    description: "'No mortgage' implies cash buyer"
+    turns:
+      - message: "I'm looking at investment properties in Berkeley. No mortgage needed."
+        expected:
+          intent: invest
+        expected_null: [income, current_rent]
+        min_signals: 1
+
+  - id: ext_44_cash_offer
+    description: "'Cash offer' implies high capital"
+    turns:
+      - message: "I can make a cash offer on properties up to $1.8M in Berkeley."
+        expected:
+          intent: invest
+          capital: 1800000
+        expected_null: [income, current_rent]
+        min_signals: 1
+
+  # --- Third-party framing ---
+  - id: ext_45_for_client
+    description: "Asking on behalf of a client"
+    turns:
+      - message: "I have a client looking to buy in Berkeley. They have about $2M to spend all-cash as an investment."
+        expected:
+          intent: invest
+          capital: 2000000
+        expected_null: [income, current_rent]
+        min_signals: 1
+
+  - id: ext_46_for_parents
+    description: "Asking on behalf of parents"
+    turns:
+      - message: "My parents want to downsize from their Piedmont home. They have about $1.5M in equity and want to buy something smaller in Berkeley."
+        expected:
+          intent: occupy
+          equity: 1500000
+          owns_current_home: true
+        expected_null: [is_first_time_buyer]
+        min_signals: 1
+
+  # --- Implied income from job title ---
+  - id: ext_47_job_title_income
+    description: "Job title doesn't provide extractable income"
+    turns:
+      - message: "I'm a software engineer at Google and want to buy my first home in Berkeley."
+        expected:
+          intent: occupy
+          is_first_time_buyer: true
+        expected_null: [income, capital, equity]
+        min_signals: 1
+
+  # --- Relative amounts ---
+  - id: ext_48_relative_budget
+    description: "Budget stated relative to median rather than absolute"
+    turns:
+      - message: "I can probably afford something around the Berkeley median price. I make $180k with about $250k saved."
+        expected:
+          intent: occupy
+          income: 180000
+          capital: 250000
+        expected_null: [equity]
+        min_signals: 1
+
+  # --- Implicit investment without saying 'invest' ---
+  - id: ext_49_rental_income_question
+    description: "Asking about rental income implies investment intent"
+    turns:
+      - message: "What kind of rental income could I get from a duplex in South Berkeley? I have about $600k for a down payment."
+        expected:
+          intent: invest
+          capital: 600000
+        expected_null: [current_rent, is_first_time_buyer]
+        min_signals: 1
+
+  - id: ext_50_cap_rate_question
+    description: "Asking about cap rate implies investment intent"
+    turns:
+      - message: "What's the typical cap rate for rental properties in Berkeley right now?"
+        expected:
+          intent: invest
+        expected_null: [capital, income, equity, current_rent]
+        min_signals: 0
+
+  # --- Homeownership implied but not stated ---
+  - id: ext_51_mortgage_rate_lock
+    description: "Mentioning locked rate implies homeownership"
+    turns:
+      - message: "I'm locked in at 2.8% on my current place. Is it worth moving to a bigger house in Berkeley even with rates at 6.5%?"
+        expected:
+          intent: occupy
+          owns_current_home: true
+        expected_null: [is_first_time_buyer]
+        min_signals: 1
+
+  - id: ext_52_refinance_mention
+    description: "Mentioning refinance implies homeownership"
+    turns:
+      - message: "I'm considering pulling equity from my Oakland condo to buy an investment property in Berkeley. My condo is worth about $800k with $200k left on the mortgage."
+        expected:
+          intent: invest
+          owns_current_home: true
+          equity: 600000
+        expected_null: [is_first_time_buyer]
+        min_signals: 2
+
+  # --- Ambiguous occupy vs invest ---
+  - id: ext_53_house_hack
+    description: "House hacking is both occupy and invest"
+    turns:
+      - message: "I want to buy a duplex in Berkeley, live in one unit and rent out the other. I have $300k saved and make $190k."
+        expected:
+          capital: 300000
+          income: 190000
+        expected_null: [equity]
+        min_signals: 2
+
+  - id: ext_54_live_then_rent
+    description: "Plan to live then convert to rental"
+    turns:
+      - message: "I want to buy a place in Berkeley to live in for 2-3 years then convert to a rental when I move. Budget around $1.2M."
+        expected:
+          capital: 1200000
+        expected_null: [equity]
+        min_signals: 1
+
+  # --- Vague financial language ---
+  - id: ext_55_comfortable_budget
+    description: "Vague 'comfortable' language with no numbers"
+    turns:
+      - message: "I'm comfortable spending up to maybe seven figures on a home in Berkeley."
+        expected:
+          intent: occupy
+        expected_null: [income, equity, current_rent]
+        min_signals: 0
+
+  - id: ext_56_well_off_no_numbers
+    description: "Signals wealth without specific numbers"
+    turns:
+      - message: "Money isn't really the issue. I just want the right neighborhood for my family in Berkeley."
+        expected:
+          intent: occupy
+        expected_null: [capital, income, equity, current_rent]
+        min_signals: 0
+
+  # --- Negative ownership signals ---
+  - id: ext_57_never_owned
+    description: "Explicitly states never owned"
+    turns:
+      - message: "I've never owned a home before. I rent a 1BR in Oakland for $2,200. Is Berkeley realistic for me?"
+        expected:
+          is_first_time_buyer: true
+          owns_current_home: false
+          current_rent: 2200
+        expected_null: [equity]
+        min_signals: 1
+
+  # --- Numbers in non-standard formats ---
+  - id: ext_58_written_out_numbers
+    description: "Numbers written as words"
+    turns:
+      - message: "I earn two hundred thousand a year and have three hundred grand saved up for a down payment."
+        expected:
+          income: 200000
+          capital: 300000
+        expected_null: [equity]
+        min_signals: 1
+
+  - id: ext_59_shorthand_k
+    description: "Numbers with k shorthand"
+    turns:
+      - message: "Household income 350k, about 500k for down payment. Looking to buy in the hills."
+        expected:
+          intent: occupy
+          income: 350000
+          capital: 500000
+        expected_null: [equity]
+        min_signals: 2
