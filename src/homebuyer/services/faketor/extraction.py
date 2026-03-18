@@ -149,11 +149,15 @@ RULES:
 INTENT EXTRACTION:
 - "I want to buy a home to live in" → intent: "occupy" (explicit)
 - "I want to invest in rental properties" → intent: "invest" (explicit)
+- "Can I afford to buy a home?" → intent: "occupy" (buying a home = occupy)
+- "I want to buy a house in Berkeley" → intent: "occupy" ("buy a house/home" = occupy)
 - "What's a realistic budget to settle down in Berkeley?" → intent: "idk" \
 (settling down implies occupy, but not stated)
 - "How are rents trending in South Berkeley?" → intent: "idk" \
 (rent question implies invest, but could be a renter asking)
 - "Tell me about the Berkeley market" → intent: null (no directional signal)
+NOTE: "buy a home/house" always means occupy unless investment language is \
+also present (e.g., "buy a rental property" = invest).
 
 OWNERSHIP EXTRACTION:
 - "I own a home in Oakland" → owns_current_home: true (explicit)
@@ -377,6 +381,7 @@ class SignalExtractor:
                 if hasattr(block, "text"):
                     text += block.text
 
+            logger.debug("Extraction raw response (%d chars)", len(text))
             return self._parse_response(text, elapsed_ms)
 
         except Exception as e:

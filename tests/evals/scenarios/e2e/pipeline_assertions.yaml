@@ -24,7 +24,7 @@ scenarios:
           income: 140000
           capital: 100000
         expected_classification:
-          segment_in: [stretcher, down_payment_constrained, first_time_buyer]
+          segment_in: [stretcher, down_payment_constrained, first_time_buyer, not_viable]
           confidence_min: 0.4
         expected_pre_execution:
           tools_include: [compute_true_cost]
