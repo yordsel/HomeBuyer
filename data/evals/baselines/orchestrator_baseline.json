@@ -1,21 +1,21 @@
 {
-  "run_id": "2026-03-18T03-15-50",
+  "run_id": "2026-03-18T04-05-20",
   "eval_type": "orchestrator",
-  "timestamp": "2026-03-18T03:15:50.697925+00:00",
-  "git_sha": "dede10a",
+  "timestamp": "2026-03-18T04:05:20.123567+00:00",
+  "git_sha": "2109475",
   "metrics": {
     "tool_precision": 1.0,
-    "tool_recall": 0.543,
+    "tool_recall": 0.435,
     "forbidden_violations": 0,
-    "avg_reply_length": 1250.0,
-    "avg_latency_ms": 22732.3,
+    "avg_reply_length": 1319.0,
+    "avg_latency_ms": 24234.4,
     "error_rate": 0.0,
     "total_scenarios": 20,
     "total_turns": 23,
     "avg_topic_coverage": 4.35,
     "avg_topic_avoidance": 5.0,
-    "avg_factual_grounding": 2.7,
-    "avg_helpfulness": 3.48
+    "avg_factual_grounding": 3.57,
+    "avg_helpfulness": 3.74
   },
   "per_scenario": [
     {
@@ -23,16 +23,15 @@
       "turns": [
         {
           "tools_used": [
-            "compute_true_cost",
-            "query_database"
+            "compute_true_cost"
           ],
           "expected_hits": [],
           "expected_misses": [
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1477,
-          "latency_ms": 30546.562910079956,
+          "reply_length": 1222,
+          "latency_ms": 18764.106035232544,
           "error": null
         }
       ]
@@ -49,8 +48,8 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1363,
-          "latency_ms": 19582.73983001709,
+          "reply_length": 1239,
+          "latency_ms": 16510.565757751465,
           "error": null
         }
       ]
@@ -67,8 +66,8 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1329,
-          "latency_ms": 16265.437841415405,
+          "reply_length": 1242,
+          "latency_ms": 15235.732078552246,
           "error": null
         }
       ]
@@ -85,8 +84,8 @@
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1353,
-          "latency_ms": 21268.882036209106,
+          "reply_length": 1522,
+          "latency_ms": 18806.309938430786,
           "error": null
         }
       ]
@@ -103,8 +102,8 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1301,
-          "latency_ms": 18065.732955932617,
+          "reply_length": 1421,
+          "latency_ms": 18431.965112686157,
           "error": null
         }
       ]
@@ -114,28 +113,28 @@
       "turns": [
         {
           "tools_used": [
-            "get_market_summary",
-            "compute_true_cost",
-            "compute_true_cost"
+            "get_market_summary"
           ],
           "expected_hits": [
             "get_market_summary"
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1380,
-          "latency_ms": 23805.180072784424,
+          "reply_length": 1319,
+          "latency_ms": 16515.043258666992,
           "error": null
         },
         {
-          "tools_used": [],
+          "tools_used": [
+            "update_working_set"
+          ],
           "expected_hits": [],
           "expected_misses": [
             "search_properties"
           ],
           "forbidden_violations": [],
-          "reply_length": 688,
-          "latency_ms": 15225.074768066406,
+          "reply_length": 1321,
+          "latency_ms": 19772.27020263672,
           "error": null
         }
       ]
@@ -147,15 +146,17 @@
           "tools_used": [
             "update_working_set",
             "query_database",
-            "query_database"
+            "query_database",
+            "query_database",
+            "analyze_investment_scenarios"
           ],
           "expected_hits": [],
           "expected_misses": [
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1209,
-          "latency_ms": 27931.351900100708,
+          "reply_length": 1328,
+          "latency_ms": 57593.616247177124,
           "error": null
         }
       ]
@@ -166,16 +167,16 @@
         {
           "tools_used": [
             "update_working_set",
-            "query_database",
-            "appreciation_stress_test"
+            "analyze_investment_scenarios",
+            "analyze_investment_scenarios"
           ],
           "expected_hits": [],
           "expected_misses": [
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1295,
-          "latency_ms": 25961.771965026855,
+          "reply_length": 1716,
+          "latency_ms": 31815.972089767456,
           "error": null
         }
       ]
@@ -186,10 +187,10 @@
         {
           "tools_used": [
             "get_market_summary",
-            "get_neighborhood_stats",
-            "get_neighborhood_stats",
-            "get_neighborhood_stats",
             "query_database",
+            "get_neighborhood_stats",
+            "get_neighborhood_stats",
+            "get_neighborhood_stats",
             "search_properties",
             "appreciation_stress_test"
           ],
@@ -198,8 +199,8 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1739,
-          "latency_ms": 38884.07301902771,
+          "reply_length": 1717,
+          "latency_ms": 45757.83085823059,
           "error": null
         }
       ]
@@ -209,18 +210,15 @@
       "turns": [
         {
           "tools_used": [
-            "get_market_summary",
-            "dual_property_model",
-            "search_properties",
-            "analyze_investment_scenarios"
+            "dual_property_model"
           ],
-          "expected_hits": [
+          "expected_hits": [],
+          "expected_misses": [
             "get_market_summary"
           ],
-          "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1171,
-          "latency_ms": 31402.349948883057,
+          "reply_length": 1216,
+          "latency_ms": 21412.82892227173,
           "error": null
         }
       ]
@@ -237,8 +235,8 @@
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1354,
-          "latency_ms": 19831.06517791748,
+          "reply_length": 1283,
+          "latency_ms": 19580.51300048828,
           "error": null
         }
       ]
@@ -250,15 +248,15 @@
           "tools_used": [
             "update_working_set",
             "update_working_set",
-            "query_database"
+            "appreciation_stress_test"
           ],
           "expected_hits": [],
           "expected_misses": [
             "search_properties"
           ],
           "forbidden_violations": [],
-          "reply_length": 1513,
-          "latency_ms": 28882.4200630188,
+          "reply_length": 1597,
+          "latency_ms": 33931.11515045166,
           "error": null
         },
         {
@@ -268,8 +266,8 @@
             "get_development_potential"
           ],
           "forbidden_violations": [],
-          "reply_length": 845,
-          "latency_ms": 10290.489196777344,
+          "reply_length": 1028,
+          "latency_ms": 13014.129877090454,
           "error": null
         }
       ]
@@ -288,8 +286,8 @@
             "get_price_prediction"
           ],
           "forbidden_violations": [],
-          "reply_length": 763,
-          "latency_ms": 11475.817203521729,
+          "reply_length": 820,
+          "latency_ms": 13000.326156616211,
           "error": null
         }
       ]
@@ -299,16 +297,15 @@
       "turns": [
         {
           "tools_used": [
-            "pmi_model",
-            "compute_true_cost"
+            "pmi_model"
           ],
           "expected_hits": [
             "pmi_model"
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1156,
-          "latency_ms": 20486.274003982544,
+          "reply_length": 1239,
+          "latency_ms": 16091.758012771606,
           "error": null
         }
       ]
@@ -319,17 +316,17 @@
         {
           "tools_used": [
             "lookup_property",
-            "estimate_rental_income",
-            "get_price_prediction"
+            "update_working_set"
           ],
           "expected_hits": [
-            "lookup_property",
+            "lookup_property"
+          ],
+          "expected_misses": [
             "estimate_rental_income"
           ],
-          "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1243,
-          "latency_ms": 24001.219272613525,
+          "reply_length": 560,
+          "latency_ms": 17486.45782470703,
           "error": null
         }
       ]
@@ -339,15 +336,17 @@
       "turns": [
         {
           "tools_used": [
-            "competition_assessment"
+            "competition_assessment",
+            "get_neighborhood_stats",
+            "get_comparable_sales"
           ],
           "expected_hits": [],
           "expected_misses": [
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1093,
-          "latency_ms": 18107.295036315918,
+          "reply_length": 1241,
+          "latency_ms": 24880.14316558838,
           "error": null
         }
       ]
@@ -357,34 +356,30 @@
       "turns": [
         {
           "tools_used": [
-            "get_neighborhood_stats",
-            "get_neighborhood_stats",
-            "get_neighborhood_stats",
-            "get_neighborhood_stats",
-            "neighborhood_lifestyle"
+            "get_market_summary",
+            "search_properties"
           ],
-          "expected_hits": [],
-          "expected_misses": [
+          "expected_hits": [
             "get_market_summary"
           ],
+          "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1285,
-          "latency_ms": 20054.826974868774,
+          "reply_length": 1466,
+          "latency_ms": 22368.41607093811,
           "error": null
         },
         {
           "tools_used": [
             "get_neighborhood_stats",
-            "get_neighborhood_stats",
-            "neighborhood_lifestyle"
+            "get_neighborhood_stats"
           ],
           "expected_hits": [
             "get_neighborhood_stats"
           ],
           "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1362,
-          "latency_ms": 17897.52721786499,
+          "reply_length": 1483,
+          "latency_ms": 17681.636095046997,
           "error": null
         }
       ]
@@ -394,16 +389,15 @@
       "turns": [
         {
           "tools_used": [
-            "get_market_summary",
             "rate_penalty"
           ],
-          "expected_hits": [
+          "expected_hits": [],
+          "expected_misses": [
             "get_market_summary"
           ],
-          "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1108,
-          "latency_ms": 22008.17084312439,
+          "reply_length": 1029,
+          "latency_ms": 22867.921113967896,
           "error": null
         }
       ]
@@ -415,17 +409,20 @@
           "tools_used": [
             "update_working_set",
             "query_database",
+            "query_database",
+            "query_database",
             "get_neighborhood_stats",
             "get_neighborhood_stats",
-            "get_neighborhood_stats"
+            "get_neighborhood_stats",
+            "appreciation_stress_test"
           ],
           "expected_hits": [],
           "expected_misses": [
             "get_market_summary"
           ],
           "forbidden_violations": [],
-          "reply_length": 1288,
-          "latency_ms": 35905.90596199036,
+          "reply_length": 1977,
+          "latency_ms": 55599.807024002075,
           "error": null
         }
       ]
@@ -435,17 +432,15 @@
       "turns": [
         {
           "tools_used": [
-            "compute_true_cost",
-            "get_market_summary",
-            "adjacent_market_comparison"
+            "compute_true_cost"
           ],
-          "expected_hits": [
+          "expected_hits": [],
+          "expected_misses": [
             "get_market_summary"
           ],
-          "expected_misses": [],
           "forbidden_violations": [],
-          "reply_length": 1427,
-          "latency_ms": 24962.857007980347,
+          "reply_length": 1347,
+          "latency_ms": 20272.70007133484,
           "error": null
         }
       ]

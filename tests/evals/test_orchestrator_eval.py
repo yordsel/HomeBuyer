@@ -231,9 +231,25 @@ class TestOrchestratorEvalLive:
         import anthropic
         return anthropic.Anthropic()
 
+    @pytest.fixture
+    def app_state(self):
+        """Initialize AppState with real DB + ML model for authentic tool results."""
+        import homebuyer.api as api_module
+        from homebuyer.api import AppState
+
+        state = AppState()
+        # Set the module-level _state so _faketor_tool_executor can access it
+        api_module._state = state
+        yield state
+        state.close()
+        api_module._state = None
+
     @pytest.mark.asyncio
-    async def test_all_scenarios(self, orchestrator_scenarios, anthropic_client, tmp_path):
-        """Run all orchestrator scenarios against real Sonnet API."""
+    async def test_all_scenarios(
+        self, orchestrator_scenarios, anthropic_client, app_state, tmp_path,
+    ):
+        """Run all orchestrator scenarios against real Sonnet API + real DB."""
+        from homebuyer.api import _faketor_tool_executor
         from homebuyer.services.faketor.classification import SegmentClassifier
         from homebuyer.services.faketor.extraction import SignalExtractor
         from homebuyer.services.faketor.tools import registry as global_registry
@@ -242,44 +258,33 @@ class TestOrchestratorEvalLive:
         extractor = SignalExtractor(anthropic_client)
         classifier = SegmentClassifier()
 
-        # Use in-memory context store (no DB needed)
+        # Real tool executor backed by DB + ML model
+        real_tool_executor = ToolExecutor(_faketor_tool_executor, global_registry)
+
+        # Use in-memory context store (no DB needed for context persistence)
         ctx_store = MagicMock(spec=ResearchContextStore)
         ctx_store.persist = AsyncMock()
 
+        # Pre-executor still mocked (proactive analysis is tested separately)
+        pre_executor = MagicMock(spec=PreExecutor)
+        pre_executor.execute.return_value = PreExecutionResult()
+
+        import time
         results = []
         for scenario in orchestrator_scenarios:
             context = _make_mock_context(scenario.segment)
             ctx_store.load_or_create = AsyncMock(return_value=context)
-
-            # Tool executor returns realistic Berkeley data per tool name
-            from tests.evals.fixtures import TOOL_RESULTS, realistic_tool_result
-
-            def _realistic_executor(tool_name, tool_input):
-                import json
-                result_str = realistic_tool_result(tool_name, tool_input)
-                return ExecToolResult(
-                    tool_name=tool_name,
-                    tool_input=tool_input or {},
-                    result_str=result_str,
-                    result_data=json.loads(result_str),
-                )
-
-            tool_executor = MagicMock(spec=ToolExecutor)
-            tool_executor.execute.side_effect = _realistic_executor
-            pre_executor = MagicMock(spec=PreExecutor)
-            pre_executor.execute.return_value = PreExecutionResult()
 
             orch = TurnOrchestrator(
                 client=anthropic_client,
                 context_store=ctx_store,
                 signal_extractor=extractor,
                 segment_classifier=classifier,
-                tool_executor=tool_executor,
+                tool_executor=real_tool_executor,
                 pre_executor=pre_executor,
                 registry=global_registry,
             )
 
-            import time
             turn_results = []
             for turn in scenario.turns:
                 t0 = time.time()
@@ -295,6 +300,15 @@ class TestOrchestratorEvalLive:
                     tools_used, turn.expected_tools, turn.forbidden_tools,
                 )
 
+                # Build tool results context for the judge
+                tool_results_for_judge = [
+                    {"tool": tc["name"], "result": b.get("data", {})}
+                    for tc, b in zip(result.tool_calls, result.blocks)
+                ] if result.blocks else [
+                    {"tool": tc["name"], "result": "(result not captured)"}
+                    for tc in result.tool_calls
+                ]
+
                 quality_grade = grade_response_quality(
                     anthropic_client,
                     result.reply,
@@ -302,6 +316,7 @@ class TestOrchestratorEvalLive:
                     scenario.segment,
                     turn.expected_topics,
                     turn.forbidden_topics,
+                    tool_results=tool_results_for_judge,
                 )
 
                 turn_results.append(OrchestratorTurnResult(

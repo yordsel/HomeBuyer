@@ -152,6 +152,9 @@ USER SEGMENT: {segment}
 USER MESSAGE:
 {message}
 
+TOOL RESULTS THE ASSISTANT HAD ACCESS TO:
+{tool_results}
+
 ASSISTANT RESPONSE:
 {response}
 
@@ -161,8 +164,11 @@ TOPICS TO AVOID (should not appear): {forbidden_topics}
 Score each dimension 0-5:
 1. topic_coverage: Does the response address the expected topics?
 2. topic_avoidance: Does the response avoid the forbidden topics? (5 = avoids all)
-3. factual_grounding: Are claims supported by data, not hallucinated?
-4. helpfulness: Overall quality for this buyer's situation?
+3. factual_grounding: Does the response use specific numbers and facts from the tool \
+results above? Are the numbers cited in the response consistent with the tool data? \
+(5 = response cites specific data from tools, 0 = vague claims with no data)
+4. helpfulness: Overall quality for this buyer's situation? Consider whether the \
+response gives actionable, specific advice tailored to the segment.
 
 Return JSON: {{"topic_coverage": N, "topic_avoidance": N, "factual_grounding": N, \
 "helpfulness": N, "reasoning": "..."}}\
@@ -188,15 +194,33 @@ def grade_response_quality(
     segment: str,
     expected_topics: list[str],
     forbidden_topics: list[str],
+    tool_results: list[dict[str, Any]] | None = None,
 ) -> ResponseQualityGrade:
     """Use Haiku as a judge to score response quality.
 
     Only called in live mode. Returns a ResponseQualityGrade with scores 0-5.
+
+    Args:
+        tool_results: List of {"tool": name, "result": data} dicts from actual
+            tool calls, so the judge can verify factual grounding.
     """
+    # Format tool results for the judge (truncate to avoid token bloat)
+    if tool_results:
+        tool_strs = []
+        for tr in tool_results[:5]:  # Cap at 5 tools
+            result_str = json.dumps(tr.get("result", {}), default=str)
+            if len(result_str) > 1000:
+                result_str = result_str[:1000] + "..."
+            tool_strs.append(f"[{tr.get('tool', 'unknown')}]: {result_str}")
+        tool_context = "\n".join(tool_strs)
+    else:
+        tool_context = "(no tool results available)"
+
     prompt = _JUDGE_USER_TEMPLATE.format(
         segment=segment,
         message=message,
         response=response,
+        tool_results=tool_context,
         expected_topics=", ".join(expected_topics) if expected_topics else "(none specified)",
         forbidden_topics=", ".join(forbidden_topics) if forbidden_topics else "(none specified)",
     )
