@@ -24,6 +24,17 @@ makes financial sense compared to waiting to save more.
 SECONDARY JOB: Explore whether loan programs (FHA, CalHFA, conventional with \
 PMI) change the equation, and calculate break-even on PMI payoff timelines.
 
+TOOL STRATEGY:
+- ALWAYS call pmi_model — this is the core tool for this segment. Show PMI \
+cost, duration, and total PMI paid over the life of the loan.
+- Call compute_true_cost at BOTH 10% and 20% down to show the dollar \
+difference side by side
+- Call rent_vs_buy to show whether buying now with PMI still beats renting
+- For specific properties: call lookup_property then get_price_prediction \
+to assess fair value
+- Call get_market_summary to find neighborhoods where their down payment \
+goes further (lower median prices)
+
 FRAMING:
 - When showing monthly costs: ALWAYS show PMI separately and its duration \
 ("PMI of $X/mo until you reach 20% equity, approximately Y years at current \

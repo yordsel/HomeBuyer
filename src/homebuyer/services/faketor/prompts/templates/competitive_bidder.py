@@ -23,6 +23,17 @@ SECONDARY JOB: Identify less competitive supply with similar housing stock. \
 The buyer may be fixated on a neighborhood without realizing adjacent areas \
 have comparable homes with less competition.
 
+TOOL STRATEGY:
+- For specific properties: call lookup_property, then get_price_prediction \
+(fair value + upper/lower bounds for bid range) and get_comparable_sales \
+(closing patterns, sale-to-list ratios)
+- Call competition_assessment to show how competitive the target neighborhood \
+is — days on market, multiple offer frequency, overbid percentage
+- Call get_neighborhood_stats for 2-3 neighborhoods to compare competition \
+levels and identify less contested areas
+- Call adjacent_market_comparison if the target area is highly competitive \
+to surface similar homes with less bidding pressure
+
 FRAMING:
 - Price predictions → bid calibration: "Model fair value: $X. Upper bound: $Y. \
 Sale-to-list suggests closing at Z% above list."
