@@ -158,6 +158,17 @@ def _resolve_property_from_db(
             if not overrides.get("zip_code"):
                 zip_code = nearest.get("zip_code") or zip_code
 
+        # Prefer computed_bldg_sqft from properties table when available
+        if sqft is None or not overrides.get("sqft"):
+            prop_row = db.fetchone(
+                "SELECT computed_bldg_sqft FROM properties "
+                "WHERE ABS(latitude - ?) < 0.0002 AND ABS(longitude - ?) < 0.0002 "
+                "AND computed_bldg_sqft IS NOT NULL LIMIT 1",
+                (lat, lon),
+            )
+            if prop_row and prop_row.get("computed_bldg_sqft"):
+                sqft = prop_row["computed_bldg_sqft"]
+
     # Geocoder fallback for neighborhood
     if not neighborhood and geocoder:
         neighborhood = geocoder.geocode_point(lat, lon)
@@ -2807,7 +2818,8 @@ def _expand_working_set_from_ids(
     _WS_FIELDS = (
         "id, address, neighborhood, beds, baths, sqft, building_sqft, "
         "lot_size_sqft, zoning_class, property_type, last_sale_price, year_built, "
-        "latitude, longitude, property_category, record_type, lot_group_key, situs_unit"
+        "latitude, longitude, property_category, record_type, lot_group_key, situs_unit, "
+        "computed_bldg_sqft, data_notes"
     )
     _SQLITE_VAR_LIMIT = 900  # Stay under SQLite's default 999 limit
 
@@ -2835,7 +2847,8 @@ def _populate_working_set_from_ids(
     _WS_FIELDS = (
         "id, address, neighborhood, beds, baths, sqft, building_sqft, "
         "lot_size_sqft, zoning_class, property_type, last_sale_price, year_built, "
-        "latitude, longitude, property_category, record_type, lot_group_key, situs_unit"
+        "latitude, longitude, property_category, record_type, lot_group_key, situs_unit, "
+        "computed_bldg_sqft, data_notes"
     )
     _SQLITE_VAR_LIMIT = 900  # Stay under SQLite's default 999 limit
 
@@ -3027,10 +3040,13 @@ def _execute_update_working_set(tool_input: dict) -> str:
             r_sqft = row.get("sqft")
             r_building_sqft = row.get("building_sqft")
             r_lot_size_sqft = row.get("lot_size_sqft")
+            r_computed_bldg_sqft = row.get("computed_bldg_sqft")
 
             data_quality = "normal"
             data_quality_note = None
-            if r_building_sqft and r_sqft and r_sqft > 0:
+            # If computed_bldg_sqft is populated, reconciliation already resolved
+            # any mismatch — only flag if it's missing and raw values conflict.
+            if not r_computed_bldg_sqft and r_building_sqft and r_sqft and r_sqft > 0:
                 try:
                     bld_ratio = float(r_building_sqft) / float(r_sqft)
                     if bld_ratio > 3:
@@ -3045,11 +3061,13 @@ def _execute_update_working_set(tool_input: dict) -> str:
                 data_quality = "mf5_limited_data"
                 data_quality_note = "Multi-family 5+ unit — limited comparable data."
 
+            # Prefer computed_bldg_sqft for building-to-lot ratio
+            bldg_for_ratio = r_computed_bldg_sqft or r_building_sqft
             building_to_lot_ratio = None
-            if r_building_sqft and r_lot_size_sqft and r_lot_size_sqft > 0:
+            if bldg_for_ratio and r_lot_size_sqft and r_lot_size_sqft > 0:
                 try:
                     building_to_lot_ratio = round(
-                        float(r_building_sqft) / float(r_lot_size_sqft), 3
+                        float(bldg_for_ratio) / float(r_lot_size_sqft), 3
                     )
                 except (TypeError, ValueError, ZeroDivisionError):
                     pass
@@ -3082,7 +3100,9 @@ def _execute_update_working_set(tool_input: dict) -> str:
                 "baths": row.get("baths"),
                 "sqft": row.get("sqft"),
                 "building_sqft": r_building_sqft,
+                "computed_bldg_sqft": row.get("computed_bldg_sqft"),
                 "lot_size_sqft": r_lot_size_sqft,
+                "data_notes": row.get("data_notes"),
                 "building_to_lot_ratio": building_to_lot_ratio,
                 "year_built": row.get("year_built"),
                 "property_type": row.get("property_type"),
@@ -3157,7 +3177,8 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                     address = nearest.get("address")
             # Look up record_type and lot_group_key from properties table
             prop_row = _state.db.fetchone(
-                "SELECT record_type, lot_group_key, building_sqft, property_category "
+                "SELECT record_type, lot_group_key, building_sqft, computed_bldg_sqft, "
+                "property_category "
                 "FROM properties "
                 "WHERE ABS(latitude - ?) < 0.0002 AND ABS(longitude - ?) < 0.0002 "
                 "LIMIT 1",
@@ -3166,9 +3187,9 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             if prop_row:
                 record_type = prop_row["record_type"]
                 lot_group_key = prop_row["lot_group_key"]
-                # Use building_sqft from properties if we don't have sqft from sale
-                if sqft is None and prop_row["building_sqft"]:
-                    sqft = prop_row["building_sqft"]
+                # Prefer computed_bldg_sqft (reconciled), fall back to building_sqft
+                if sqft is None:
+                    sqft = prop_row.get("computed_bldg_sqft") or prop_row.get("building_sqft")
                 property_category = prop_row.get("property_category")
             else:
                 property_category = None
@@ -3694,6 +3715,7 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             "zoning_class": best.get("zoning_class"),
             "lot_size_sqft": best.get("lot_size_sqft"),
             "building_sqft": best.get("building_sqft"),
+            "computed_bldg_sqft": best.get("computed_bldg_sqft"),
             "beds": best.get("beds"),
             "baths": best.get("baths"),
             "sqft": best.get("sqft"),
@@ -3807,10 +3829,13 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
             r_sqft = row.get("sqft")
             r_building_sqft = row.get("building_sqft")
             r_lot_size_sqft = row.get("lot_size_sqft")
+            r_computed_bldg_sqft = row.get("computed_bldg_sqft")
 
             data_quality = "normal"
             data_quality_note = None
-            if r_building_sqft and r_sqft and r_sqft > 0:
+            # If computed_bldg_sqft is populated, reconciliation already resolved
+            # any mismatch — only flag if it's missing and raw values conflict.
+            if not r_computed_bldg_sqft and r_building_sqft and r_sqft and r_sqft > 0:
                 try:
                     bld_ratio = float(r_building_sqft) / float(r_sqft)
                     if bld_ratio > 3:
@@ -3826,12 +3851,13 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 data_quality = "mf5_limited_data"
                 data_quality_note = "Multi-family 5+ unit — limited comparable data."
 
-            # Pre-compute building-to-lot ratio using correct building_sqft
+            # Pre-compute building-to-lot ratio — prefer computed_bldg_sqft
+            bldg_for_ratio = r_computed_bldg_sqft or r_building_sqft
             building_to_lot_ratio = None
-            if r_building_sqft and r_lot_size_sqft and r_lot_size_sqft > 0:
+            if bldg_for_ratio and r_lot_size_sqft and r_lot_size_sqft > 0:
                 try:
                     building_to_lot_ratio = round(
-                        float(r_building_sqft) / float(r_lot_size_sqft), 3
+                        float(bldg_for_ratio) / float(r_lot_size_sqft), 3
                     )
                 except (TypeError, ValueError, ZeroDivisionError):
                     pass
@@ -3865,7 +3891,9 @@ def _faketor_tool_executor(tool_name: str, tool_input: dict) -> str:
                 "baths": row.get("baths"),
                 "sqft": row.get("sqft"),
                 "building_sqft": r_building_sqft,
+                "computed_bldg_sqft": row.get("computed_bldg_sqft"),
                 "lot_size_sqft": r_lot_size_sqft,
+                "data_notes": row.get("data_notes"),
                 "building_to_lot_ratio": building_to_lot_ratio,
                 "year_built": row.get("year_built"),
                 "property_type": row.get("property_type"),

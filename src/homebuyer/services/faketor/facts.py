@@ -38,7 +38,11 @@ def compute_search_facts(data: dict) -> dict:
     prices = [r["last_sale_price"] for r in results if r.get("last_sale_price")]
     predicted = [r["predicted_price"] for r in results if r.get("predicted_price")]
     lot_sizes = [r["lot_size_sqft"] for r in results if r.get("lot_size_sqft")]
-    building_sqfts = [r["building_sqft"] for r in results if r.get("building_sqft")]
+    building_sqfts = [
+        r.get("computed_bldg_sqft") or r.get("building_sqft")
+        for r in results
+        if r.get("computed_bldg_sqft") or r.get("building_sqft")
+    ]
     zones = sorted(set(r.get("zoning_class") for r in results if r.get("zoning_class")))
     neighborhoods = sorted(set(r.get("neighborhood") for r in results if r.get("neighborhood")))
 

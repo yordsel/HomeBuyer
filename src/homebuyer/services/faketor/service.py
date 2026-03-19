@@ -255,18 +255,19 @@ This queries ALL properties in the working set in ONE tool call. After identifyi
 you can drill into 2-3 specific properties with per-property tools for detailed analysis.
 
 DATA QUALITY AWARENESS:
+- The computed_bldg_sqft column is the PREFERRED property size — it reconciles conflicts \
+  between assessor (building_sqft) and MLS/third-party (sqft) data. Use it instead of raw \
+  sqft or building_sqft for property evaluation. Falls back to NULL when no data is available.
+- The data_notes column (JSON array) explains how computed_bldg_sqft was derived.
 - About 232 Multi-Family 5+ properties have PER-UNIT assessor features (sqft, beds, baths \
-  reflect one unit) but WHOLE-BUILDING sale prices and lot sizes. This creates misleading \
-  metrics like extremely low building-to-lot ratios or extremely high price-per-sqft.
-- When searching for development opportunities, underdeveloped properties, or density analysis, \
-  EXCLUDE per-unit mismatch records using: WHERE building_sqft / NULLIF(sqft, 0) <= 3 \
-  OR building_sqft IS NULL
+  reflect one unit) but WHOLE-BUILDING sale prices and lot sizes. computed_bldg_sqft already \
+  resolves most of these mismatches.
 - search_properties results include a data_quality field. When presenting results, note any \
   properties flagged with data quality issues (per_unit_mismatch or mf5_limited_data).
-- For building density or building-to-lot ratio calculations, ALWAYS use building_sqft (total \
-  building footprint), never sqft (per-unit living area).
-- The building_to_lot_ratio field in search results is pre-computed using the correct \
-  building_sqft column — use it directly instead of computing your own ratio.
+- For building density or building-to-lot ratio calculations, use computed_bldg_sqft (preferred) \
+  or building_sqft (total building footprint), never raw sqft (per-unit living area).
+- The building_to_lot_ratio field in search results is pre-computed using computed_bldg_sqft \
+  (or building_sqft as fallback) — use it directly instead of computing your own ratio.
 
 SEARCH RESULT PRESENTATION:
 - When search_properties returns results, ALWAYS state how many you're showing vs how many \

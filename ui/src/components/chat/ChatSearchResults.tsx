@@ -140,7 +140,7 @@ function SearchResultRow({
         {p.beds ?? '—'}/{p.baths ?? '—'}
       </td>
       <td className="px-3 py-2 text-right text-gray-500">
-        {p.sqft ? formatNumber(p.sqft) : '—'}
+        {formatNumber(p.computed_bldg_sqft ?? p.sqft)}
       </td>
       <td className="px-3 py-2 text-right font-medium text-indigo-600">
         {p.predicted_price ? formatCurrency(p.predicted_price) : '—'}

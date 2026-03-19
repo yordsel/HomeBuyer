@@ -23,7 +23,9 @@ export interface PropertyContextData {
   beds?: number;
   baths?: number;
   sqft?: number;
+  computed_bldg_sqft?: number;
   lot_size_sqft?: number;
+  data_notes?: string;
   year_built?: number;
   property_type?: string;
   zoning_class?: string;

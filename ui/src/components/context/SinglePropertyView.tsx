@@ -111,8 +111,8 @@ export function SinglePropertyView({
             {property.baths != null && (
               <MiniStat icon={Bath} label="Baths" value={String(property.baths)} />
             )}
-            {property.sqft != null && (
-              <MiniStat icon={Ruler} label="Sqft" value={formatNumber(property.sqft)} />
+            {(property.computed_bldg_sqft != null || property.sqft != null) && (
+              <MiniStat icon={Ruler} label="Sqft" value={formatNumber(property.computed_bldg_sqft ?? property.sqft)} />
             )}
             {property.lot_size_sqft != null && (
               <MiniStat icon={LayoutGrid} label="Lot" value={formatNumber(property.lot_size_sqft)} />

@@ -47,6 +47,17 @@ export function formatDate(dateStr: string | null | undefined): string {
 }
 
 /**
+ * Get the best-available building sqft for a property.
+ * Prefers computed_bldg_sqft (reconciled) over raw sqft.
+ */
+export function getPropertySqft(prop: {
+  computed_bldg_sqft?: number | null;
+  sqft?: number | null;
+}): number | null {
+  return prop.computed_bldg_sqft ?? prop.sqft ?? null;
+}
+
+/**
  * Get today's date as YYYY-MM-DD.
  */
 export function getTodayString(): string {

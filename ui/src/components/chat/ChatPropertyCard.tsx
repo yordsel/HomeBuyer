@@ -69,10 +69,10 @@ export function ChatPropertyCard({ data, onAddressClick }: ChatPropertyCardProps
         {d.baths != null && (
           <StatCell label="Baths" value={String(d.baths)} />
         )}
-        {(d.sqft != null || d.building_sqft != null) && (
+        {(d.computed_bldg_sqft != null || d.sqft != null || d.building_sqft != null) && (
           <StatCell
             label="Sqft"
-            value={formatNumber(d.sqft ?? d.building_sqft)}
+            value={formatNumber(d.computed_bldg_sqft ?? d.sqft ?? d.building_sqft)}
             icon={<Ruler size={12} />}
           />
         )}

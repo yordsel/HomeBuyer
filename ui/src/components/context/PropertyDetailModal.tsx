@@ -79,11 +79,11 @@ export function PropertyDetailModal({
                 value={String(property.baths)}
               />
             )}
-            {property.sqft != null && (
+            {(property.computed_bldg_sqft != null || property.sqft != null) && (
               <StatTile
                 icon={Ruler}
                 label="Sqft"
-                value={formatNumber(property.sqft)}
+                value={formatNumber(property.computed_bldg_sqft ?? property.sqft)}
               />
             )}
             {property.lot_size_sqft != null && (

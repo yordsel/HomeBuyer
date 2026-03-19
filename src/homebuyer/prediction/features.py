@@ -114,8 +114,8 @@ _DERIVED_FEATURES = [
     "bed_bath_ratio",
     "sqft_per_bed",
     "lot_to_living_ratio",
-    "effective_sqft",                  # building_sqft for MF 5+, else sqft
-    "building_to_listing_sqft_ratio",  # building_sqft / sqft (signals per-unit mismatch)
+    "effective_sqft",                  # computed_bldg_sqft when available, else sqft
+    "building_to_listing_sqft_ratio",  # computed_bldg_sqft / sqft (signals per-unit mismatch)
     "is_condo_unit",                   # 1 if record_type='unit', else 0
     "effective_lot_size",              # lot_size / units_on_lot for condos, lot_size_sqft for lots
     "units_on_lot",                    # count of properties sharing same lot_group_key
@@ -124,7 +124,7 @@ _DERIVED_FEATURES = [
 # Structural features derived from assessor data (properties table)
 _STRUCTURE_FEATURES = [
     "unit_count",       # Number of units (1 for SFH, 2-4 for multi, 5 floor for 5+)
-    "building_sqft",    # Total building square footage (vs sqft which is per-unit for multi)
+    "building_sqft",    # Best-available building sqft (computed_bldg_sqft preferred over raw)
 ]
 
 # Label-encoded categorical features
@@ -331,6 +331,7 @@ class FeatureBuilder:
                 ps.neighborhood, ps.zip_code, ps.zoning_class, ps.address,
                 p.use_code,
                 p.building_sqft,
+                p.computed_bldg_sqft,
                 p.record_type,
                 p.property_category,
                 p.lot_group_key
@@ -642,9 +643,18 @@ class FeatureBuilder:
             np.nan,
         )
 
-        # effective_sqft: use building_sqft for MF 5+ where available,
-        # otherwise fall back to listing sqft.
-        if "building_sqft" in df.columns and "use_code" in df.columns:
+        # effective_sqft: prefer computed_bldg_sqft (reconciled best-available),
+        # then building_sqft for MF 5+, otherwise fall back to listing sqft.
+        if "computed_bldg_sqft" in df.columns:
+            computed = pd.to_numeric(df["computed_bldg_sqft"], errors="coerce")
+            has_computed = computed.notna() & (computed > 0)
+            # Use computed_bldg_sqft where available, fall back to sqft
+            features["effective_sqft"] = np.where(
+                has_computed,
+                computed,
+                features["sqft"],
+            )
+        elif "building_sqft" in df.columns and "use_code" in df.columns:
             unit_count_raw = df["use_code"].map(
                 lambda x: USE_CODE_UNIT_COUNT.get(str(x).strip(), np.nan)
                 if pd.notna(x) else np.nan
@@ -663,12 +673,19 @@ class FeatureBuilder:
 
         # building_to_listing_sqft_ratio: signals per-unit vs whole-building
         # mismatch.  ~1.0 for SFR, 3-10x for MF with per-unit MLS data.
-        if "building_sqft" in df.columns:
-            bldg_sqft = pd.to_numeric(df["building_sqft"], errors="coerce")
+        # Prefer computed_bldg_sqft (reconciled) over raw building_sqft.
+        bldg_col = None
+        if "computed_bldg_sqft" in df.columns:
+            bldg_col = pd.to_numeric(df["computed_bldg_sqft"], errors="coerce")
+        if bldg_col is None or (bldg_col.notna().sum() == 0):
+            if "building_sqft" in df.columns:
+                bldg_col = pd.to_numeric(df["building_sqft"], errors="coerce")
+
+        if bldg_col is not None:
             features["building_to_listing_sqft_ratio"] = np.where(
                 (features["sqft"].notna()) & (features["sqft"] > 0)
-                & (bldg_sqft.notna()) & (bldg_sqft > 0),
-                bldg_sqft / features["sqft"],
+                & (bldg_col.notna()) & (bldg_col > 0),
+                bldg_col / features["sqft"],
                 np.nan,
             )
         else:
@@ -683,7 +700,12 @@ class FeatureBuilder:
         else:
             features["unit_count"] = np.nan
 
-        if "building_sqft" in df.columns:
+        # Prefer computed_bldg_sqft for the building_sqft feature
+        if "computed_bldg_sqft" in df.columns:
+            computed = pd.to_numeric(df["computed_bldg_sqft"], errors="coerce")
+            raw_bldg = pd.to_numeric(df.get("building_sqft", pd.Series(dtype=float)), errors="coerce")
+            features["building_sqft"] = computed.fillna(raw_bldg)
+        elif "building_sqft" in df.columns:
             features["building_sqft"] = pd.to_numeric(
                 df["building_sqft"], errors="coerce"
             )

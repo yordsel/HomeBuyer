@@ -723,6 +723,7 @@ export interface PropertyDetailBlockData {
   last_sale_price?: number;
   last_sale_date?: string;
   building_sqft?: number;
+  computed_bldg_sqft?: number;
   latitude?: number;
   longitude?: number;
   property_category?: string;
@@ -1392,7 +1393,9 @@ export interface SearchResultProperty {
   baths?: number;
   sqft?: number;
   building_sqft?: number;
+  computed_bldg_sqft?: number;
   lot_size_sqft?: number;
+  data_notes?: string;
   building_to_lot_ratio?: number;
   year_built?: number;
   property_type?: string;
@@ -1469,7 +1472,9 @@ export interface WorkingSetProperty {
   baths: number | null;
   sqft: number | null;
   building_sqft: number | null;
+  computed_bldg_sqft: number | null;
   lot_size_sqft: number | null;
+  data_notes: string | null;
   zoning_class: string | null;
   property_type: string | null;
   last_sale_price: number | null;

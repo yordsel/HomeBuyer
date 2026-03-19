@@ -212,9 +212,9 @@ function PropertyListCard({
             <Bath size={9} /> {property.baths}
           </span>
         )}
-        {property.sqft != null && (
+        {(property.computed_bldg_sqft != null || property.sqft != null) && (
           <span className="flex items-center gap-0.5">
-            <Ruler size={9} /> {formatNumber(property.sqft)}
+            <Ruler size={9} /> {formatNumber(property.computed_bldg_sqft ?? property.sqft)}
           </span>
         )}
         {predictedPrice != null && (

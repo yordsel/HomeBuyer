@@ -202,7 +202,7 @@ export function AllPropertiesModal({
           cmp = (a.property.beds ?? 0) - (b.property.beds ?? 0);
           break;
         case 'sqft':
-          cmp = (a.property.sqft ?? 0) - (b.property.sqft ?? 0);
+          cmp = (a.property.computed_bldg_sqft ?? a.property.sqft ?? 0) - (b.property.computed_bldg_sqft ?? b.property.sqft ?? 0);
           break;
         case 'price':
           cmp = (getPredictedPrice(a) ?? 0) - (getPredictedPrice(b) ?? 0);
@@ -336,7 +336,7 @@ export function AllPropertiesModal({
                             {prop.beds ?? '—'}/{prop.baths ?? '—'}
                           </td>
                           <td className="px-3 py-2.5 text-gray-600">
-                            {prop.sqft ? formatNumber(prop.sqft) : '—'}
+                            {formatNumber(prop.computed_bldg_sqft ?? prop.sqft)}
                           </td>
                           <td className="px-3 py-2.5 text-gray-600">
                             {prop.lot_size_sqft ? formatNumber(prop.lot_size_sqft) : '—'}
@@ -403,7 +403,7 @@ export function AllPropertiesModal({
                               {tracked.property.beds ?? '—'}/{tracked.property.baths ?? '—'}
                             </td>
                             <td className="px-3 py-2.5 text-gray-600">
-                              {tracked.property.sqft ? formatNumber(tracked.property.sqft) : '—'}
+                              {formatNumber(tracked.property.computed_bldg_sqft ?? tracked.property.sqft)}
                             </td>
                             <td className="px-3 py-2.5 font-medium text-indigo-600">
                               {price ? formatCurrency(price) : '—'}
