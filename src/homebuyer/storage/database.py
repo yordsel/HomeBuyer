@@ -53,7 +53,7 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 # Schema DDL (SQLite dialect — translated at runtime for Postgres)
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _SCHEMA_SQL_SQLITE = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -243,6 +243,8 @@ CREATE TABLE IF NOT EXISTS properties (
     record_type         TEXT,
     lot_group_key       TEXT,
     parcel_lot_size_sqft INTEGER,
+    computed_bldg_sqft  INTEGER,
+    data_notes          TEXT,
     collected_at        TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -948,6 +950,22 @@ class Database:
                 # Re-enable FK enforcement
                 self.conn.execute("PRAGMA foreign_keys=ON")
                 logger.info("Migration v3: users table recreated with nullable password_hash.")
+
+        # --- v6 migration: add computed_bldg_sqft + data_notes ---
+        if self.table_exists("properties"):
+            props_cols_v6 = self.get_table_columns("properties")
+            if "computed_bldg_sqft" not in props_cols_v6:
+                self.execute(
+                    "ALTER TABLE properties ADD COLUMN computed_bldg_sqft INTEGER"
+                )
+                self.commit()
+                logger.info("Migration v6: added computed_bldg_sqft column.")
+            if "data_notes" not in props_cols_v6:
+                self.execute(
+                    "ALTER TABLE properties ADD COLUMN data_notes TEXT"
+                )
+                self.commit()
+                logger.info("Migration v6: added data_notes column.")
 
         # --- Create/update schema ---
         if self.is_postgres:
