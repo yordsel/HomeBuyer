@@ -1,5 +1,6 @@
 """Data models for the HomeBuyer application."""
 
+import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Optional
@@ -196,7 +197,18 @@ class BerkeleyParcel:
     rentcast_enriched: bool = False  # Flag: has RentCast API enrichment been fetched?
     # Computed / reconciled fields
     computed_bldg_sqft: Optional[int] = None  # Best-available building sqft after reconciliation
-    data_notes: Optional[str] = None  # JSON array of reconciliation notes
+    data_notes: Optional[str] = None  # JSON array of reconciliation notes (use notes_list property)
+
+    @property
+    def notes_list(self) -> list[str]:
+        """Parse data_notes JSON string into a list of strings."""
+        if not self.data_notes:
+            return []
+        try:
+            parsed = json.loads(self.data_notes)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
 
 
 @dataclass

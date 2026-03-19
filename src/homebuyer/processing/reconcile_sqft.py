@@ -23,6 +23,11 @@ logger = logging.getLogger(__name__)
 # Each rule is: (label, WHERE clause, computed value SQL, note text)
 # Rules are evaluated top-to-bottom; earlier rules take priority because
 # each UPDATE only touches rows where computed_bldg_sqft IS STILL NULL.
+#
+# data_notes is assumed to be a JSON array (or NULL).  The SQL CASE
+# expression only writes notes when data_notes IS NULL; existing non-null
+# values are preserved as-is.  If a row has malformed JSON in data_notes,
+# it will be left untouched — this is intentional to avoid data loss.
 _RECONCILIATION_RULES: list[tuple[str, str, str, str]] = [
     # --- Fake vacants (building_sqft = 0 but property clearly exists) ---
     (
@@ -76,6 +81,8 @@ _RECONCILIATION_RULES: list[tuple[str, str, str, str]] = [
         "Condo sqft > building_sqft; using larger per-unit sqft",
     ),
     # --- Non-condo mismatches ---
+    # S7 was removed: it handled condo equal-value cases (building_sqft == sqft)
+    # which are now caught by the "OK: Match" happy-path rule below.
     (
         "S8: Non-condo bldg > sqft",
         """property_category NOT IN ('condo', 'coop', 'townhouse')
@@ -133,7 +140,7 @@ def reconcile_sqft(db: Database, *, force: bool = False) -> dict[str, int]:
     db : Database
         Connected database instance.
     force : bool
-        If True, re-reconcile all rows (clears computed_bldg_sqft first).
+        If True, re-reconcile all rows (clears computed_bldg_sqft and data_notes, then regenerates both).
         If False (default), only touches rows where computed_bldg_sqft IS NULL.
 
     Returns

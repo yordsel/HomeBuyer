@@ -562,7 +562,7 @@ def process_all(ctx: click.Context) -> None:
 
 
 @process.command("reconcile-sqft")
-@click.option("--force", is_flag=True, help="Re-reconcile all rows (clears existing values).")
+@click.option("--force", is_flag=True, help="Re-reconcile all rows (clears computed_bldg_sqft and data_notes, then regenerates both).")
 @click.pass_context
 def process_reconcile_sqft(ctx: click.Context, force: bool = False) -> None:
     """Reconcile building_sqft vs sqft into computed_bldg_sqft."""

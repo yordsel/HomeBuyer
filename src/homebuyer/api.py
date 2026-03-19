@@ -8,6 +8,7 @@ Usage:
     uvicorn homebuyer.api:app --port 8787
 """
 
+import asyncio
 import logging
 import os
 import re
@@ -501,18 +502,8 @@ class AppState:
         self.db.connect(check_same_thread=False)
         self.db.initialize_schema()
 
-        # Backfill computed_bldg_sqft for any rows that don't have it yet
-        from homebuyer.processing.reconcile_sqft import reconcile_sqft
-
-        try:
-            stats = reconcile_sqft(self.db)
-            logger.info(
-                "Sqft reconciliation: %d/%d properties populated.",
-                stats.get("_total_reconciled", 0),
-                stats.get("_total_properties", 0),
-            )
-        except Exception:
-            logger.exception("Sqft reconciliation failed (non-fatal).")
+        # Backfill computed_bldg_sqft — deferred to background in lifespan()
+        # to avoid blocking startup on large tables.
 
         logger.info("Loading ML model...")
         try:
@@ -710,6 +701,22 @@ async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logger.info("Starting HomeBuyer API server...")
     _state = AppState()
+
+    # Run sqft reconciliation off the main thread so it doesn't block
+    # the event loop, but await completion before yielding to ensure
+    # the DB connection isn't closed while reconciliation is running.
+    try:
+        from homebuyer.processing.reconcile_sqft import reconcile_sqft
+
+        stats = await asyncio.to_thread(reconcile_sqft, _state.db)
+        logger.info(
+            "Sqft reconciliation: %d/%d properties populated.",
+            stats.get("_total_reconciled", 0),
+            stats.get("_total_properties", 0),
+        )
+    except Exception:
+        logger.exception("Sqft reconciliation failed (non-fatal).")
+
     # Generate fun facts at startup (non-blocking, non-fatal)
     try:
         from homebuyer.services.fun_facts import generate_fun_facts

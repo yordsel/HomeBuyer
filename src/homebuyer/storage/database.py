@@ -916,17 +916,6 @@ class Database:
                     "Migration v4: renamed attom_enriched → rentcast_enriched."
                 )
 
-            # --- v6 migration: add computed_bldg_sqft + data_notes ---
-            if "computed_bldg_sqft" not in props_cols:
-                self.execute(
-                    "ALTER TABLE properties ADD COLUMN computed_bldg_sqft INTEGER"
-                )
-                self.execute("ALTER TABLE properties ADD COLUMN data_notes TEXT")
-                self.commit()
-                logger.info(
-                    "Migration v6: added computed_bldg_sqft and data_notes columns."
-                )
-
         # --- v3 migration: make password_hash nullable for OAuth-only users ---
         if self.table_exists("users") and not self.is_postgres:
             # SQLite doesn't support ALTER COLUMN, so recreate table if needed
@@ -961,6 +950,22 @@ class Database:
                 # Re-enable FK enforcement
                 self.conn.execute("PRAGMA foreign_keys=ON")
                 logger.info("Migration v3: users table recreated with nullable password_hash.")
+
+        # --- v6 migration: add computed_bldg_sqft + data_notes ---
+        if self.table_exists("properties"):
+            props_cols_v6 = self.get_table_columns("properties")
+            if "computed_bldg_sqft" not in props_cols_v6:
+                self.execute(
+                    "ALTER TABLE properties ADD COLUMN computed_bldg_sqft INTEGER"
+                )
+                self.commit()
+                logger.info("Migration v6: added computed_bldg_sqft column.")
+            if "data_notes" not in props_cols_v6:
+                self.execute(
+                    "ALTER TABLE properties ADD COLUMN data_notes TEXT"
+                )
+                self.commit()
+                logger.info("Migration v6: added data_notes column.")
 
         # --- Create/update schema ---
         if self.is_postgres:
