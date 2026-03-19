@@ -4943,34 +4943,21 @@ def _prediction_to_dict(result) -> dict:
     E-4 (#64): Adds top_value_drivers — sorted, human-readable summary of
     the most impactful SHAP feature contributions for prominent surfacing.
     """
-    contributions = result.feature_contributions or {}
+    contributions = result.feature_contributions or []
 
     # Build sorted list of top value drivers from SHAP
+    # contributions is a list[dict] with keys: name, value, raw_feature
     top_drivers: list[dict] = []
     if contributions:
-        _FEATURE_LABELS: dict[str, str] = {
-            "sqft": "Living area (sqft)",
-            "lot_size_sqft": "Lot size",
-            "beds": "Bedrooms",
-            "baths": "Bathrooms",
-            "year_built": "Year built",
-            "latitude": "Location (latitude)",
-            "longitude": "Location (longitude)",
-            "property_type": "Property type",
-            "neighborhood": "Neighborhood",
-            "zip_code": "ZIP code",
-            "days_on_market": "Days on market",
-            "sale_to_list_ratio": "Sale-to-list ratio",
-            "mortgage_rate_30yr": "Mortgage rate",
-        }
-        for feature, impact in sorted(
-            contributions.items(), key=lambda x: abs(x[1]), reverse=True
-        ):
+        for contrib in contributions:
+            impact = contrib.get("value", 0)
             if abs(impact) < 1000:  # skip negligible contributions
                 continue
+            feature = contrib.get("raw_feature", "")
+            label = contrib.get("name", feature.replace("_", " ").title())
             top_drivers.append({
                 "feature": feature,
-                "label": _FEATURE_LABELS.get(feature, feature.replace("_", " ").title()),
+                "label": label,
                 "impact": int(round(impact)),
                 "direction": "increases" if impact > 0 else "decreases",
                 "impact_formatted": f"${abs(int(round(impact))):,}",

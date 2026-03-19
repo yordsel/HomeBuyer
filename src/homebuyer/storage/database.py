@@ -974,6 +974,18 @@ class Database:
                 )
 
         # --- v3 migration: make password_hash nullable for OAuth-only users ---
+        if self.table_exists("users") and self.is_postgres:
+            # PostgreSQL supports ALTER COLUMN directly
+            try:
+                self.execute(
+                    "ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL"
+                )
+                self.commit()
+                logger.info("Migration v3 (Postgres): password_hash is now nullable.")
+            except Exception:
+                # Column may already be nullable or table schema differs
+                self.rollback()
+
         if self.table_exists("users") and not self.is_postgres:
             # SQLite doesn't support ALTER COLUMN, so recreate table if needed
             # Check if password_hash is currently NOT NULL

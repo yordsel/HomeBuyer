@@ -227,15 +227,15 @@ class TestE4ShapDrivers:
         result.list_price = 1_100_000
         result.predicted_premium_pct = 9.1
         result.base_value = 1_000_000
-        result.feature_contributions = {
-            "sqft": 150_000,
-            "beds": 45_000,
-            "year_built": -30_000,
-            "neighborhood": 80_000,
-            "lot_size_sqft": 5_000,
-            "baths": 25_000,
-            "latitude": 500,  # negligible, should be filtered
-        }
+        result.feature_contributions = [
+            {"name": "Living area (sqft)", "value": 150_000, "raw_feature": "sqft"},
+            {"name": "Bedrooms", "value": 45_000, "raw_feature": "beds"},
+            {"name": "Year built", "value": -30_000, "raw_feature": "year_built"},
+            {"name": "Neighborhood", "value": 80_000, "raw_feature": "neighborhood"},
+            {"name": "Lot size", "value": 5_000, "raw_feature": "lot_size_sqft"},
+            {"name": "Bathrooms", "value": 25_000, "raw_feature": "baths"},
+            {"name": "Location (latitude)", "value": 500, "raw_feature": "latitude"},
+        ]
 
         d = _prediction_to_dict(result)
         drivers = d["top_value_drivers"]
@@ -456,7 +456,10 @@ class TestE4ShapBoundary:
         result.list_price = None
         result.predicted_premium_pct = None
         result.base_value = 900_000
-        result.feature_contributions = {"sqft": 1000, "beds": 999}
+        result.feature_contributions = [
+            {"name": "Living area (sqft)", "value": 1000, "raw_feature": "sqft"},
+            {"name": "Bedrooms", "value": 999, "raw_feature": "beds"},
+        ]
 
         d = _prediction_to_dict(result)
         features = [x["feature"] for x in d["top_value_drivers"]]
@@ -476,11 +479,11 @@ class TestE4ShapBoundary:
         result.list_price = None
         result.predicted_premium_pct = None
         result.base_value = 1_000_000
-        result.feature_contributions = {
-            "sqft": -50_000,
-            "year_built": -30_000,
-            "lot_size_sqft": -5_000,
-        }
+        result.feature_contributions = [
+            {"name": "Living area (sqft)", "value": -50_000, "raw_feature": "sqft"},
+            {"name": "Year built", "value": -30_000, "raw_feature": "year_built"},
+            {"name": "Lot size", "value": -5_000, "raw_feature": "lot_size_sqft"},
+        ]
 
         d = _prediction_to_dict(result)
         for driver in d["top_value_drivers"]:
