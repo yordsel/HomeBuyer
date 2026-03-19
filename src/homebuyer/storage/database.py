@@ -641,6 +641,7 @@ class Database:
 
     def connect(self, check_same_thread: bool = True) -> "Database":
         """Open connection."""
+        self._check_same_thread = check_same_thread
         if self.is_postgres:
             self._conn = psycopg2.connect(
                 self._dsn,
@@ -659,6 +660,39 @@ class Database:
             self._conn.execute("PRAGMA foreign_keys=ON")
             logger.debug("Connected to SQLite database: %s", self.db_path)
         return self
+
+    def _ensure_postgres_connection(self) -> None:
+        """Verify the PostgreSQL connection is alive; reconnect if broken.
+
+        Handles two failure modes:
+        1. Connection dropped (Render free tier idle timeout, network blip)
+        2. Connection in failed transaction state (prior query errored
+           without rollback)
+        """
+        if not self.is_postgres or self._conn is None:
+            return
+        try:
+            # Check if connection is in a failed transaction state
+            if self._conn.info.transaction_status == psycopg2.extensions.TRANSACTION_STATUS_INERROR:
+                logger.warning("PostgreSQL connection in failed transaction state, rolling back.")
+                self._conn.rollback()
+                return
+            # Lightweight check that the connection is still alive
+            cur = self._conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+        except Exception:
+            logger.warning("PostgreSQL connection lost, reconnecting...")
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = psycopg2.connect(
+                self._dsn,
+                cursor_factory=psycopg2.extras.RealDictCursor,
+            )
+            self._conn.autocommit = False
+            logger.info("PostgreSQL connection re-established.")
 
     def close(self) -> None:
         """Close the database connection."""
@@ -681,13 +715,31 @@ class Database:
         """Execute a SQL statement with dialect translation.
 
         For Postgres: translates ? → %s, datetime('now') → TO_CHAR(NOW() ...).
-        Returns a cursor.
+        Returns a cursor.  Automatically recovers from broken PostgreSQL
+        connections (dropped or in failed-transaction state).
         """
         sql = _adapt_sql(sql, self.backend)
         if self.is_postgres:
-            cur = self.conn.cursor()
-            cur.execute(sql, tuple(params) if params else None)
-            return cur
+            self._ensure_postgres_connection()
+            try:
+                cur = self.conn.cursor()
+                cur.execute(sql, tuple(params) if params else None)
+                return cur
+            except psycopg2.OperationalError:
+                # Connection died mid-query — reconnect and retry once
+                logger.warning("PostgreSQL OperationalError, reconnecting and retrying...")
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = psycopg2.connect(
+                    self._dsn,
+                    cursor_factory=psycopg2.extras.RealDictCursor,
+                )
+                self._conn.autocommit = False
+                cur = self._conn.cursor()
+                cur.execute(sql, tuple(params) if params else None)
+                return cur
         else:
             return self.conn.execute(sql, tuple(params) if params else ())
 
@@ -733,6 +785,11 @@ class Database:
     def commit(self) -> None:
         """Commit the current transaction."""
         self.conn.commit()
+
+    def rollback(self) -> None:
+        """Roll back the current transaction."""
+        if self._conn is not None:
+            self._conn.rollback()
 
     # ------------------------------------------------------------------
     # Fun facts helpers

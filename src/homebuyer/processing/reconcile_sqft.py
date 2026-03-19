@@ -155,52 +155,62 @@ def reconcile_sqft(db: Database, *, force: bool = False) -> dict[str, int]:
     stats: dict[str, int] = {}
 
     for label, where, value_expr, note_text in _RECONCILIATION_RULES:
-        # Count matching rows before update (to measure impact)
-        pre_count = db.fetchval(
-            f"SELECT COUNT(*) FROM properties WHERE computed_bldg_sqft IS NULL AND {where}"
-        ) or 0
+        try:
+            # Count matching rows before update (to measure impact)
+            pre_count = db.fetchval(
+                f"SELECT COUNT(*) FROM properties WHERE computed_bldg_sqft IS NULL AND {where}"
+            ) or 0
 
-        if pre_count == 0:
+            if pre_count == 0:
+                stats[label] = 0
+                continue
+
+            if note_text is not None:
+                note_json = json.dumps([note_text])
+                sql = f"""
+                    UPDATE properties
+                    SET computed_bldg_sqft = {value_expr},
+                        data_notes = CASE
+                            WHEN data_notes IS NULL THEN ?
+                            ELSE data_notes
+                        END
+                    WHERE computed_bldg_sqft IS NULL
+                      AND {where}
+                """
+                db.execute(sql, (note_json,))
+            else:
+                # No note needed (happy path)
+                sql = f"""
+                    UPDATE properties
+                    SET computed_bldg_sqft = {value_expr}
+                    WHERE computed_bldg_sqft IS NULL
+                      AND {where}
+                """
+                db.execute(sql)
+
+            db.commit()
+            stats[label] = pre_count
+
+            if pre_count > 0:
+                logger.info("  %s: %d rows", label, pre_count)
+        except Exception:
+            logger.warning("Reconciliation rule %s failed, rolling back.", label, exc_info=True)
+            db.rollback()
             stats[label] = 0
-            continue
-
-        if note_text is not None:
-            note_json = json.dumps([note_text])
-            sql = f"""
-                UPDATE properties
-                SET computed_bldg_sqft = {value_expr},
-                    data_notes = CASE
-                        WHEN data_notes IS NULL THEN ?
-                        ELSE data_notes
-                    END
-                WHERE computed_bldg_sqft IS NULL
-                  AND {where}
-            """
-            db.execute(sql, (note_json,))
-        else:
-            # No note needed (happy path)
-            sql = f"""
-                UPDATE properties
-                SET computed_bldg_sqft = {value_expr}
-                WHERE computed_bldg_sqft IS NULL
-                  AND {where}
-            """
-            db.execute(sql)
-
-        db.commit()
-        stats[label] = pre_count
-
-        if pre_count > 0:
-            logger.info("  %s: %d rows", label, pre_count)
 
     # Summary
-    total_reconciled = db.fetchval(
-        "SELECT COUNT(*) FROM properties WHERE computed_bldg_sqft IS NOT NULL"
-    ) or 0
-    total_noted = db.fetchval(
-        "SELECT COUNT(*) FROM properties WHERE data_notes IS NOT NULL"
-    ) or 0
-    total_props = db.fetchval("SELECT COUNT(*) FROM properties") or 0
+    try:
+        total_reconciled = db.fetchval(
+            "SELECT COUNT(*) FROM properties WHERE computed_bldg_sqft IS NOT NULL"
+        ) or 0
+        total_noted = db.fetchval(
+            "SELECT COUNT(*) FROM properties WHERE data_notes IS NOT NULL"
+        ) or 0
+        total_props = db.fetchval("SELECT COUNT(*) FROM properties") or 0
+    except Exception:
+        logger.warning("Failed to compute reconciliation summary.", exc_info=True)
+        db.rollback()
+        total_reconciled = total_noted = total_props = 0
 
     logger.info(
         "Reconciliation complete: %d/%d properties have computed_bldg_sqft, "

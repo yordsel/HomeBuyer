@@ -716,6 +716,7 @@ async def lifespan(app: FastAPI):
         )
     except Exception:
         logger.exception("Sqft reconciliation failed (non-fatal).")
+        _state.db.rollback()
 
     # Generate fun facts at startup (non-blocking, non-fatal)
     try:
@@ -724,6 +725,7 @@ async def lifespan(app: FastAPI):
         logger.info("Generated %d fun facts at startup", len(facts))
     except Exception:
         logger.warning("Fun fact generation failed at startup", exc_info=True)
+        _state.db.rollback()
     yield
     logger.info("Shutting down HomeBuyer API server...")
     _state.close()
