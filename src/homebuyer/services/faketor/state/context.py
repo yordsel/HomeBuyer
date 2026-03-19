@@ -230,6 +230,74 @@ class ResearchContextStore:
         # context creation or lost state during promotion.
         self._lock = asyncio.Lock()
 
+    def _hydrate_market(self, ctx: ResearchContext) -> None:
+        """Populate market snapshot from DB if empty or stale.
+
+        Runs two lightweight queries (latest market_metrics row + latest
+        mortgage rate) instead of the full generate_summary_report() that
+        the get_market_summary tool uses.  This ensures the MARKET
+        CONDITIONS prompt block is rendered so the LLM doesn't
+        redundantly call get_market_summary on every turn.
+        """
+        if self._db is None:
+            return
+        if not ctx.market.is_stale:
+            return
+
+        from homebuyer.services.faketor.state.market import (
+            BerkeleyWideMetrics,
+        )
+
+        try:
+            # Latest monthly market metrics (All Residential, 30-day period)
+            row = self._db.fetchone(
+                "SELECT median_sale_price, median_list_price, avg_sale_to_list, "
+                "sold_above_list_pct, homes_sold, inventory, median_dom "
+                "FROM market_metrics "
+                "WHERE property_type = 'All Residential' AND period_duration = '30' "
+                "ORDER BY period_begin DESC LIMIT 1"
+            )
+            if row:
+                # avg_sale_to_list is stored as a ratio (e.g. 1.18), not percent
+                sale_to_list = row.get("avg_sale_to_list") or 0.0
+                homes_sold = row.get("homes_sold") or 0
+                inventory = row.get("inventory") or 0
+                months_of_supply = (
+                    round(inventory / homes_sold, 1)
+                    if homes_sold and inventory
+                    else 0.0
+                )
+                ctx.market.berkeley_wide = BerkeleyWideMetrics(
+                    median_sale_price=row.get("median_sale_price") or 0,
+                    median_list_price=row.get("median_list_price") or 0,
+                    median_dom=row.get("median_dom") or 0,
+                    avg_sale_to_list=sale_to_list,
+                    inventory=inventory,
+                    months_of_supply=months_of_supply,
+                    homes_sold=homes_sold,
+                )
+
+            # Latest mortgage rate
+            rate_row = self._db.fetchone(
+                "SELECT rate_30yr FROM mortgage_rates "
+                "WHERE rate_30yr IS NOT NULL "
+                "ORDER BY observation_date DESC LIMIT 1"
+            )
+            if rate_row:
+                ctx.market.mortgage_rate_30yr = rate_row["rate_30yr"]
+
+            # Alameda County conforming limit (2025)
+            ctx.market.conforming_limit = 1_209_750
+            ctx.market.snapshot_at = time.time()
+
+            logger.debug(
+                "Hydrated market snapshot: median=$%s, rate=%.2f%%",
+                ctx.market.berkeley_wide.median_sale_price,
+                ctx.market.mortgage_rate_30yr,
+            )
+        except Exception:
+            logger.warning("Failed to hydrate market snapshot", exc_info=True)
+
     async def load_or_create(
         self,
         user_id: str | None = None,
@@ -254,6 +322,8 @@ class ResearchContextStore:
             now = time.time()
 
             # Authenticated user path
+            ctx: ResearchContext | None = None
+
             if user_id:
                 ctx = self._by_user.get(user_id)
                 if not ctx:
@@ -274,35 +344,39 @@ class ResearchContextStore:
                             (now - ctx.last_active) / 3600,
                         )
                     ctx.touch()
-                    return ctx
+                else:
+                    # Create new context for authenticated user
+                    ctx = ResearchContext(
+                        user_id=user_id,
+                        session_id=session_id,
+                        created_at=now,
+                        last_active=now,
+                    )
+                    self._by_user[user_id] = ctx
 
-                # Create new context for authenticated user
-                ctx = ResearchContext(
-                    user_id=user_id,
-                    session_id=session_id,
-                    created_at=now,
-                    last_active=now,
-                )
-                self._by_user[user_id] = ctx
-                return ctx
-
-            # Anonymous user path
-            if session_id:
+            elif session_id:
+                # Anonymous user path
                 ctx = self._by_session.get(session_id)
                 if ctx:
                     ctx.touch()
-                    return ctx
+                else:
+                    ctx = ResearchContext(
+                        session_id=session_id,
+                        created_at=now,
+                        last_active=now,
+                    )
+                    self._by_session[session_id] = ctx
 
-                ctx = ResearchContext(
-                    session_id=session_id,
-                    created_at=now,
-                    last_active=now,
-                )
-                self._by_session[session_id] = ctx
-                return ctx
+            else:
+                # No user_id or session_id — create ephemeral context
+                ctx = ResearchContext(created_at=now, last_active=now)
 
-            # No user_id or session_id — create ephemeral context
-            return ResearchContext(created_at=now, last_active=now)
+            # Hydrate market snapshot if empty or stale (>4h) so the
+            # MARKET CONDITIONS prompt block renders and the LLM doesn't
+            # redundantly call get_market_summary on every turn.
+            self._hydrate_market(ctx)
+
+            return ctx
 
     async def persist(self, context: ResearchContext) -> None:
         """Persist research context.
